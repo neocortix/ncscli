@@ -1,0 +1,42 @@
+---
+- hosts: all
+  gather_facts: False
+  remote_user: mjc
+  vars:
+    victimUrl: http://35.163.117.219
+    masterHost: 52.88.159.7
+  tasks:
+    - name: sync locust code
+      synchronize: 
+        src: ~/locust/
+        dest: ~/locust
+        delete: yes
+        rsync_opts:
+        - "--exclude='locust/__pycache__'"
+        - "--exclude=.git"
+        - "--exclude=*.pyc"
+
+    - name: create loadtest dir (if it doesn't exist)
+      file: 
+        path: ~/loadtest
+        state: directory
+        mode: 0755
+
+    - name: propagate python code
+      synchronize: 
+        src: runLocust.py
+        dest: ~/loadtest
+        #mode: a+x
+
+    - name: propagate user script
+      synchronize: 
+        src: locustfile.py
+        dest: ~/loadtest
+        #mode: a+x
+
+    - name: start worker
+      shell: "(cd ~/loadtest; python3 -u ./runLocust.py --host={{ victimUrl }} --slave --master-host={{ masterHost }} >locustWorker.log 2>&1 &)"
+      #command: chdir=~/loadtest ./runLocust.py
+      #command: chdir=~/loadtest ./startWorker.sh
+      async: 45
+      poll: 0
