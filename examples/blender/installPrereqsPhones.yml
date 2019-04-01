@@ -1,0 +1,42 @@
+---
+- hosts: all
+  gather_facts: False
+  remote_user: root
+
+  tasks:
+
+  - name: install python 3
+    tags:
+    - early
+    raw: test -e /usr/bin/python3 || (/bin/bash --login -c "apt-get update && apt-get install -q -y python3")
+
+  - name: install rsync
+    shell: /bin/bash --login -c "apt-get install -q -y rsync"
+
+  - name: install blender
+    shell: /bin/bash --login -c "apt-get install -q -y blender"
+
+  - name: capture ip addr from ipinfo.io
+    shell: /bin/bash --login -c "curl ipinfo.io/ip > ipAddr.txt 2> /dev/null"
+
+  - name: create installed.inv (on master)
+    delegate_to: localhost
+    run_once: true
+    raw: truncate --size 0 installed.inv
+
+- hosts: all
+  gather_facts: False
+  remote_user: root
+  serial: 1
+
+  tasks:
+
+  - name: append installed.inv
+    delegate_to: localhost
+    lineinfile:
+      line: >-
+        {{ inventory_hostname }} ansible_python_interpreter={{ ansible_python_interpreter }}
+        ansible_user={{ ansible_user }} ansible_ssh_host={{ansible_ssh_host }}
+        ansible_port={{ ansible_port }}
+      insertafter: EOF
+      dest: installed.inv
