@@ -122,6 +122,7 @@ if __name__ == "__main__":
     ap.add_argument('launchedJsonFilePath', default='launched.json')
     ap.add_argument('outJsonFilePath', default='installed.json')
     ap.add_argument('--timeLimit', default=0, type=float, help='maximum time (in seconds) to take (default =unlimited (0))')
+    ap.add_argument('--command', default='uname', help='the command to execute')
     args = ap.parse_args()
     logger.info( "args: %s", str(args) )
     
@@ -156,9 +157,7 @@ if __name__ == "__main__":
         connTiming.finish()
         eventTimings.append(connTiming)
 
-    program = '/bin/bash --login -c "apt-get update && apt-get install -q -y rsync"'
-    #program = '/bin/bash --login -c "apt-get update && apt-get install -q -y rsync && apt-get install -q -y blender"'
-    #program = 'which rsync'
+    program = '/bin/bash --login -c "%s"' % args.command
 
     starterTiming = eventTiming('startInstaller')
     # start all the installers
@@ -192,6 +191,7 @@ if __name__ == "__main__":
             if timeLimit and (time.time() >= deadline):
                 logger.warning( 'total time exceeded time limit of %d seconds', timeLimit)
                 break
+            resultsLogFile.flush()
             time.sleep( 2 )
             nGood = 0
             nFinished = 0
