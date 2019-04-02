@@ -3,6 +3,7 @@
 
 # standard library modules
 import argparse
+import datetime
 import json
 import logging
 import os
@@ -179,7 +180,8 @@ if __name__ == "__main__":
        
     resultsLogFilePath = os.path.splitext( os.path.basename( __file__ ) )[0] + '_results.log'
     resultsLogFile = open( resultsLogFilePath, "a", encoding="utf8" )
-    print( "args:", str(args), file=resultsLogFile )
+    print( '[]', datetime.datetime.now().strftime('%Y/%m/%d %H:%M:%S'),
+        "args:", str(args), file=resultsLogFile )
     
     installed = set()
     failed = set()
@@ -243,8 +245,8 @@ if __name__ == "__main__":
                 session['finished'] = finished
                 #print( [session['finished'] for session in sessions.values()] )
                 allFinished = all( [session['finished'] for session in sessions.values()] )
-            logger.info( '%d installed, %d failed',
-                len(installed), len(failed) )
+            logger.info( '%d finished, %d failed out of %d total; elapsed time %.1f min',
+                len(installed), len(failed), len(remoteHosts), (time.time()-startTime)/60 )
     except KeyboardInterrupt:
                 logger.info( 'caught SIGINT (ctrl-c), skipping ahead' )
 
