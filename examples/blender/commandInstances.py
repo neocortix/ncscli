@@ -86,7 +86,7 @@ def startRemoteCmd( target, cmd ):
 
     # execute a remote command
     try:
-        stdin,stdout,stderr = client.exec_command(fullCmd, get_pty=True)  # , bufsize=800
+        stdin,stdout,stderr = client.exec_command(fullCmd, get_pty=not True)  # , bufsize=800
     except Exception as exc:
         logger.warning( 'exec() got exception (%s) %s', type(exc), exc)
         return {'client': client }
@@ -159,6 +159,7 @@ if __name__ == "__main__":
         eventTimings.append(connTiming)
 
     program = '/bin/bash --login -c "%s"' % args.command
+    #program = args.command
 
     starterTiming = eventTiming('startInstaller')
     # start all the installers
@@ -174,6 +175,17 @@ if __name__ == "__main__":
             time.sleep( 1 )
     starterTiming.finish()
     eventTimings.append(starterTiming)
+
+    # find unreachable instances
+    unreachables = []
+    for remoteHost in remoteHosts:
+        iid = remoteHost['instanceId']
+        #logger.info( 'checking installer on %s', remoteHost )
+        session = sessions[ iid ]
+        if 'stdout' not in session:
+            logger.info( '<unreachable> instance %s', iid )
+            unreachables.append(remoteHost)
+    logger.info( 'counted %d unreachable', len(unreachables))
 
     #for session in sessions.values():
     #    print (session)
@@ -217,13 +229,18 @@ if __name__ == "__main__":
 
                 # drain the stderr
                 while stderr.channel.recv_ready():
-                    print( hostTag, '<er>', stderr.readline().strip() )
+                    line = stderr.readline()
+                    print( hostTag, '<stderr>', line.strip() )
+                    print( hostTag, '<stderr>', line.strip(), file=resultsLogFile )
 
                 wasFinished = session['finished']
                 finished = stdout.channel.exit_status_ready()
                 session['finished'] = finished
                 if finished and not wasFinished:
                     nFinished += 1
+                    for line in stderr.readlines():
+                        print( hostTag, '<stderr>', line.strip() )
+                        print( hostTag, '<stderr>', line.strip(), file=resultsLogFile )
                     for line in stdout.readlines():
                         print( hostTag, line.strip() )
                         #if 'test set accuracy' in line or 'test accuracy' in line:
@@ -240,13 +257,15 @@ if __name__ == "__main__":
                         failed.add( iid )
                         instancesByIid[iid]['installerState'] = 'failed'
                         for line in stderr.readlines():
-                            print( line.strip() )
+                            # is this redundant (already done) or still necessary?
+                            print( hostTag, '<stderr>', line.strip() )
+                            print( hostTag, '<stderr>', line.strip(), file=resultsLogFile )
                 finished = stdout.channel.exit_status_ready()
                 session['finished'] = finished
                 #print( [session['finished'] for session in sessions.values()] )
                 allFinished = all( [session['finished'] for session in sessions.values()] )
-            logger.info( '%d finished, %d failed out of %d total; elapsed time %.1f min',
-                len(installed), len(failed), len(remoteHosts), (time.time()-startTime)/60 )
+            logger.info( '%d finished, %d failed, %d unreachable, %d total; elapsed time %.1f min',
+                len(installed), len(failed), len(unreachables), len(remoteHosts), (time.time()-startTime)/60 )
     except KeyboardInterrupt:
                 logger.info( 'caught SIGINT (ctrl-c), skipping ahead' )
 
@@ -268,6 +287,10 @@ if __name__ == "__main__":
         for inst in failed:
             logger.warning( 'failed on instance %s', inst )
             
+    logger.info( 'counted %d unreachable', len(unreachables))
+    for remoteHost in unreachables:
+        logger.info( 'unreachable %s %s', remoteHost['instanceId'], remoteHost['host'] )
+    
     print('\nTiming Summary (durations in minutes)')
     for ev in eventTimings:
         s1 = ev.startDateTime.strftime( '%H:%M:%S' )
