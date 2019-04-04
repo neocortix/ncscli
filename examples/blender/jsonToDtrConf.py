@@ -21,6 +21,7 @@ if __name__ == "__main__":
 
     inRecs = json.load(sys.stdin)
 
+    outLines = []
     for inRec in inRecs:
         details = inRec
         iid = details['instanceId']
@@ -31,7 +32,13 @@ if __name__ == "__main__":
             if 'ssh' in details:
                 host = details['ssh']['host']
                 port = details['ssh']['port']
-                print( "node = root@%s:%s" % (
+                outLine = "node = root@%s:%s" % (
                         host, port
-                    ))
-
+                )
+                #print( outLine)
+                outLines.append( outLine )
+                #print( "node = root@%s:%s" % (
+                #        host, port
+                #    ))
+    for outLine in sorted( outLines):
+        print( outLine )
