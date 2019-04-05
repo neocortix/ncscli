@@ -170,7 +170,7 @@ if __name__ == "__main__":
         session = startInstaller( remoteHost, program, rh )
         session['finished'] = 'stdout' not in session
         sessions[ remoteHost['instanceId'] ] = session
-        instancesByIid[iid]['installerState'] = 'pending'
+        instancesByIid[iid]['commandState'] = 'pending'
         if rh == 0:
             time.sleep( 1 )
     starterTiming.finish()
@@ -185,6 +185,7 @@ if __name__ == "__main__":
         if 'stdout' not in session:
             logger.info( '<unreachable> instance %s', iid )
             unreachables.append(remoteHost)
+            instancesByIid[iid]['commandState'] = 'unreachable'
     logger.info( 'counted %d unreachable', len(unreachables))
 
     #for session in sessions.values():
@@ -251,11 +252,11 @@ if __name__ == "__main__":
                         nGood += 1
                         logger.info( 'host %s GOOD exit code', hostTag )
                         installed.add( iid )
-                        instancesByIid[iid]['installerState'] = 'good'
+                        instancesByIid[iid]['commandState'] = 'good'
                     if status != 0:
                         logger.error( 'host %s returned exit code %d', hostTag, status )
                         failed.add( iid )
-                        instancesByIid[iid]['installerState'] = 'failed'
+                        instancesByIid[iid]['commandState'] = 'failed'
                         for line in stderr.readlines():
                             # is this redundant (already done) or still necessary?
                             print( hostTag, '<stderr>', line.strip() )

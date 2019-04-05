@@ -26,14 +26,15 @@ if __name__ == "__main__":
         details = inRec
         iid = details['instanceId']
         #logger.info( 'NCSC Inst details %s', details )
-        if 'installerState' in details and details['installerState'] != 'good':
+        if 'commandState' in details and details['commandState'] != 'good':
             continue
         if details['state'] == 'started':
             if 'ssh' in details:
                 host = details['ssh']['host']
                 port = details['ssh']['port']
-                outLine = "node = root@%s:%s" % (
-                        host, port
+                user = details['ssh']['user']
+                outLine = "node = %s@%s:%s" % (
+                        user, host, port
                 )
                 #print( outLine)
                 outLines.append( outLine )
