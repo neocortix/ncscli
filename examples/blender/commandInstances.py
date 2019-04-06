@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import subprocess
+import sys
 import time
 
 import paramiko
@@ -187,6 +188,9 @@ if __name__ == "__main__":
             unreachables.append(remoteHost)
             instancesByIid[iid]['commandState'] = 'unreachable'
     logger.info( 'counted %d unreachable', len(unreachables))
+    if len(unreachables) >= len(remoteHosts):
+        sys.exit( 'ALL HOSTS UNREACHABLE' )
+
 
     #for session in sessions.values():
     #    print (session)
