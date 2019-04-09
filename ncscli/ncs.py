@@ -56,7 +56,7 @@ def getAppVersions( authToken ):
     return versions
 
 def launchNcscInstances( authToken, numReq=1,
-        regions=[], abis=[], sshClientKeyName=None ):
+        regions=[], abis=[], sshClientKeyName=None, jsonFilter=None ):
     appVersions = getAppVersions( authToken )
     if not appVersions:
         # something is very wrong
@@ -66,18 +66,34 @@ def launchNcscInstances( authToken, numReq=1,
     latestVersion = max( appVersions )
 
     headers = ncscReqHeaders( authToken )
-    reqData = json.dumps({
+
+
+    reqData = {
         #"user":"hacky.sack@gmail.com",
         #'mobile-app-versions': [minAppVersion, latestVersion],
         'abis': abis,
         'regions': regions,
         'ssh_key': sshClientKeyName,
         'count': numReq
-        })
-    logger.debug( 'reqData: %s', reqData )
+        }
+    if jsonFilter:
+        try:
+            filters = json.loads( jsonFilter )
+        except Exception:
+            logger.error( 'invalid json in filter "%s"', jsonFilter )
+            raise
+        else:
+            if filters:
+                if not isinstance( filters, dict ):
+                    logger.error( 'json in filter is not a dict "%s"', jsonFilter )
+                    raise TypeError('json in filter is not a dict')
+                reqData.update( filters )
+    reqDataStr = json.dumps( reqData )
+
+    logger.info( 'reqData: %s', reqDataStr )
     url = 'https://cloud.neocortix.com/cloud-api/sc/instances'
     #logger.info( 'posting with auth %s', authToken )
-    resp = requests.post( url, headers=headers, data=reqData )
+    resp = requests.post( url, headers=headers, data=reqDataStr )
     logger.info( 'response code %s', resp.status_code )
     if (resp.status_code < 200) or (resp.status_code >= 300):
         logger.error( 'error code from server (%s) %s', resp.status_code, resp.text )
@@ -112,7 +128,7 @@ def doCmdLaunch( args ):
     try:
         infos = launchNcscInstances( authToken, args.count, 
             sshClientKeyName=args.sshClientKeyName,
-            regions=args.region, abis=instanceAbis )
+            regions=args.region, abis=instanceAbis, jsonFilter=args.filter )
         if 'serverError' in infos:
             logger.warning( 'got serverError %d', infos['serverError'])
             return infos['serverError']
@@ -334,6 +350,7 @@ if __name__ == "__main__":
     #ap.add_argument('--verbose', '-v', action='count', default=0)
     ap.add_argument( '--count', type=int, default=1, help='the number of instances required (default=1)' )
     ap.add_argument( '--instanceId', type=str, nargs='+', help='one or more instance IDs (or ALL to terminate all)' )
+    ap.add_argument( '--filter', help='json to filter instances for launch (or maybe list)' )
     ap.add_argument( '--json', action='store_true', help='for json-format output' )
     ap.add_argument( '--region', nargs='+', help='the geographic region(s) to target' )
     ap.add_argument( '--showPasswords', action='store_true', help='if you want launch or list to show passwords' )
