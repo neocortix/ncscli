@@ -4,6 +4,7 @@
 # standard library modules
 import argparse
 import datetime
+from concurrent import futures
 import json
 import logging
 import os
@@ -93,6 +94,10 @@ def startRemoteCmd( target, cmd ):
         return {'client': client }
     return {'client': client, 'stdin': stdin, 'stdout': stdout, 'stderr': stderr }
 
+def startRemoteCmd1( args ):
+    '''a wrapper for startRemoteCmd that takes its args a s a single dict'''
+    return startRemoteCmd( args['target'], args['cmd'] )
+
     
 def startInstaller( targetHost, program, taskIndex ):
     cmd = program
@@ -163,17 +168,37 @@ if __name__ == "__main__":
     #program = args.command
 
     starterTiming = eventTiming('startInstaller')
+    threading = False
     # start all the installers
-    for rh in range( 0, len( remoteHosts ) ):
-        remoteHost = remoteHosts[ rh ]
-        iid = remoteHost['instanceId']
-        logger.info( 'starting installer on %s', iid[0:8] )
-        session = startInstaller( remoteHost, program, rh )
-        session['finished'] = 'stdout' not in session
-        sessions[ remoteHost['instanceId'] ] = session
-        instancesByIid[iid]['commandState'] = 'pending'
-        if rh == 0:
-            time.sleep( 1 )
+    if threading:
+        argList = []
+        for remoteHost in remoteHosts:
+            argList.append( {'target': remoteHost, 'cmd': program })
+        nWorkers = 2
+        with futures.ThreadPoolExecutor( max_workers=nWorkers ) as executor:
+            parIter = executor.map( startRemoteCmd1, argList )  
+            parResultList = list( parIter )
+        #print( 'parResultList', parResultList)
+        for rh in range( 0, len( remoteHosts ) ):
+            remoteHost = remoteHosts[ rh ]
+            iid = remoteHost['instanceId']
+            #logger.info( 'starting installer on %s', iid[0:8] )
+            session = parResultList[rh]
+            session['finished'] = 'stdout' not in session
+            sessions[ remoteHost['instanceId'] ] = session
+            instancesByIid[iid]['commandState'] = 'pending'
+        #sys.exit( 'DEBUGGING' )
+    else:
+        for rh in range( 0, len( remoteHosts ) ):
+            remoteHost = remoteHosts[ rh ]
+            iid = remoteHost['instanceId']
+            logger.info( 'starting installer on %s', iid[0:8] )
+            session = startInstaller( remoteHost, program, rh )
+            session['finished'] = 'stdout' not in session
+            sessions[ remoteHost['instanceId'] ] = session
+            instancesByIid[iid]['commandState'] = 'pending'
+            if rh == 0:
+                time.sleep( 1 )
     starterTiming.finish()
     eventTimings.append(starterTiming)
 
