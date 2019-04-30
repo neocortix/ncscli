@@ -11,6 +11,7 @@ import os
 import sys
 import random
 import time
+import uuid
 
 # third-party modules
 import requests
@@ -27,7 +28,7 @@ def ncscReqHeaders( authToken ):
         "X-Neocortix-Cloud-API-AuthToken": authToken
     }
 
-def queryNcsSc( urlTail, authToken, reqParams=None ):
+def queryNcsSc( urlTail, authToken, reqParams=None, maxRetries=1 ):
     #if random.random() > .75:
     #    raise requests.exceptions.RequestException( 'simulated exception' )
     headers = ncscReqHeaders( authToken )
@@ -39,9 +40,10 @@ def queryNcsSc( urlTail, authToken, reqParams=None ):
     if (resp.status_code < 200) or (resp.status_code >= 300):
         logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
         logger.info( 'error url "%s"', url )
-        if resp.status_code == 502:  # "bad gateway"
-            time.sleep( 10 )
-            return queryNcsSc( urlTail, authToken, reqParams )
+        if True:  # resp.status_code in [500, 502, 504]:
+            if maxRetries > 0:
+                time.sleep( 10 )
+                return queryNcsSc( urlTail, authToken, reqParams, maxRetries-1 )
     try:
         content = resp.json()
     except Exception:
@@ -67,11 +69,13 @@ def launchNcscInstances( authToken, numReq=1,
 
     headers = ncscReqHeaders( authToken )
 
+    reqId = str( uuid.uuid4() )
 
     reqData = {
         #"user":"hacky.sack@gmail.com",
         #'mobile-app-versions': [minAppVersion, latestVersion],
         'abis': abis,
+        'job': reqId,
         'regions': regions,
         'ssh_key': sshClientKeyName,
         'count': numReq
@@ -96,8 +100,23 @@ def launchNcscInstances( authToken, numReq=1,
     resp = requests.post( url, headers=headers, data=reqDataStr )
     logger.info( 'response code %s', resp.status_code )
     if (resp.status_code < 200) or (resp.status_code >= 300):
-        logger.error( 'error code from server (%s) %s', resp.status_code, resp.text )
-        return {'serverError': resp.status_code}
+        logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
+        # try recovering by retrieving list of instances that match job id
+        logger.info( 'attempting recovery from launch error' )
+        listReqData = {
+            'job': reqId,
+            }
+        try:
+            resp2 = queryNcsSc( 'instances', authToken, maxRetries=20,
+                reqParams=json.dumps(listReqData))
+        except Exception as exc:
+            logger.error( 'exception getting list of instances (%s) "%s"',
+                type(exc), exc )
+            if (resp2.status_code < 200) or (resp2.status_code >= 300):
+                # in case of persistent error, return the original error code
+                return {'serverError': resp.status_code, 'reqId': reqId}
+            else:
+                return resp2.json()
     return resp.json()
 
 def terminateNcscInstance( authToken, iid ):
@@ -221,7 +240,7 @@ def doCmdLaunch( args ):
                 print( ',', end=' ')
             print( json.dumps( outRec ) )
         else:
-            print( "%s,%s" % (iid, details['state']) )
+            print( "%s,%s,%s" % (iid, details['state'], details['job']) )
     if args.json:
         print( ']')
     return 0 # no err
@@ -299,9 +318,10 @@ def doCmdList( args ):
             port = details['ssh']['port'] if 'ssh' in details else 0
             host = details['ssh']['host'] if 'ssh' in details else 'None'
             pw = details['ssh']['password'] if 'ssh' in details else ''
+            jobId = details['job']
             if not args.showPasswords:
                 pw = '*'
-            print( '%s,%s,%d,%s,%s' % ( iid, details['state'], port, host, pw ) )
+            print( '%s,%s,%d,%s,%s,%s' % ( iid, details['state'], port, host, pw, jobId ) )
             #print( '%s,"%s",%s,%d,%s,%s' % ( iid, inst['name'], details['state'], port, host, pw ) )
             #print( iid, inst['name'], details['state'], port, host, sep=',' )
     if args.json:
