@@ -60,24 +60,28 @@ async def run_client(inst, cmd):
     # implement pasword-passing if present in ssh args
     password = sshSpecs.get('password', None )
 
-    async with asyncssh.connect(host, port=port, username=user, password=password, known_hosts=None) as conn:
-        async with conn.create_process(cmd) as proc:
-            async for line in proc.stdout:
-                logger.info('stdout[%s] %s', host[0:16], line.strip() )
-                logResult( 'stdout', line.strip(), iid )
+    try:
+        async with asyncssh.connect(host, port=port, username=user, password=password, known_hosts=None) as conn:
+            async with conn.create_process(cmd) as proc:
+                async for line in proc.stdout:
+                    logger.info('stdout[%s] %s', host[0:16], line.strip() )
+                    logResult( 'stdout', line.strip(), iid )
 
-            async for line in proc.stderr:
-                logger.info('stderr[%s] %s', host[0:16], line.strip() )
-                #print('stderr[%s] %s' % (host, line), end='')
-                logResult( 'stderr', line.strip(), iid )
-        await proc.wait_closed()
-        logResult( 'returncode', proc.returncode, iid )
-        if proc.returncode is None:
-            logger.warning( 'returncode[%s] NONE', host )
-            logger.info( 'CONN: %s', sorted(dir(conn)) )
-        else:
-            print( 'returncode[%s] %d' % (host, proc.returncode) )
-        return proc.returncode
+                async for line in proc.stderr:
+                    logger.info('stderr[%s] %s', host[0:16], line.strip() )
+                    logResult( 'stderr', line.strip(), iid )
+            await proc.wait_closed()
+            logResult( 'returncode', proc.returncode, iid )
+            if proc.returncode is None:
+                logger.warning( 'returncode[%s] NONE', host )
+                logger.info( 'CONN: %s', sorted(dir(conn)) )
+            else:
+                print( 'returncode[%s] %d' % (host, proc.returncode) )
+            return proc.returncode
+    except Exception as exc:
+        logger.warning( 'got exception (%s) %s', type(exc), exc, exc_info=False )
+        logResult( 'exception', {'type': type(exc).__name__, 'msg': str(exc) }, iid )
+        return exc
     return 'did we not connect?'
 
 async def run_client_orig(host, command):
@@ -93,6 +97,7 @@ async def run_multiple_clients( instances, cmd, timeLimit=30 ):
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     nGood = 0
+    nExceptions = 0
     nFailed = 0
     nTimedOut = 0
     nOther = 0
@@ -102,25 +107,30 @@ async def run_multiple_clients( instances, cmd, timeLimit=30 ):
         iid = inst['instanceId']
         abbrevIid = iid[0:16]
 
-        if isinstance(result, asyncio.TimeoutError):
-            nTimedOut += 1
-            logger.warning('task timed out for %s', abbrevIid )
-        elif isinstance(result, int):
-            # normally, each result is a return code from the remote
-            #print('Task %d result: %s' % (i, result))
+        if isinstance(result, int):
+            # the normal case, where each result is a return code from the remote
             if result:
                 nFailed += 1
                 logger.warning( 'result code %d for %s', result, abbrevIid )
             else:
                 nGood += 1
-                #logger.debug( 'result code %d for %s', result, iid[0:16] )
+                #logger.debug( 'result code %d for %s', result, abbrevIid )
+        elif isinstance(result, asyncio.TimeoutError):
+            nTimedOut += 1
+            logger.warning('task timed out for %s', abbrevIid )
+        elif isinstance(result, ConnectionRefusedError):  # one type of Exception
+            nExceptions += 1
+            logger.warning('connection refused for %s', abbrevIid )
+        elif isinstance(result, Exception):
+            nExceptions += 1
+            logger.warning('exception (%s) "%s" for %s', type(result), result, abbrevIid )
         else:
             # unexpected result type
             nOther += 1
-            logger.warning('task result for %s was (%s) %s', iid[0:16], type(result), result )
+            logger.warning('task result for %s was (%s) %s', abbrevIid, type(result), result )
 
-    logger.info( '%d good, %d failed, %d timed out, %d other',
-        nGood, nFailed, nTimedOut, nOther )
+    logger.info( '%d good, %d exceptions, %d failed, %d timed out, %d other',
+        nGood, nExceptions, nFailed, nTimedOut, nOther )
 
 if __name__ == "__main__":
     # configure logging
