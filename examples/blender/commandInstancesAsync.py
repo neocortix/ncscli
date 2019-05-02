@@ -49,11 +49,12 @@ def extractSshTargets( inRecs ):
                 targets.append(target)
     return targets
 
-async def run_client(inst, cmd):
+async def run_client(inst, cmd, scpSrcFilePath=None ):
     #logger.info( 'inst %s', inst)
     sshSpecs = inst['ssh']
-    logger.info( 'iid %s, ssh: %s', inst['instanceId'], inst['ssh'])
+    #logger.info( 'iid %s, ssh: %s', inst['instanceId'], inst['ssh'])
     host = sshSpecs['host']
+    hostAbbrev = host[0:16]
     port = sshSpecs['port']
     user = sshSpecs['user']
     iid = inst['instanceId']
@@ -61,7 +62,12 @@ async def run_client(inst, cmd):
     password = sshSpecs.get('password', None )
 
     try:
-        async with asyncssh.connect(host, port=port, username=user, password=password, known_hosts=None) as conn:
+        #async with asyncssh.connect(host, port=port, username=user, password=password, known_hosts=None) as conn:
+        async with asyncssh.connect(host, port=port, username=user, known_hosts=None, agent_path=None) as conn:
+            if scpSrcFilePath:
+                logger.info( 'uploading %s to %s', scpSrcFilePath, hostAbbrev )
+                await asyncssh.scp( scpSrcFilePath, conn, preserve=True, recurse=True )
+                logger.info( 'uploaded %s to %s', scpSrcFilePath, hostAbbrev )
             async with conn.create_process(cmd) as proc:
                 async for line in proc.stdout:
                     logger.info('stdout[%s] %s', host[0:16], line.strip() )
@@ -84,15 +90,11 @@ async def run_client(inst, cmd):
         return exc
     return 'did we not connect?'
 
-async def run_client_orig(host, command):
-    async with asyncssh.connect(host) as conn:
-        return await conn.run(command)
-
-async def run_multiple_clients( instances, cmd, timeLimit=30 ):
+async def run_multiple_clients( instances, cmd, timeLimit=None, scpSrcFilePath=None ):
     # run cmd on all the given instances
     #logger.info( 'instances %s', instances )
 
-    tasks = (asyncio.wait_for(run_client(inst, cmd), timeout=timeLimit)
+    tasks = (asyncio.wait_for(run_client(inst, cmd, scpSrcFilePath=scpSrcFilePath), timeout=timeLimit)
                  for inst in instances )
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -143,6 +145,7 @@ if __name__ == "__main__":
     ap.add_argument('launchedJsonFilePath', default='launched.json')
     ap.add_argument('outJsonFilePath', default='installed.json')
     ap.add_argument('--timeLimit', type=float, help='maximum time (in seconds) to take (default=none (unlimited)')
+    ap.add_argument('--upload', help='optional fileName to upload to all targets')
     ap.add_argument('--command', default='uname', help='the command to execute')
     args = ap.parse_args()
     logger.info( "args: %s", str(args) )
@@ -159,7 +162,7 @@ if __name__ == "__main__":
 
     dateTimeTagFormat = '%Y-%m-%d_%H%M%S'  # cant use iso format dates in filenames because colons
     dateTimeTag = startDateTime.strftime( dateTimeTagFormat )
-    logger.info( 'dateTimeTag is %s', dateTimeTag )
+    logger.debug( 'dateTimeTag is %s', dateTimeTag )
 
     loadedInstances = None
     with open( launchedJsonFilePath, 'r' ) as jsonFile:
@@ -212,7 +215,9 @@ if __name__ == "__main__":
     '''
 
     #cmd = 'hostname'
-    asyncio.get_event_loop().run_until_complete(run_multiple_clients( startedInstances, program, timeLimit=timeLimit ))
+    asyncio.get_event_loop().run_until_complete(run_multiple_clients( 
+        startedInstances, program, scpSrcFilePath=args.upload, timeLimit=timeLimit
+        ))
 
 
 
