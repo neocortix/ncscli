@@ -49,7 +49,7 @@ def extractSshTargets( inRecs ):
                 targets.append(target)
     return targets
 
-async def run_client(inst, cmd, scpSrcFilePath=None ):
+async def run_client(inst, cmd, scpSrcFilePath=None, dlDirPath='.', dlFileName=None ):
     #logger.info( 'inst %s', inst)
     sshSpecs = inst['ssh']
     #logger.info( 'iid %s, ssh: %s', inst['instanceId'], inst['ssh'])
@@ -58,6 +58,7 @@ async def run_client(inst, cmd, scpSrcFilePath=None ):
     port = sshSpecs['port']
     user = sshSpecs['user']
     iid = inst['instanceId']
+    iidAbbrev = iid[0:16]
     # implement pasword-passing if present in ssh args
     password = sshSpecs.get('password', None )
 
@@ -83,6 +84,12 @@ async def run_client(inst, cmd, scpSrcFilePath=None ):
                 logger.info( 'CONN: %s', sorted(dir(conn)) )
             else:
                 print( 'returncode[%s] %d' % (host, proc.returncode) )
+            if dlFileName:
+                destDirPath = '%s/%s' % (dlDirPath, iid)
+                logger.info( 'downloading %s from %s to %s',
+                    dlFileName, iidAbbrev, destDirPath )
+                await asyncssh.scp( (conn, dlFileName), destDirPath, preserve=True, recurse=True )
+                #logger.info( 'downloaded from %s to %s', iidAbbrev, destDirPath )
             return proc.returncode
     except Exception as exc:
         logger.warning( 'got exception (%s) %s', type(exc), exc, exc_info=False )
@@ -90,12 +97,16 @@ async def run_client(inst, cmd, scpSrcFilePath=None ):
         return exc
     return 'did we not connect?'
 
-async def run_multiple_clients( instances, cmd, timeLimit=None, scpSrcFilePath=None ):
+async def run_multiple_clients( instances, cmd, timeLimit=None,
+    scpSrcFilePath=None,
+    dlDirPath='.', dlFileName=None
+    ):
     # run cmd on all the given instances
     #logger.info( 'instances %s', instances )
 
-    tasks = (asyncio.wait_for(run_client(inst, cmd, scpSrcFilePath=scpSrcFilePath), timeout=timeLimit)
-                 for inst in instances )
+    tasks = (asyncio.wait_for(run_client(inst, cmd, scpSrcFilePath=scpSrcFilePath, dlDirPath=dlDirPath, dlFileName=dlFileName),
+        timeout=timeLimit)
+        for inst in instances )
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     nGood = 0
@@ -120,6 +131,8 @@ async def run_multiple_clients( instances, cmd, timeLimit=None, scpSrcFilePath=N
         elif isinstance(result, asyncio.TimeoutError):
             nTimedOut += 1
             logger.warning('task timed out for %s', abbrevIid )
+            # log it as something different from an exception
+            logResult( 'timeout', True, iid )
         elif isinstance(result, ConnectionRefusedError):  # one type of Exception
             nExceptions += 1
             logger.warning('connection refused for %s', abbrevIid )
@@ -144,6 +157,8 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser( description=__doc__ )
     ap.add_argument('launchedJsonFilePath', default='launched.json')
     ap.add_argument('outJsonFilePath', default='installed.json')
+    ap.add_argument('--download', help='optional fileName to download from all targets')
+    ap.add_argument('--downloadDestDir', default='./download', help='dest dir for download (default="./download")')
     ap.add_argument('--timeLimit', type=float, help='maximum time (in seconds) to take (default=none (unlimited)')
     ap.add_argument('--upload', help='optional fileName to upload to all targets')
     ap.add_argument('--command', default='uname', help='the command to execute')
@@ -187,7 +202,6 @@ if __name__ == "__main__":
     starterTiming.finish()
     eventTimings.append(starterTiming)
 
-       
     #resultsLogFilePath = os.path.splitext( os.path.basename( __file__ ) )[0] + '_results.log'
     resultsLogFilePath = dataDirPath + '/' \
         + os.path.splitext( os.path.basename( __file__ ) )[0] \
@@ -204,39 +218,30 @@ if __name__ == "__main__":
     failed = set()
 
     mainTiming = eventTiming('main')
-    #allFinished = False
+
+    if args.download:
+        # create dirs for downloads
+        dlDirPath = args.downloadDestDir
+        os.makedirs(dlDirPath, exist_ok=True)
+        for inst in startedInstances:
+            iid = inst['instanceId']
+            os.makedirs(dlDirPath+'/'+iid, exist_ok=True)
 
 
-    # this agent stuff does not work
-    '''
-    agent = asyncssh.connect_agent()
-    print( dir(agent) )
-    print( agent.get_keys() )
-    '''
 
     #cmd = 'hostname'
     asyncio.get_event_loop().run_until_complete(run_multiple_clients( 
-        startedInstances, program, scpSrcFilePath=args.upload, timeLimit=timeLimit
+        startedInstances, program, scpSrcFilePath=args.upload,
+        dlFileName=args.download, dlDirPath=dlDirPath,
+        timeLimit=timeLimit
         ))
-
-
-
-
-
 
     mainTiming.finish()
     eventTimings.append(mainTiming)
 
-
-
-
     elapsed = time.time() - startTime
     logger.info( 'finished; elapsed time %.1f seconds (%.1f minutes)', elapsed, elapsed/60 )
 
-    #with open( args.outJsonFilePath, 'w') as outFile:
-    #    json.dump( list(instancesByIid.values()), outFile, default=str, indent=2, skipkeys=True )
-
-    
     print('\nTiming Summary (durations in minutes)')
     for ev in eventTimings:
         s1 = ev.startDateTime.strftime( '%H:%M:%S' )
