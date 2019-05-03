@@ -54,7 +54,6 @@ async def run_client(inst, cmd, scpSrcFilePath=None, dlDirPath='.', dlFileName=N
     sshSpecs = inst['ssh']
     #logger.info( 'iid %s, ssh: %s', inst['instanceId'], inst['ssh'])
     host = sshSpecs['host']
-    hostAbbrev = host[0:16]
     port = sshSpecs['port']
     user = sshSpecs['user']
     iid = inst['instanceId']
@@ -66,30 +65,31 @@ async def run_client(inst, cmd, scpSrcFilePath=None, dlDirPath='.', dlFileName=N
         #async with asyncssh.connect(host, port=port, username=user, password=password, known_hosts=None) as conn:
         async with asyncssh.connect(host, port=port, username=user, known_hosts=None, agent_path=None) as conn:
             if scpSrcFilePath:
-                logger.info( 'uploading %s to %s', scpSrcFilePath, hostAbbrev )
+                logger.info( 'uploading %s to %s', scpSrcFilePath, iidAbbrev )
                 await asyncssh.scp( scpSrcFilePath, conn, preserve=True, recurse=True )
-                logger.info( 'uploaded %s to %s', scpSrcFilePath, hostAbbrev )
+                #logger.info( 'uploaded %s to %s', scpSrcFilePath, iidAbbrev )
+                logResult( 'upload', scpSrcFilePath, iid )
             async with conn.create_process(cmd) as proc:
                 async for line in proc.stdout:
-                    logger.info('stdout[%s] %s', host[0:16], line.strip() )
+                    logger.info('stdout[%s] %s', iidAbbrev, line.strip() )
                     logResult( 'stdout', line.strip(), iid )
 
                 async for line in proc.stderr:
-                    logger.info('stderr[%s] %s', host[0:16], line.strip() )
+                    logger.info('stderr[%s] %s', iidAbbrev, line.strip() )
                     logResult( 'stderr', line.strip(), iid )
             await proc.wait_closed()
             logResult( 'returncode', proc.returncode, iid )
             if proc.returncode is None:
-                logger.warning( 'returncode[%s] NONE', host )
-                logger.info( 'CONN: %s', sorted(dir(conn)) )
-            else:
-                print( 'returncode[%s] %d' % (host, proc.returncode) )
+                logger.warning( 'returncode[%s] NONE', iidAbbrev )
+            elif proc.returncode:
+                logger.warning( 'returncode %s for %s', proc.returncode, iidAbbrev )
             if dlFileName:
                 destDirPath = '%s/%s' % (dlDirPath, iid)
                 logger.info( 'downloading %s from %s to %s',
                     dlFileName, iidAbbrev, destDirPath )
                 await asyncssh.scp( (conn, dlFileName), destDirPath, preserve=True, recurse=True )
                 #logger.info( 'downloaded from %s to %s', iidAbbrev, destDirPath )
+                logResult( 'download', dlFileName, iid )
             return proc.returncode
     except Exception as exc:
         logger.warning( 'got exception (%s) %s', type(exc), exc, exc_info=False )
@@ -132,7 +132,7 @@ async def run_multiple_clients( instances, cmd, timeLimit=None,
             nTimedOut += 1
             logger.warning('task timed out for %s', abbrevIid )
             # log it as something different from an exception
-            logResult( 'timeout', True, iid )
+            logResult( 'timeout', timeLimit, iid )
         elif isinstance(result, ConnectionRefusedError):  # one type of Exception
             nExceptions += 1
             logger.warning('connection refused for %s', abbrevIid )
@@ -232,7 +232,7 @@ if __name__ == "__main__":
     #cmd = 'hostname'
     asyncio.get_event_loop().run_until_complete(run_multiple_clients( 
         startedInstances, program, scpSrcFilePath=args.upload,
-        dlFileName=args.download, dlDirPath=dlDirPath,
+        dlFileName=args.download, dlDirPath=args.downloadDestDir,
         timeLimit=timeLimit
         ))
 
