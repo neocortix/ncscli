@@ -36,19 +36,6 @@ def logResult( key, value, instanceId ):
             'dateTime': datetime.datetime.now(datetime.timezone.utc).isoformat() }
         print( json.dumps( toLog, sort_keys=True ), file=resultsLogFile )
 
-def extractSshTargets( inRecs ):
-    targets = []
-    
-    for details in inRecs:
-        iid = details['instanceId']
-        #logger.info( 'NCSC Inst details %s', details )
-        if details['state'] == 'started':
-            if 'ssh' in details:
-                target = details['ssh'] # will contain host, port, user, and password
-                target['instanceId'] = iid
-                targets.append(target)
-    return targets
-
 async def run_client(inst, cmd, scpSrcFilePath=None, dlDirPath='.', dlFileName=None ):
     #logger.info( 'inst %s', inst)
     sshSpecs = inst['ssh']
@@ -62,8 +49,24 @@ async def run_client(inst, cmd, scpSrcFilePath=None, dlDirPath='.', dlFileName=N
     password = sshSpecs.get('password', None )
 
     try:
+        known_hosts = None
+        if False:  # 'returnedPubKey' in inst:
+            keyStr = inst['returnedPubKey']
+            logger.info( 'importing %s', keyStr)
+            key = asyncssh.import_public_key( keyStr )
+            logger.info( 'imported %s', key.export_public_key() )
+            #known_hosts = key # nope
+            known_hosts = asyncssh.import_known_hosts(keyStr)
         #async with asyncssh.connect(host, port=port, username=user, password=password, known_hosts=None) as conn:
-        async with asyncssh.connect(host, port=port, username=user, known_hosts=None, agent_path=None) as conn:
+        async with asyncssh.connect(host, port=port, username=user, known_hosts=known_hosts, agent_path=None) as conn:
+            serverHostKey = conn.get_server_host_key()
+            #logger.info( 'got serverHostKey (%s) %s', type(serverHostKey), serverHostKey )
+            serverPubKey = serverHostKey.export_public_key(format_name='openssh')
+            #logger.info( 'serverPubKey (%s) %s', type(serverPubKey), serverPubKey )
+            serverPubKeyStr = str(serverPubKey,'utf8')
+            logger.info( 'serverPubKeyStr %s', serverPubKeyStr )
+            inst['returnedPubKey'] = serverPubKeyStr
+
             if scpSrcFilePath:
                 logger.info( 'uploading %s to %s', scpSrcFilePath, iidAbbrev )
                 await asyncssh.scp( scpSrcFilePath, conn, preserve=True, recurse=True )
@@ -125,24 +128,30 @@ async def run_multiple_clients( instances, cmd, timeLimit=None,
             if result:
                 nFailed += 1
                 logger.warning( 'result code %d for %s', result, abbrevIid )
+                inst['commandState'] = 'failed'
             else:
                 nGood += 1
                 #logger.debug( 'result code %d for %s', result, abbrevIid )
+                inst['commandState'] = 'good'
         elif isinstance(result, asyncio.TimeoutError):
             nTimedOut += 1
             logger.warning('task timed out for %s', abbrevIid )
             # log it as something different from an exception
             logResult( 'timeout', timeLimit, iid )
+            inst['commandState'] = 'timeout'
         elif isinstance(result, ConnectionRefusedError):  # one type of Exception
             nExceptions += 1
             logger.warning('connection refused for %s', abbrevIid )
+            inst['commandState'] = 'unreachable'
         elif isinstance(result, Exception):
             nExceptions += 1
             logger.warning('exception (%s) "%s" for %s', type(result), result, abbrevIid )
+            inst['commandState'] = 'exception'
         else:
             # unexpected result type
             nOther += 1
             logger.warning('task result for %s was (%s) %s', abbrevIid, type(result), result )
+            inst['commandState'] = 'unknown'
 
     logger.info( '%d good, %d exceptions, %d failed, %d timed out, %d other',
         nGood, nExceptions, nFailed, nTimedOut, nOther )
@@ -173,7 +182,9 @@ if __name__ == "__main__":
 
     startDateTime = datetime.datetime.now( datetime.timezone.utc )
     startTime = time.time()
-    #deadline = startTime + timeLimit
+    eventTimings = []
+    starterTiming = eventTiming('startInstaller')
+
 
     dateTimeTagFormat = '%Y-%m-%d_%H%M%S'  # cant use iso format dates in filenames because colons
     dateTimeTag = startDateTime.strftime( dateTimeTagFormat )
@@ -184,23 +195,18 @@ if __name__ == "__main__":
         loadedInstances = json.load(jsonFile)  # a list of dicts
 
     startedInstances = [inst for inst in loadedInstances if inst['state'] == 'started' ]
-
+    '''
     instancesByIid = {}
     for inst in loadedInstances:
         iid = inst['instanceId']
         instancesByIid[iid] = inst
-
     remoteHosts = extractSshTargets( startedInstances )
- 
     sessions = {}
-    eventTimings = []
-
+    '''
+ 
     program = '/bin/bash --login -c "%s"' % args.command
     #program = args.command
 
-    starterTiming = eventTiming('startInstaller')
-    starterTiming.finish()
-    eventTimings.append(starterTiming)
 
     #resultsLogFilePath = os.path.splitext( os.path.basename( __file__ ) )[0] + '_results.log'
     resultsLogFilePath = dataDirPath + '/' \
@@ -217,8 +223,6 @@ if __name__ == "__main__":
     installed = set()
     failed = set()
 
-    mainTiming = eventTiming('main')
-
     if args.download:
         # create dirs for downloads
         dlDirPath = args.downloadDestDir
@@ -227,9 +231,10 @@ if __name__ == "__main__":
             iid = inst['instanceId']
             os.makedirs(dlDirPath+'/'+iid, exist_ok=True)
 
-
-
-    #cmd = 'hostname'
+    starterTiming.finish()
+    eventTimings.append(starterTiming)
+    mainTiming = eventTiming('main')
+    # the main loop
     asyncio.get_event_loop().run_until_complete(run_multiple_clients( 
         startedInstances, program, scpSrcFilePath=args.upload,
         dlFileName=args.download, dlDirPath=args.downloadDestDir,
@@ -238,6 +243,10 @@ if __name__ == "__main__":
 
     mainTiming.finish()
     eventTimings.append(mainTiming)
+
+    with open( args.outJsonFilePath, 'w') as outFile:
+        json.dump( startedInstances, outFile, default=str, indent=2, skipkeys=True )
+
 
     elapsed = time.time() - startTime
     logger.info( 'finished; elapsed time %.1f seconds (%.1f minutes)', elapsed, elapsed/60 )
