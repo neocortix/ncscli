@@ -64,7 +64,7 @@ async def run_client(inst, cmd, scpSrcFilePath=None, dlDirPath='.', dlFileName=N
             serverPubKey = serverHostKey.export_public_key(format_name='openssh')
             #logger.info( 'serverPubKey (%s) %s', type(serverPubKey), serverPubKey )
             serverPubKeyStr = str(serverPubKey,'utf8')
-            logger.info( 'serverPubKeyStr %s', serverPubKeyStr )
+            #logger.info( 'serverPubKeyStr %s', serverPubKeyStr )
             inst['returnedPubKey'] = serverPubKeyStr
 
             if scpSrcFilePath:
@@ -72,20 +72,24 @@ async def run_client(inst, cmd, scpSrcFilePath=None, dlDirPath='.', dlFileName=N
                 await asyncssh.scp( scpSrcFilePath, conn, preserve=True, recurse=True )
                 #logger.info( 'uploaded %s to %s', scpSrcFilePath, iidAbbrev )
                 logResult( 'upload', scpSrcFilePath, iid )
-            async with conn.create_process(cmd) as proc:
-                async for line in proc.stdout:
-                    logger.info('stdout[%s] %s', iidAbbrev, line.strip() )
-                    logResult( 'stdout', line.strip(), iid )
+            proc = None
+            # execute cmd on remote, if non-null cmd given
+            if cmd:
+                async with conn.create_process(cmd) as proc:
+                    async for line in proc.stdout:
+                        logger.info('stdout[%s] %s', iidAbbrev, line.strip() )
+                        logResult( 'stdout', line.strip(), iid )
 
-                async for line in proc.stderr:
-                    logger.info('stderr[%s] %s', iidAbbrev, line.strip() )
-                    logResult( 'stderr', line.strip(), iid )
-            await proc.wait_closed()
-            logResult( 'returncode', proc.returncode, iid )
-            if proc.returncode is None:
-                logger.warning( 'returncode[%s] NONE', iidAbbrev )
-            elif proc.returncode:
-                logger.warning( 'returncode %s for %s', proc.returncode, iidAbbrev )
+                    async for line in proc.stderr:
+                        logger.info('stderr[%s] %s', iidAbbrev, line.strip() )
+                        logResult( 'stderr', line.strip(), iid )
+                await proc.wait_closed()
+                logResult( 'returncode', proc.returncode, iid )
+                if proc.returncode is None:
+                    logger.warning( 'returncode[%s] NONE', iidAbbrev )
+                elif proc.returncode:
+                    logger.warning( 'returncode %s for %s', proc.returncode, iidAbbrev )
+
             if dlFileName:
                 destDirPath = '%s/%s' % (dlDirPath, iid)
                 logger.info( 'downloading %s from %s to %s',
@@ -93,7 +97,10 @@ async def run_client(inst, cmd, scpSrcFilePath=None, dlDirPath='.', dlFileName=N
                 await asyncssh.scp( (conn, dlFileName), destDirPath, preserve=True, recurse=True )
                 #logger.info( 'downloaded from %s to %s', iidAbbrev, destDirPath )
                 logResult( 'download', dlFileName, iid )
-            return proc.returncode
+            if proc:
+                return proc.returncode
+            else:
+                return 0
     except Exception as exc:
         logger.warning( 'got exception (%s) %s', type(exc), exc, exc_info=False )
         logResult( 'exception', {'type': type(exc).__name__, 'msg': str(exc) }, iid )
@@ -170,7 +177,7 @@ if __name__ == "__main__":
     ap.add_argument('--downloadDestDir', default='./download', help='dest dir for download (default="./download")')
     ap.add_argument('--timeLimit', type=float, help='maximum time (in seconds) to take (default=none (unlimited)')
     ap.add_argument('--upload', help='optional fileName to upload to all targets')
-    ap.add_argument('--command', default='uname', help='the command to execute')
+    ap.add_argument('--command', help='the command to execute')
     args = ap.parse_args()
     logger.info( "args: %s", str(args) )
     
@@ -204,7 +211,10 @@ if __name__ == "__main__":
     sessions = {}
     '''
  
-    program = '/bin/bash --login -c "%s"' % args.command
+    if args.command:
+        program = '/bin/bash --login -c "%s"' % args.command
+    else:
+        program = None
     #program = args.command
 
 
