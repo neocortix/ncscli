@@ -172,12 +172,12 @@ if __name__ == "__main__":
 
     ap = argparse.ArgumentParser( description=__doc__ )
     ap.add_argument('launchedJsonFilePath', default='launched.json')
-    ap.add_argument('outJsonFilePath', default='installed.json')
+    ap.add_argument('--command', help='the command to execute')
     ap.add_argument('--download', help='optional fileName to download from all targets')
     ap.add_argument('--downloadDestDir', default='./download', help='dest dir for download (default="./download")')
+    ap.add_argument('--jsonOut', help='file path to write updated instance info in json format')
     ap.add_argument('--timeLimit', type=float, help='maximum time (in seconds) to take (default=none (unlimited)')
     ap.add_argument('--upload', help='optional fileName to upload to all targets')
-    ap.add_argument('--command', help='the command to execute')
     args = ap.parse_args()
     logger.info( "args: %s", str(args) )
     
@@ -254,8 +254,10 @@ if __name__ == "__main__":
     mainTiming.finish()
     eventTimings.append(mainTiming)
 
-    with open( args.outJsonFilePath, 'w') as outFile:
-        json.dump( startedInstances, outFile, default=str, indent=2, skipkeys=True )
+    if args.jsonOut:
+        jsonOutFilePath = os.path.expanduser( os.path.expandvars( args.jsonOut ) )
+        with open( jsonOutFilePath, 'w') as outFile:
+            json.dump( startedInstances, outFile, default=str, indent=2, skipkeys=True )
 
 
     elapsed = time.time() - startTime
