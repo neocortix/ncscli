@@ -30,13 +30,21 @@ def anyFound( a, b ):
             return True
     return False
 
+def boolArg( v ):
+    if v.lower() == 'true':
+        return True
+    elif v.lower() == 'false':
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 def logResult( key, value, instanceId ):
     if resultsLogFile:
         toLog = {key: value, 'instanceId': instanceId,
             'dateTime': datetime.datetime.now(datetime.timezone.utc).isoformat() }
         print( json.dumps( toLog, sort_keys=True ), file=resultsLogFile )
 
-async def run_client(inst, cmd, scpSrcFilePath=None, dlDirPath='.', dlFileName=None ):
+async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.', dlFileName=None ):
     #logger.info( 'inst %s', inst)
     sshSpecs = inst['ssh']
     #logger.info( 'iid %s, ssh: %s', inst['instanceId'], inst['ssh'])
@@ -57,8 +65,10 @@ async def run_client(inst, cmd, scpSrcFilePath=None, dlDirPath='.', dlFileName=N
             logger.info( 'imported %s', key.export_public_key() )
             #known_hosts = key # nope
             known_hosts = asyncssh.import_known_hosts(keyStr)
+        #sshAgent = os.getenv( 'SSH_AUTH_SOCK' )
         #async with asyncssh.connect(host, port=port, username=user, password=password, known_hosts=None) as conn:
-        async with asyncssh.connect(host, port=port, username=user, known_hosts=known_hosts, agent_path=None) as conn:
+        async with asyncssh.connect(host, port=port, username=user,
+            known_hosts=known_hosts, agent_path=sshAgent ) as conn:
             serverHostKey = conn.get_server_host_key()
             #logger.info( 'got serverHostKey (%s) %s', type(serverHostKey), serverHostKey )
             serverPubKey = serverHostKey.export_public_key(format_name='openssh')
@@ -107,14 +117,14 @@ async def run_client(inst, cmd, scpSrcFilePath=None, dlDirPath='.', dlFileName=N
         return exc
     return 'did we not connect?'
 
-async def run_multiple_clients( instances, cmd, timeLimit=None,
+async def run_multiple_clients( instances, cmd, timeLimit=None, sshAgent=None,
     scpSrcFilePath=None,
     dlDirPath='.', dlFileName=None
     ):
     # run cmd on all the given instances
     #logger.info( 'instances %s', instances )
 
-    tasks = (asyncio.wait_for(run_client(inst, cmd, scpSrcFilePath=scpSrcFilePath, dlDirPath=dlDirPath, dlFileName=dlFileName),
+    tasks = (asyncio.wait_for(run_client(inst, cmd, sshAgent=sshAgent, scpSrcFilePath=scpSrcFilePath, dlDirPath=dlDirPath, dlFileName=dlFileName),
         timeout=timeLimit)
         for inst in instances )
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -176,6 +186,7 @@ if __name__ == "__main__":
     ap.add_argument('--download', help='optional fileName to download from all targets')
     ap.add_argument('--downloadDestDir', default='./download', help='dest dir for download (default="./download")')
     ap.add_argument('--jsonOut', help='file path to write updated instance info in json format')
+    ap.add_argument('--sshAgent', type=boolArg, default=False, help='whether or not to use ssh agent')
     ap.add_argument('--timeLimit', type=float, help='maximum time (in seconds) to take (default=none (unlimited)')
     ap.add_argument('--upload', help='optional fileName to upload to all targets')
     args = ap.parse_args()
@@ -185,6 +196,11 @@ if __name__ == "__main__":
     launchedJsonFilePath = args.launchedJsonFilePath
 
     timeLimit = args.timeLimit  # seconds
+
+    if args.sshAgent:
+        sshAgent = os.getenv( 'SSH_AUTH_SOCK' )
+    else:
+        sshAgent = None
 
 
     startDateTime = datetime.datetime.now( datetime.timezone.utc )
@@ -248,6 +264,7 @@ if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(run_multiple_clients( 
         startedInstances, program, scpSrcFilePath=args.upload,
         dlFileName=args.download, dlDirPath=args.downloadDestDir,
+        sshAgent=sshAgent,
         timeLimit=timeLimit
         ))
 
