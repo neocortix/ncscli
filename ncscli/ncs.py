@@ -112,11 +112,14 @@ def launchNcscInstances( authToken, numReq=1,
         except Exception as exc:
             logger.error( 'exception getting list of instances (%s) "%s"',
                 type(exc), exc )
-            if (resp2.status_code < 200) or (resp2.status_code >= 300):
-                # in case of persistent error, return the original error code
-                return {'serverError': resp.status_code, 'reqId': reqId}
+            # in case of excption, return the original error code
+            return {'serverError': resp.status_code, 'reqId': reqId}
+        else:
+            if (resp2['statusCode'] < 200) or (resp2['statusCode'] >= 300):
+                # in case of persistent error, return the last error code
+                return {'serverError': resp2['statusCode'], 'reqId': reqId}
             else:
-                return resp2.json()
+                return resp2['content']
     return resp.json()
 
 def terminateNcscInstance( authToken, iid ):
@@ -153,7 +156,7 @@ def doCmdLaunch( args ):
             return infos['serverError']
     except Exception as exc:
         logger.error( 'exception launching instances (%s) "%s"',
-            type(exc), exc )
+            type(exc), exc, exc_info=True )
         return 13  # error 13
     # regions=['russia-ukraine-belarus']  abis=['arm64-v8a']
     for info in infos:
