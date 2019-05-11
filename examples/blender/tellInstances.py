@@ -85,6 +85,8 @@ async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.
             proc = None
             # execute cmd on remote, if non-null cmd given
             if cmd:
+                # substitute actual instanceId for '<<instanceId>>' in cmd
+                cmd = cmd.replace( '<<instanceId>>', iid )
                 async with conn.create_process(cmd) as proc:
                     async for line in proc.stdout:
                         logger.info('stdout[%s] %s', iidAbbrev, line.strip() )
