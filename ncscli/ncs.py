@@ -5,6 +5,7 @@ Command-line interface for Neocortix Scalable Compute
 # standard library modules
 import argparse
 import collections
+from concurrent import futures
 import json
 import logging
 import os
@@ -103,6 +104,7 @@ def launchNcscInstances( authToken, numReq=1,
         logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
         # try recovering by retrieving list of instances that match job id
         logger.info( 'attempting recovery from launch error' )
+        time.sleep( 30 )
         listReqData = {
             'job': reqId,
             }
@@ -117,9 +119,11 @@ def launchNcscInstances( authToken, numReq=1,
         else:
             if (resp2['statusCode'] < 200) or (resp2['statusCode'] >= 300):
                 # in case of persistent error, return the last error code
+                logger.info( 'returning server error')
                 return {'serverError': resp2['statusCode'], 'reqId': reqId}
             else:
-                return resp2['content']
+                logger.info( 'returning resp2 content %s', resp2['content'].keys() )
+                return resp2['content']['my']
     return resp.json()
 
 def terminateNcscInstance( authToken, iid ):
@@ -169,6 +173,8 @@ def doCmdLaunch( args ):
         #logger.debug( 'created instance %s', inst['id'] )
     logger.info( 'allocated %d instances', len(iids) )
 
+    reqParams = {"show-device-info":True}
+    startedInstances = {}
     # wait while instances are still starting, but with a timeout
     timeLimit = 600 # seconds
     deadline = time.time() + timeLimit
@@ -182,7 +188,7 @@ def doCmdLaunch( args ):
                 if iid in startedSet:
                     continue
                 try:
-                    details = queryNcsSc( 'instances/%s' % iid, authToken )['content']
+                    details = queryNcsSc( 'instances/%s' % iid, authToken, reqParams )['content']
                 except Exception as exc:
                     logger.warning( 'exception checking instance state (%s) "%s"',
                         type(exc), exc )
@@ -194,6 +200,7 @@ def doCmdLaunch( args ):
                 launcherStates[ iState ] += 1
                 if details['state'] == 'started':
                     startedSet.add( iid )
+                    startedInstances[ iid ] = details
                 if details['state'] == 'failed':
                     failedSet.add( iid )
                 if details['state'] == 'initial':
@@ -217,15 +224,20 @@ def doCmdLaunch( args ):
     logger.info( 'started %d Instances; %s',
         len(startedSet), launcherStates )
 
-    logger.debug( 'querying for device-info')
+    logger.info( 'querying for device-info')
     # print details of created instances to stdout
     if args.json:
         print( '[')
         jsonFirstElem=True
     for iid in iids:
         try:
-            reqParams = {"show-device-info":True}
-            details = queryNcsSc( 'instances/%s' % iid, authToken, reqParams )['content']
+            #reqParams = {"show-device-info":True}
+            if iid in startedInstances:
+                #logger.debug( 'reusing instance info')
+                details = startedInstances[iid]
+            else:
+                logger.info( 're-querying instance info')
+                details = queryNcsSc( 'instances/%s' % iid, authToken, reqParams )['content']
         except Exception as exc:
             logger.error( 'exception getting instance details (%s) "%s"',
                 type(exc), exc )
@@ -246,6 +258,7 @@ def doCmdLaunch( args ):
             print( "%s,%s,%s" % (iid, details['state'], details['job']) )
     if args.json:
         print( ']')
+    logger.info( 'finished')
     return 0 # no err
 
 def doCmdList( args ):
@@ -294,8 +307,8 @@ def doCmdList( args ):
         #        details['storage']['free']/1000000, len( details['cpu']['cores'] ) )
         #else:
         #    logger.warning( 'no "ram" listed for inst %s (which was %s)', iid, details['state']  )
-        if 'events' in details:
-            logger.info( 'state: %s, events: %s', instState, details['events'] )                
+        #if 'events' in details:
+        #    logger.info( 'state: %s, events: %s', instState, details['events'] )                
         #else:
         #    logger.warning( 'no "events" listed for inst %s (which was %s)', iid, details['state']  )
         if 'failure' in details:
@@ -330,9 +343,26 @@ def doCmdList( args ):
     if args.json:
         print( ']')
 
+def terminateInstances( authToken, instanceIds ):
+    def terminateOne( iid ):
+        logger.info( 'terminating %s', iid )
+        terminateNcscInstance( authToken, iid )
+    if instanceIds and (len(instanceIds) >0) and (isinstance(instanceIds[0], str )):
+        nWorkers = 2
+        with futures.ThreadPoolExecutor( max_workers=nWorkers ) as executor:
+            parIter = executor.map( terminateOne, instanceIds )
+            parResultList = list( parIter )
+    
 def doCmdTerminate( args ):
     authToken = args.authToken
 
+    def terminateOne( iid ):
+        logger.info( 'terminating %s', iid )
+        #print( 'terminating', iid )
+        terminateNcscInstance( authToken, iid )
+
+    startTime = time.time()
+    threading = True
     if args.instanceId == ['ALL']:
         try:
             response = queryNcsSc( 'instances', authToken)
@@ -344,18 +374,27 @@ def doCmdTerminate( args ):
         instancesJson, respCode = (response['content'], response['statusCode'] )
 
         runningInstances = instancesJson['my']  # 'running'
+        #logger.info( 'runningInstances %s', runningInstances )
         logger.info( 'found %d running instances', len( runningInstances ) )
-        for inst in runningInstances:
-            iid = inst['id']
-            logger.info( 'terminating %s "%s"', iid, inst['name'] )
-            terminateNcscInstance( authToken, iid )
+        if threading:
+            runningIids = [inst['id'] for inst in runningInstances]
+            #logger.info( 'runningIids %s', runningIids )
+            terminateInstances( authToken, runningIids )
+        else:
+            for inst in runningInstances:
+                iid = inst['id']
+                logger.info( 'terminating %s "%s"', iid, inst['name'] )
+                terminateNcscInstance( authToken, iid )
     elif not args.instanceId:
         logger.error( 'no instance ID provided for terminate' )
     else:
-        for iid in args.instanceId:
-            logger.info( 'terminating %s', iid )
-            terminateNcscInstance( authToken, iid )
-
+        if threading:
+            terminateInstances( authToken, args.instanceId )
+        else:
+            for iid in args.instanceId:
+                logger.info( 'terminating %s', iid )
+                terminateNcscInstance( authToken, iid )
+    logger.info( 'took %.1f seconds', time.time() - startTime)
 
 if __name__ == "__main__":
     logging.basicConfig(format='%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s', datefmt='%Y/%m/%d %H:%M:%S')
