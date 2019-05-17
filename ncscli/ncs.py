@@ -104,7 +104,7 @@ def launchNcscInstances( authToken, numReq=1,
         logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
         # try recovering by retrieving list of instances that match job id
         logger.info( 'attempting recovery from launch error' )
-        time.sleep( 30 )
+        time.sleep( 60 )
         listReqData = {
             'job': reqId,
             }
@@ -201,7 +201,7 @@ def doCmdLaunch( args ):
                 if details['state'] == 'started':
                     startedSet.add( iid )
                     startedInstances[ iid ] = details
-                if details['state'] == 'failed':
+                if (details['state'] == 'failed') or (details['state'] == 'exhausted'):
                     failedSet.add( iid )
                 if details['state'] == 'initial':
                     logger.info( '%s %s', details['state'], iid )
@@ -348,18 +348,13 @@ def terminateInstances( authToken, instanceIds ):
         logger.info( 'terminating %s', iid )
         terminateNcscInstance( authToken, iid )
     if instanceIds and (len(instanceIds) >0) and (isinstance(instanceIds[0], str )):
-        nWorkers = 2
+        nWorkers = 3
         with futures.ThreadPoolExecutor( max_workers=nWorkers ) as executor:
             parIter = executor.map( terminateOne, instanceIds )
             parResultList = list( parIter )
     
 def doCmdTerminate( args ):
     authToken = args.authToken
-
-    def terminateOne( iid ):
-        logger.info( 'terminating %s', iid )
-        #print( 'terminating', iid )
-        terminateNcscInstance( authToken, iid )
 
     startTime = time.time()
     threading = True
