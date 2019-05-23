@@ -144,6 +144,37 @@ async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.
         return exc
     return 'did we not connect?'
 
+async def run_client_simple(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.', dlFileName=None ):
+    sshSpecs = inst['ssh']
+    host = sshSpecs['host']
+    port = sshSpecs['port']
+    user = sshSpecs['user']
+    iid = inst['instanceId']
+
+    try:
+        known_hosts = None
+        async with asyncssh.connect(host, port=port, username=user,
+            known_hosts=known_hosts, agent_path=sshAgent ) as conn:
+            # substitute actual instanceId for '<<instanceId>>' in cmd
+            cmd = cmd.replace( '<<instanceId>>', iid )
+            async with conn.create_process(cmd) as proc:
+                async for line in proc.stdout:
+                    print( 'stdout', line.strip(), iid )
+
+                async for line in proc.stderr:
+                    print( 'stderr', line.strip(), iid )
+            await proc.wait_closed()
+            print( 'returncode', proc.returncode, iid )
+            if proc:
+                return proc.returncode
+            else:
+                return 0
+    except Exception as exc:
+        logger.warning( 'got exception (%s) for instance %s; %s', type(exc), iid, exc, exc_info=False )
+        logResult( 'exception', {'type': type(exc).__name__, 'msg': str(exc) }, iid )
+        return exc
+    return 'did we not connect?'
+
 async def run_multiple_clients( instances, cmd, timeLimit=None, sshAgent=None,
     scpSrcFilePath=None,
     dlDirPath='.', dlFileName=None
@@ -200,12 +231,17 @@ async def run_multiple_clients( instances, cmd, timeLimit=None, sshAgent=None,
     logger.info( '%d good, %d exceptions, %d failed, %d timed out, %d other',
         nGood, nExceptions, nFailed, nTimedOut, nOther )
 
+def tellInstances( ):
+    '''tellInstances to upload, execute, and/or download, things'''
+
+
 if __name__ == "__main__":
     # configure logging
     logging.basicConfig(format='%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s', datefmt='%Y/%m/%d %H:%M:%S')
     logger.setLevel(logging.DEBUG)
     logger.debug('the logger is configured')
     asyncssh.set_log_level( logging.WARNING )
+    #logging.getLogger("asyncio").setLevel(logging.DEBUG)
 
     ap = argparse.ArgumentParser( description=__doc__ )
     ap.add_argument('launchedJsonFilePath', default='launched.json')
@@ -273,8 +309,8 @@ if __name__ == "__main__":
     #print( json.dumps( toLog ), file=resultsLogFile )
     logResult( 'programArgs', vars(args), '<master>')
     
-    installed = set()
-    failed = set()
+    #installed = set()
+    #failed = set()
 
     if args.download:
         # create dirs for downloads
@@ -288,7 +324,9 @@ if __name__ == "__main__":
     eventTimings.append(starterTiming)
     mainTiming = eventTiming('main')
     # the main loop
-    asyncio.get_event_loop().run_until_complete(run_multiple_clients( 
+    eventLoop = asyncio.get_event_loop()
+    eventLoop.set_debug(True)
+    eventLoop.run_until_complete(run_multiple_clients( 
         startedInstances, program, scpSrcFilePath=args.upload,
         dlFileName=args.download, dlDirPath=args.downloadDestDir,
         sshAgent=sshAgent,
