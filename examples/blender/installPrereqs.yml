@@ -1,0 +1,15 @@
+---
+- hosts: all
+  #gather_facts: False
+
+  tasks:
+
+  - name: install rsync using apt
+    apt:
+      name: rsync
+    become: yes
+
+  - name: install blender using apt
+    apt:
+      name: blender
+    become: yes

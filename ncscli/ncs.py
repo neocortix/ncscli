@@ -5,17 +5,19 @@ Command-line interface for Neocortix Scalable Compute
 # standard library modules
 import argparse
 import collections
+from concurrent import futures
 import json
 import logging
 import os
 import sys
 import random
 import time
+import uuid
 
 # third-party modules
 import requests
 
-__version__ = '0.0.3'
+__version__ = '0.04'
 logger = logging.getLogger(__name__)
 
 
@@ -27,7 +29,7 @@ def ncscReqHeaders( authToken ):
         "X-Neocortix-Cloud-API-AuthToken": authToken
     }
 
-def queryNcsSc( urlTail, authToken, reqParams=None ):
+def queryNcsSc( urlTail, authToken, reqParams=None, maxRetries=1 ):
     #if random.random() > .75:
     #    raise requests.exceptions.RequestException( 'simulated exception' )
     headers = ncscReqHeaders( authToken )
@@ -39,9 +41,10 @@ def queryNcsSc( urlTail, authToken, reqParams=None ):
     if (resp.status_code < 200) or (resp.status_code >= 300):
         logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
         logger.info( 'error url "%s"', url )
-        if resp.status_code == 502:  # "bad gateway"
-            time.sleep( 10 )
-            return queryNcsSc( urlTail, authToken, reqParams )
+        if True:  # resp.status_code in [500, 502, 504]:
+            if maxRetries > 0:
+                time.sleep( 10 )
+                return queryNcsSc( urlTail, authToken, reqParams, maxRetries-1 )
     try:
         content = resp.json()
     except Exception:
@@ -56,7 +59,7 @@ def getAppVersions( authToken ):
     return versions
 
 def launchNcscInstances( authToken, numReq=1,
-        regions=[], abis=[], sshClientKeyName=None ):
+        regions=[], abis=[], sshClientKeyName=None, jsonFilter=None ):
     appVersions = getAppVersions( authToken )
     if not appVersions:
         # something is very wrong
@@ -66,22 +69,61 @@ def launchNcscInstances( authToken, numReq=1,
     latestVersion = max( appVersions )
 
     headers = ncscReqHeaders( authToken )
-    reqData = json.dumps({
+
+    reqId = str( uuid.uuid4() )
+
+    reqData = {
         #"user":"hacky.sack@gmail.com",
         #'mobile-app-versions': [minAppVersion, latestVersion],
         'abis': abis,
+        'job': reqId,
         'regions': regions,
         'ssh_key': sshClientKeyName,
         'count': numReq
-        })
-    logger.debug( 'reqData: %s', reqData )
+        }
+    if jsonFilter:
+        try:
+            filters = json.loads( jsonFilter )
+        except Exception:
+            logger.error( 'invalid json in filter "%s"', jsonFilter )
+            raise
+        else:
+            if filters:
+                if not isinstance( filters, dict ):
+                    logger.error( 'json in filter is not a dict "%s"', jsonFilter )
+                    raise TypeError('json in filter is not a dict')
+                reqData.update( filters )
+    reqDataStr = json.dumps( reqData )
+
+    logger.info( 'reqData: %s', reqDataStr )
     url = 'https://cloud.neocortix.com/cloud-api/sc/instances'
     #logger.info( 'posting with auth %s', authToken )
-    resp = requests.post( url, headers=headers, data=reqData )
+    resp = requests.post( url, headers=headers, data=reqDataStr )
     logger.info( 'response code %s', resp.status_code )
     if (resp.status_code < 200) or (resp.status_code >= 300):
-        logger.error( 'error code from server (%s) %s', resp.status_code, resp.text )
-        return {'serverError': resp.status_code}
+        logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
+        # try recovering by retrieving list of instances that match job id
+        logger.info( 'attempting recovery from launch error' )
+        time.sleep( 90 )
+        listReqData = {
+            'job': reqId,
+            }
+        try:
+            resp2 = queryNcsSc( 'instances', authToken, maxRetries=20,
+                reqParams=json.dumps(listReqData))
+        except Exception as exc:
+            logger.error( 'exception getting list of instances (%s) "%s"',
+                type(exc), exc )
+            # in case of excption, return the original error code
+            return {'serverError': resp.status_code, 'reqId': reqId}
+        else:
+            if (resp2['statusCode'] < 200) or (resp2['statusCode'] >= 300):
+                # in case of persistent error, return the last error code
+                logger.info( 'returning server error')
+                return {'serverError': resp2['statusCode'], 'reqId': reqId}
+            else:
+                logger.info( 'returning resp2 content %s', resp2['content'].keys() )
+                return resp2['content']['my']
     return resp.json()
 
 def terminateNcscInstance( authToken, iid ):
@@ -112,13 +154,13 @@ def doCmdLaunch( args ):
     try:
         infos = launchNcscInstances( authToken, args.count, 
             sshClientKeyName=args.sshClientKeyName,
-            regions=args.region, abis=instanceAbis )
+            regions=args.region, abis=instanceAbis, jsonFilter=args.filter )
         if 'serverError' in infos:
             logger.warning( 'got serverError %d', infos['serverError'])
             return infos['serverError']
     except Exception as exc:
         logger.error( 'exception launching instances (%s) "%s"',
-            type(exc), exc )
+            type(exc), exc, exc_info=True )
         return 13  # error 13
     # regions=['russia-ukraine-belarus']  abis=['arm64-v8a']
     for info in infos:
@@ -131,6 +173,8 @@ def doCmdLaunch( args ):
         #logger.debug( 'created instance %s', inst['id'] )
     logger.info( 'allocated %d instances', len(iids) )
 
+    reqParams = {"show-device-info":True}
+    startedInstances = {}
     # wait while instances are still starting, but with a timeout
     timeLimit = 600 # seconds
     deadline = time.time() + timeLimit
@@ -144,7 +188,7 @@ def doCmdLaunch( args ):
                 if iid in startedSet:
                     continue
                 try:
-                    details = queryNcsSc( 'instances/%s' % iid, authToken )['content']
+                    details = queryNcsSc( 'instances/%s' % iid, authToken, reqParams )['content']
                 except Exception as exc:
                     logger.warning( 'exception checking instance state (%s) "%s"',
                         type(exc), exc )
@@ -156,7 +200,8 @@ def doCmdLaunch( args ):
                 launcherStates[ iState ] += 1
                 if details['state'] == 'started':
                     startedSet.add( iid )
-                if details['state'] == 'failed':
+                    startedInstances[ iid ] = details
+                if (details['state'] == 'failed') or (details['state'] == 'exhausted'):
                     failedSet.add( iid )
                 if details['state'] == 'initial':
                     logger.info( '%s %s', details['state'], iid )
@@ -179,15 +224,20 @@ def doCmdLaunch( args ):
     logger.info( 'started %d Instances; %s',
         len(startedSet), launcherStates )
 
-    logger.debug( 'querying for device-info')
+    logger.info( 'querying for device-info')
     # print details of created instances to stdout
     if args.json:
         print( '[')
         jsonFirstElem=True
     for iid in iids:
         try:
-            reqParams = {"show-device-info":True}
-            details = queryNcsSc( 'instances/%s' % iid, authToken, reqParams )['content']
+            #reqParams = {"show-device-info":True}
+            if iid in startedInstances:
+                #logger.debug( 'reusing instance info')
+                details = startedInstances[iid]
+            else:
+                logger.info( 're-querying instance info')
+                details = queryNcsSc( 'instances/%s' % iid, authToken, reqParams )['content']
         except Exception as exc:
             logger.error( 'exception getting instance details (%s) "%s"',
                 type(exc), exc )
@@ -205,9 +255,10 @@ def doCmdLaunch( args ):
                 print( ',', end=' ')
             print( json.dumps( outRec ) )
         else:
-            print( "%s,%s" % (iid, details['state']) )
+            print( "%s,%s,%s" % (iid, details['state'], details['job']) )
     if args.json:
         print( ']')
+    logger.info( 'finished')
     return 0 # no err
 
 def doCmdList( args ):
@@ -256,8 +307,8 @@ def doCmdList( args ):
         #        details['storage']['free']/1000000, len( details['cpu']['cores'] ) )
         #else:
         #    logger.warning( 'no "ram" listed for inst %s (which was %s)', iid, details['state']  )
-        if 'events' in details:
-            logger.info( 'state: %s, events: %s', instState, details['events'] )                
+        #if 'events' in details:
+        #    logger.info( 'state: %s, events: %s', instState, details['events'] )                
         #else:
         #    logger.warning( 'no "events" listed for inst %s (which was %s)', iid, details['state']  )
         if 'failure' in details:
@@ -283,17 +334,30 @@ def doCmdList( args ):
             port = details['ssh']['port'] if 'ssh' in details else 0
             host = details['ssh']['host'] if 'ssh' in details else 'None'
             pw = details['ssh']['password'] if 'ssh' in details else ''
+            jobId = details['job']
             if not args.showPasswords:
                 pw = '*'
-            print( '%s,%s,%d,%s,%s' % ( iid, details['state'], port, host, pw ) )
+            print( '%s,%s,%d,%s,%s,%s' % ( iid, details['state'], port, host, pw, jobId ) )
             #print( '%s,"%s",%s,%d,%s,%s' % ( iid, inst['name'], details['state'], port, host, pw ) )
             #print( iid, inst['name'], details['state'], port, host, sep=',' )
     if args.json:
         print( ']')
 
+def terminateInstances( authToken, instanceIds ):
+    def terminateOne( iid ):
+        logger.info( 'terminating %s', iid )
+        terminateNcscInstance( authToken, iid )
+    if instanceIds and (len(instanceIds) >0) and (isinstance(instanceIds[0], str )):
+        nWorkers = 3
+        with futures.ThreadPoolExecutor( max_workers=nWorkers ) as executor:
+            parIter = executor.map( terminateOne, instanceIds )
+            parResultList = list( parIter )
+    
 def doCmdTerminate( args ):
     authToken = args.authToken
 
+    startTime = time.time()
+    threading = True
     if args.instanceId == ['ALL']:
         try:
             response = queryNcsSc( 'instances', authToken)
@@ -305,18 +369,27 @@ def doCmdTerminate( args ):
         instancesJson, respCode = (response['content'], response['statusCode'] )
 
         runningInstances = instancesJson['my']  # 'running'
+        #logger.info( 'runningInstances %s', runningInstances )
         logger.info( 'found %d running instances', len( runningInstances ) )
-        for inst in runningInstances:
-            iid = inst['id']
-            logger.info( 'terminating %s "%s"', iid, inst['name'] )
-            terminateNcscInstance( authToken, iid )
+        if threading:
+            runningIids = [inst['id'] for inst in runningInstances]
+            #logger.info( 'runningIids %s', runningIids )
+            terminateInstances( authToken, runningIids )
+        else:
+            for inst in runningInstances:
+                iid = inst['id']
+                logger.info( 'terminating %s "%s"', iid, inst['name'] )
+                terminateNcscInstance( authToken, iid )
     elif not args.instanceId:
         logger.error( 'no instance ID provided for terminate' )
     else:
-        for iid in args.instanceId:
-            logger.info( 'terminating %s', iid )
-            terminateNcscInstance( authToken, iid )
-
+        if threading:
+            terminateInstances( authToken, args.instanceId )
+        else:
+            for iid in args.instanceId:
+                logger.info( 'terminating %s', iid )
+                terminateNcscInstance( authToken, iid )
+    logger.info( 'took %.1f seconds', time.time() - startTime)
 
 if __name__ == "__main__":
     logging.basicConfig(format='%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s', datefmt='%Y/%m/%d %H:%M:%S')
@@ -334,6 +407,7 @@ if __name__ == "__main__":
     #ap.add_argument('--verbose', '-v', action='count', default=0)
     ap.add_argument( '--count', type=int, default=1, help='the number of instances required (default=1)' )
     ap.add_argument( '--instanceId', type=str, nargs='+', help='one or more instance IDs (or ALL to terminate all)' )
+    ap.add_argument( '--filter', help='json to filter instances for launch (or maybe list)' )
     ap.add_argument( '--json', action='store_true', help='for json-format output' )
     ap.add_argument( '--region', nargs='+', help='the geographic region(s) to target' )
     ap.add_argument( '--showPasswords', action='store_true', help='if you want launch or list to show passwords' )
