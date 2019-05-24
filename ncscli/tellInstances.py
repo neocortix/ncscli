@@ -231,36 +231,15 @@ async def run_multiple_clients( instances, cmd, timeLimit=None, sshAgent=None,
     logger.info( '%d good, %d exceptions, %d failed, %d timed out, %d other',
         nGood, nExceptions, nFailed, nTimedOut, nOther )
 
-def tellInstances( ):
+def tellInstances( launchedJsonFilePath, command, download, downloadDestDir,
+    jsonOut, sshAgent, timeLimit, upload ):
     '''tellInstances to upload, execute, and/or download, things'''
-
-
-if __name__ == "__main__":
-    # configure logging
-    logging.basicConfig(format='%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s', datefmt='%Y/%m/%d %H:%M:%S')
-    logger.setLevel(logging.DEBUG)
-    logger.debug('the logger is configured')
-    asyncssh.set_log_level( logging.WARNING )
-    #logging.getLogger("asyncio").setLevel(logging.DEBUG)
-
-    ap = argparse.ArgumentParser( description=__doc__ )
-    ap.add_argument('launchedJsonFilePath', default='launched.json')
-    ap.add_argument('--command', help='the command to execute')
-    ap.add_argument('--download', help='optional fileName to download from all targets')
-    ap.add_argument('--downloadDestDir', default='./download', help='dest dir for download (default="./download")')
-    ap.add_argument('--jsonOut', help='file path to write updated instance info in json format')
-    ap.add_argument('--sshAgent', type=boolArg, default=False, help='whether or not to use ssh agent')
-    ap.add_argument('--timeLimit', type=float, help='maximum time (in seconds) to take (default=none (unlimited)')
-    ap.add_argument('--upload', help='optional fileName to upload to all targets')
-    args = ap.parse_args()
-    logger.info( "args: %s", str(args) )
-    
     dataDirPath = 'data'
-    launchedJsonFilePath = args.launchedJsonFilePath
+    #launchedJsonFilePath = args.launchedJsonFilePath
 
-    timeLimit = args.timeLimit  # seconds
+    #timeLimit = args.timeLimit  # seconds
 
-    if args.sshAgent:
+    if sshAgent:
         sshAgent = os.getenv( 'SSH_AUTH_SOCK' )
     else:
         sshAgent = None
@@ -290,31 +269,27 @@ if __name__ == "__main__":
     sessions = {}
     '''
  
-    if args.command:
-        program = '/bin/bash --login -c "%s"' % args.command
+    if command:
+        program = '/bin/bash --login -c "%s"' % command
     else:
         program = None
-    #program = args.command
+    #program = command
 
-
+    global resultsLogFile
     #resultsLogFilePath = os.path.splitext( os.path.basename( __file__ ) )[0] + '_results.log'
     resultsLogFilePath = dataDirPath + '/' \
         + os.path.splitext( os.path.basename( __file__ ) )[0] \
         + '_results_' + dateTimeTag  + '.log'
 
     resultsLogFile = open( resultsLogFilePath, "w", encoding="utf8" )
-    #print( '[]', datetime.datetime.now().strftime('%Y/%m/%d %H:%M:%S'),
-    #    "args:", str(args), file=resultsLogFile )
-    #toLog = {'startDateTime': datetime.datetime.now().isoformat(), 'args': vars(args) }
-    #print( json.dumps( toLog ), file=resultsLogFile )
-    logResult( 'programArgs', vars(args), '<master>')
+    #logResult( 'programArgs', vars(args), '<master>')
     
     #installed = set()
     #failed = set()
 
-    if args.download:
+    if download:
         # create dirs for downloads
-        dlDirPath = args.downloadDestDir
+        dlDirPath = downloadDestDir
         os.makedirs(dlDirPath, exist_ok=True)
         for inst in startedInstances:
             iid = inst['instanceId']
@@ -327,8 +302,8 @@ if __name__ == "__main__":
     eventLoop = asyncio.get_event_loop()
     eventLoop.set_debug(True)
     eventLoop.run_until_complete(run_multiple_clients( 
-        startedInstances, program, scpSrcFilePath=args.upload,
-        dlFileName=args.download, dlDirPath=args.downloadDestDir,
+        startedInstances, program, scpSrcFilePath=upload,
+        dlFileName=download, dlDirPath=downloadDestDir,
         sshAgent=sshAgent,
         timeLimit=timeLimit
         ))
@@ -336,8 +311,8 @@ if __name__ == "__main__":
     mainTiming.finish()
     eventTimings.append(mainTiming)
 
-    if args.jsonOut:
-        jsonOutFilePath = os.path.expanduser( os.path.expandvars( args.jsonOut ) )
+    if jsonOut:
+        jsonOutFilePath = os.path.expanduser( os.path.expandvars( jsonOut ) )
         with open( jsonOutFilePath, 'w') as outFile:
             json.dump( startedInstances, outFile, default=str, indent=2, skipkeys=True )
 
@@ -354,3 +329,30 @@ if __name__ == "__main__":
             s2 = s1
         dur = ev.duration().total_seconds() / 60
         print( s1, s2, '%7.1f' % (dur), ev.eventName )
+
+
+if __name__ == "__main__":
+    # configure logging
+    logging.basicConfig(format='%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s', datefmt='%Y/%m/%d %H:%M:%S')
+    logger.setLevel(logging.DEBUG)
+    logger.debug('the logger is configured')
+    asyncssh.set_log_level( logging.WARNING )
+    #logging.getLogger("asyncio").setLevel(logging.DEBUG)
+
+    ap = argparse.ArgumentParser( description=__doc__ )
+    ap.add_argument('launchedJsonFilePath', default='launched.json')
+    ap.add_argument('--command', help='the command to execute')
+    ap.add_argument('--download', help='optional fileName to download from all targets')
+    ap.add_argument('--downloadDestDir', default='./download', help='dest dir for download (default="./download")')
+    ap.add_argument('--jsonOut', help='file path to write updated instance info in json format')
+    ap.add_argument('--sshAgent', type=boolArg, default=False, help='whether or not to use ssh agent')
+    ap.add_argument('--timeLimit', type=float, help='maximum time (in seconds) to take (default=none (unlimited)')
+    ap.add_argument('--upload', help='optional fileName to upload to all targets')
+    args = ap.parse_args()
+    logger.info( "args: %s", str(args) )
+    
+    tellInstances( args.launchedJsonFilePath, args.command,
+        args.download, args.downloadDestDir, args.jsonOut, args.sshAgent,
+        args.timeLimit, args.upload
+        )
+    logger.info( 'finished' )
