@@ -17,7 +17,7 @@ import uuid
 # third-party modules
 import requests
 
-__version__ = '0.0.3'
+__version__ = '0.04'
 logger = logging.getLogger(__name__)
 
 
@@ -104,7 +104,7 @@ def launchNcscInstances( authToken, numReq=1,
         logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
         # try recovering by retrieving list of instances that match job id
         logger.info( 'attempting recovery from launch error' )
-        time.sleep( 60 )
+        time.sleep( 90 )
         listReqData = {
             'job': reqId,
             }
