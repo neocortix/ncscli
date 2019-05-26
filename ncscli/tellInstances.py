@@ -193,11 +193,13 @@ async def run_multiple_clients( instances, cmd, timeLimit=None, sshAgent=None,
     nTimedOut = 0
     nOther = 0
     
+    statuses = []
     for i, result in enumerate(results, 1):
         inst = instances[i-1]
         iid = inst['instanceId']
         abbrevIid = iid[0:16]
 
+        statuses.append( {'instanceId': iid, 'status': result} )
         if isinstance(result, int):
             # the normal case, where each result is a return code from the remote
             if result:
@@ -230,8 +232,9 @@ async def run_multiple_clients( instances, cmd, timeLimit=None, sshAgent=None,
 
     logger.info( '%d good, %d exceptions, %d failed, %d timed out, %d other',
         nGood, nExceptions, nFailed, nTimedOut, nOther )
+    return statuses
 
-def tellInstances( launchedJsonFilePath, command, download, downloadDestDir,
+def tellInstances( launchedJsonFilePath, command, resultsLogFilePath, download, downloadDestDir,
     jsonOut, sshAgent, timeLimit, upload ):
     '''tellInstances to upload, execute, and/or download, things'''
     dataDirPath = 'data'
@@ -249,11 +252,6 @@ def tellInstances( launchedJsonFilePath, command, download, downloadDestDir,
     startTime = time.time()
     eventTimings = []
     starterTiming = eventTiming('startInstaller')
-
-
-    dateTimeTagFormat = '%Y-%m-%d_%H%M%S'  # cant use iso format dates in filenames because colons
-    dateTimeTag = startDateTime.strftime( dateTimeTagFormat )
-    logger.debug( 'dateTimeTag is %s', dateTimeTag )
 
     loadedInstances = None
     with open( launchedJsonFilePath, 'r' ) as jsonFile:
@@ -276,12 +274,10 @@ def tellInstances( launchedJsonFilePath, command, download, downloadDestDir,
     #program = command
 
     global resultsLogFile
-    #resultsLogFilePath = os.path.splitext( os.path.basename( __file__ ) )[0] + '_results.log'
-    resultsLogFilePath = dataDirPath + '/' \
-        + os.path.splitext( os.path.basename( __file__ ) )[0] \
-        + '_results_' + dateTimeTag  + '.log'
-
-    resultsLogFile = open( resultsLogFilePath, "w", encoding="utf8" )
+    if resultsLogFilePath:
+        resultsLogFile = open( resultsLogFilePath, "w", encoding="utf8" )
+    else:
+        resultsLogFile = None
     #logResult( 'programArgs', vars(args), '<master>')
     
     #installed = set()
@@ -301,12 +297,13 @@ def tellInstances( launchedJsonFilePath, command, download, downloadDestDir,
     # the main loop
     eventLoop = asyncio.get_event_loop()
     eventLoop.set_debug(True)
-    eventLoop.run_until_complete(run_multiple_clients( 
+    statuses = eventLoop.run_until_complete(run_multiple_clients( 
         startedInstances, program, scpSrcFilePath=upload,
         dlFileName=download, dlDirPath=downloadDestDir,
         sshAgent=sshAgent,
         timeLimit=timeLimit
         ))
+    #json.dump( statuses, sys.stdout, default=repr, indent=2 )
 
     mainTiming.finish()
     eventTimings.append(mainTiming)
@@ -329,6 +326,7 @@ def tellInstances( launchedJsonFilePath, command, download, downloadDestDir,
             s2 = s1
         dur = ev.duration().total_seconds() / 60
         print( s1, s2, '%7.1f' % (dur), ev.eventName )
+    return statuses
 
 
 if __name__ == "__main__":
@@ -342,6 +340,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser( description=__doc__ )
     ap.add_argument('launchedJsonFilePath', default='launched.json')
     ap.add_argument('--command', help='the command to execute')
+    ap.add_argument('--resultsLog', help='file path to write detailed output log in json format')
     ap.add_argument('--download', help='optional fileName to download from all targets')
     ap.add_argument('--downloadDestDir', default='./download', help='dest dir for download (default="./download")')
     ap.add_argument('--jsonOut', help='file path to write updated instance info in json format')
@@ -351,7 +350,7 @@ if __name__ == "__main__":
     args = ap.parse_args()
     logger.info( "args: %s", str(args) )
     
-    tellInstances( args.launchedJsonFilePath, args.command,
+    tellInstances( args.launchedJsonFilePath, args.command, args.resultsLog,
         args.download, args.downloadDestDir, args.jsonOut, args.sshAgent,
         args.timeLimit, args.upload
         )
