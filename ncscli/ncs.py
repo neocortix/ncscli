@@ -37,6 +37,9 @@ def queryNcsSc( urlTail, authToken, reqParams=None, maxRetries=1 ):
     # jsonize the reqParams, but only if it's not a string (to avoid jsonizing if already json)
     if not isinstance( reqParams, str ):
         reqParams = json.dumps( reqParams )
+    if 'job' in reqParams:
+        logger.info( 'querying url <%s> with data <%s> and headers <%s>', 
+            url, reqParams, headers )
     resp = requests.get( url, headers=headers, data=reqParams )
     if (resp.status_code < 200) or (resp.status_code >= 300):
         logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
@@ -104,7 +107,7 @@ def launchNcscInstances( authToken, numReq=1,
         logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
         # try recovering by retrieving list of instances that match job id
         logger.info( 'attempting recovery from launch error' )
-        time.sleep( 90 )
+        time.sleep( 120 )
         listReqData = {
             'job': reqId,
             }
@@ -187,28 +190,31 @@ def doCmdLaunch( args ):
             for iid in iids:
                 if iid in startedSet:
                     continue
+                if iid in failedSet:
+                    continue
                 try:
                     details = queryNcsSc( 'instances/%s' % iid, authToken, reqParams )['content']
                 except Exception as exc:
                     logger.warning( 'exception checking instance state (%s) "%s"',
                         type(exc), exc )
                     continue
-                if 'state' not in details:
+                if 'state' in details:
+                    iState = details['state']
+                else:
+                    iState = '<unknown>'
                     logger.warning( 'no "state" in content of response (%s)', details )
-                    continue
-                iState = details['state']
                 launcherStates[ iState ] += 1
-                if details['state'] == 'started':
+                if iState == 'started':
                     startedSet.add( iid )
                     startedInstances[ iid ] = details
-                if (details['state'] == 'failed') or (details['state'] == 'exhausted'):
+                if (iState == 'failed') or (iState == 'exhausted'):
                     failedSet.add( iid )
-                if details['state'] == 'initial':
-                    logger.info( '%s %s', details['state'], iid )
-                #if details['state'] in ['initial', 'starting']:
-                if details['state'] != 'started':
+                if iState == 'initial':
+                    logger.debug( '%s %s', iState, iid )
+                #if iState in ['initial', 'starting']:
+                if iState != 'started':
                     starting = True
-                    #logger.debug( '%s %s', details['state'], iid )
+                    #logger.debug( '%s %s', iState, iid )
             logger.info( '%d instance(s) launched so far; %s',
                 len( startedSet ), launcherStates )
             if not starting:
@@ -236,7 +242,7 @@ def doCmdLaunch( args ):
                 #logger.debug( 'reusing instance info')
                 details = startedInstances[iid]
             else:
-                logger.info( 're-querying instance info')
+                logger.info( 're-querying instance info for %s', iid )
                 details = queryNcsSc( 'instances/%s' % iid, authToken, reqParams )['content']
         except Exception as exc:
             logger.error( 'exception getting instance details (%s) "%s"',
@@ -255,7 +261,7 @@ def doCmdLaunch( args ):
                 print( ',', end=' ')
             print( json.dumps( outRec ) )
         else:
-            print( "%s,%s,%s" % (iid, details['state'], details['job']) )
+            print( "%s,%s,%s" % (iid, iState, details['job']) )
     if args.json:
         print( ']')
     logger.info( 'finished')
