@@ -37,7 +37,7 @@ def queryNcsSc( urlTail, authToken, reqParams=None, maxRetries=1 ):
     # jsonize the reqParams, but only if it's not a string (to avoid jsonizing if already json)
     if not isinstance( reqParams, str ):
         reqParams = json.dumps( reqParams )
-    if 'job' in reqParams:
+    if False:
         logger.info( 'querying url <%s> with data <%s> and headers <%s>', 
             url, reqParams, headers )
     resp = requests.get( url, headers=headers, data=reqParams )
@@ -62,6 +62,77 @@ def getAppVersions( authToken ):
     return versions
 
 def launchNcscInstances( authToken, numReq=1,
+        regions=[], abis=[], sshClientKeyName=None, jsonFilter=None ):
+    appVersions = getAppVersions( authToken )
+    if not appVersions:
+        # something is very wrong
+        logger.error( 'could got get AppVersions from server')
+        return {}
+    #minAppVersion = 1623
+    #latestVersion = max( appVersions )
+
+    headers = ncscReqHeaders( authToken )
+
+    reqId = str( uuid.uuid4() )
+
+    reqData = {
+        #"user":"hacky.sack@gmail.com",
+        #'mobile-app-versions': [minAppVersion, latestVersion],
+        'abis': abis,
+        'id': reqId,
+        'regions': regions,
+        'ssh_key': sshClientKeyName,
+        'count': numReq
+        }
+    if jsonFilter:
+        try:
+            filters = json.loads( jsonFilter )
+        except Exception:
+            logger.error( 'invalid json in filter "%s"', jsonFilter )
+            raise
+        else:
+            if filters:
+                if not isinstance( filters, dict ):
+                    logger.error( 'json in filter is not a dict "%s"', jsonFilter )
+                    raise TypeError('json in filter is not a dict')
+                reqData.update( filters )
+    reqDataStr = json.dumps( reqData )
+
+    logger.info( 'reqData: %s', reqDataStr )
+    url = 'https://cloud.neocortix.com/cloud-api/sc/jobs'
+    #logger.info( 'posting with auth %s', authToken )
+    resp = requests.post( url, headers=headers, data=reqDataStr )
+    logger.info( 'response code %s', resp.status_code )
+    if (resp.status_code < 200) or (resp.status_code >= 300):
+        logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
+        # try recovering by retrieving list of instances that match job id
+    logger.info( 'job request returned %s', resp.json() )
+    queryNeeded = resp.status_code == 200
+    logger.info( 'resp.status_code %d; queryNeeded %s ', resp.status_code, queryNeeded )
+    while queryNeeded:
+        jobId = resp.json()['id']
+        try:
+            logger.info( 'getting instance list for job %s', jobId )
+            resp2 = queryNcsSc( 'jobs/'+jobId, authToken, maxRetries=20 )
+        except Exception as exc:
+            logger.error( 'exception getting list of instances (%s) "%s"',
+                type(exc), exc )
+            # in case of excption, return the original error code
+            return {'serverError': resp.status_code, 'reqId': jobId}
+        else:
+            if (resp2['statusCode'] < 200) or (resp2['statusCode'] >= 300):
+                # in case of persistent error, return the last error code
+                logger.info( 'returning server error')
+                return {'serverError': resp2['statusCode'], 'reqId': jobId}
+            else:
+                logger.info( 'resp2 content %s', resp2['content'].keys() )
+                queryNeeded = resp2['content']['launching']
+                if not queryNeeded:
+                    return resp2['content']['instances']
+                time.sleep( 5 )
+    return resp.json()
+
+def launchNcscInstancesOld( authToken, numReq=1,
         regions=[], abis=[], sshClientKeyName=None, jsonFilter=None ):
     appVersions = getAppVersions( authToken )
     if not appVersions:
