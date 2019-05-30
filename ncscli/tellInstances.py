@@ -68,6 +68,7 @@ def logResult( key, value, instanceId ):
         toLog = {key: value, 'instanceId': instanceId,
             'dateTime': datetime.datetime.now(datetime.timezone.utc).isoformat() }
         print( json.dumps( toLog, sort_keys=True ), file=resultsLogFile )
+        resultsLogFile.flush()
 
 async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.', dlFileName=None ):
     #logger.info( 'inst %s', inst)
@@ -112,6 +113,7 @@ async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.
             if cmd:
                 # substitute actual instanceId for '<<instanceId>>' in cmd
                 cmd = cmd.replace( '<<instanceId>>', iid )
+                logResult( 'command', cmd, iid )
                 async with conn.create_process(cmd) as proc:
                     async for line in proc.stdout:
                         logger.info('stdout[%s] %s', iidAbbrev, line.strip() )
@@ -234,9 +236,11 @@ async def run_multiple_clients( instances, cmd, timeLimit=None, sshAgent=None,
         nGood, nExceptions, nFailed, nTimedOut, nOther )
     return statuses
 
-def tellInstances( launchedJsonFilePath, command, resultsLogFilePath, download, downloadDestDir,
+def tellInstances( instancesSpec, command, resultsLogFilePath, download, downloadDestDir,
     jsonOut, sshAgent, timeLimit, upload ):
     '''tellInstances to upload, execute, and/or download, things'''
+    args = locals().copy()
+
     dataDirPath = 'data'
     #launchedJsonFilePath = args.launchedJsonFilePath
 
@@ -253,11 +257,22 @@ def tellInstances( launchedJsonFilePath, command, resultsLogFilePath, download, 
     eventTimings = []
     starterTiming = eventTiming('startInstaller')
 
-    loadedInstances = None
-    with open( launchedJsonFilePath, 'r' ) as jsonFile:
-        loadedInstances = json.load(jsonFile)  # a list of dicts
+    # instancesSpec is a string, use it as a json instances file
+    if isinstance( instancesSpec, str ):
+        loadedInstances = None
+        with open( instancesSpec, 'r' ) as jsonFile:
+            loadedInstances = json.load(jsonFile)  # a list of dicts
+        startedInstances = [inst for inst in loadedInstances if inst['state'] == 'started' ]
+    else:
+        # check that the supposed list of instances is iterable
+        try:
+            _ = iter( instancesSpec )
+        except TypeError:
+            logger.error( 'the given instances argument is not iterabe')
+            return None
+        else:
+            startedInstances = instancesSpec
 
-    startedInstances = [inst for inst in loadedInstances if inst['state'] == 'started' ]
     '''
     instancesByIid = {}
     for inst in loadedInstances:
@@ -278,7 +293,7 @@ def tellInstances( launchedJsonFilePath, command, resultsLogFilePath, download, 
         resultsLogFile = open( resultsLogFilePath, "w", encoding="utf8" )
     else:
         resultsLogFile = None
-    #logResult( 'programArgs', vars(args), '<master>')
+    logResult( 'command', ['tellInstances', {'args': args} ], '<master>')
     
     #installed = set()
     #failed = set()
@@ -316,7 +331,7 @@ def tellInstances( launchedJsonFilePath, command, resultsLogFilePath, download, 
 
     elapsed = time.time() - startTime
     logger.info( 'finished; elapsed time %.1f seconds (%.1f minutes)', elapsed, elapsed/60 )
-
+    '''
     print('\nTiming Summary (durations in minutes)')
     for ev in eventTimings:
         s1 = ev.startDateTime.strftime( '%H:%M:%S' )
@@ -326,6 +341,7 @@ def tellInstances( launchedJsonFilePath, command, resultsLogFilePath, download, 
             s2 = s1
         dur = ev.duration().total_seconds() / 60
         print( s1, s2, '%7.1f' % (dur), ev.eventName )
+    '''
     return statuses
 
 
