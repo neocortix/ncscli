@@ -107,13 +107,13 @@ async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.
                 logger.info( 'uploading %s to %s', scpSrcFilePath, iidAbbrev )
                 await asyncssh.scp( scpSrcFilePath, conn, preserve=True, recurse=True )
                 #logger.info( 'uploaded %s to %s', scpSrcFilePath, iidAbbrev )
-                logResult( 'upload', scpSrcFilePath, iid )
+                logResult( 'operation', ['upload', scpSrcFilePath], iid )
             proc = None
             # execute cmd on remote, if non-null cmd given
             if cmd:
                 # substitute actual instanceId for '<<instanceId>>' in cmd
                 cmd = cmd.replace( '<<instanceId>>', iid )
-                logResult( 'command', cmd, iid )
+                logResult( 'operation', ['command', cmd], iid )
                 async with conn.create_process(cmd) as proc:
                     async for line in proc.stdout:
                         logger.info('stdout[%s] %s', iidAbbrev, line.strip() )
@@ -135,7 +135,7 @@ async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.
                     dlFileName, iidAbbrev, destDirPath )
                 await asyncssh.scp( (conn, dlFileName), destDirPath, preserve=True, recurse=True )
                 #logger.info( 'downloaded from %s to %s', iidAbbrev, destDirPath )
-                logResult( 'download', dlFileName, iid )
+                logResult( 'operation', ['download', dlFileName], iid )
             if proc:
                 return proc.returncode
             else:
