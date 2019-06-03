@@ -293,7 +293,7 @@ def tellInstances( instancesSpec, command, resultsLogFilePath, download, downloa
         resultsLogFile = open( resultsLogFilePath, "w", encoding="utf8" )
     else:
         resultsLogFile = None
-    logResult( 'command', ['tellInstances', {'args': args} ], '<master>')
+    logResult( 'operation', ['tellInstances', {'args': args} ], '<master>')
     
     #installed = set()
     #failed = set()
