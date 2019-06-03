@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-terminates AWS EC2 instances, dooming them to deletion
+outputs instance information as an ansible-compativle inventory file
 """
 # standard library modules
 import argparse
@@ -11,7 +11,7 @@ import sys
 logger = logging.getLogger(__name__)
 
 if __name__ == "__main__":
-    logging.basicConfig()
+    logging.basicConfig(format='%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s', datefmt='%Y/%m/%d %H:%M:%S')
     logger.setLevel(logging.INFO)
     logger.debug( 'the logger is configured' )
 
@@ -23,9 +23,14 @@ if __name__ == "__main__":
 
     for inRec in inRecs:
         details = inRec
+        if 'instanceId' not in details:
+            logger.error( 'no "instanceId" field found in %s', details)
+            continue
         iid = details['instanceId']
         #logger.info( 'NCSC Inst details %s', details )
-        if details['state'] == 'started':
+        if 'state' not in details:
+            logger.error( 'no "state" field found for instance %s', iid)
+        if details.get('state') == 'started':
             if 'ssh' not in details:
                 host = 'none'
                 port = 0

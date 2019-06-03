@@ -68,6 +68,7 @@ def logResult( key, value, instanceId ):
         toLog = {key: value, 'instanceId': instanceId,
             'dateTime': datetime.datetime.now(datetime.timezone.utc).isoformat() }
         print( json.dumps( toLog, sort_keys=True ), file=resultsLogFile )
+        resultsLogFile.flush()
 
 async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.', dlFileName=None ):
     #logger.info( 'inst %s', inst)
@@ -106,12 +107,13 @@ async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.
                 logger.info( 'uploading %s to %s', scpSrcFilePath, iidAbbrev )
                 await asyncssh.scp( scpSrcFilePath, conn, preserve=True, recurse=True )
                 #logger.info( 'uploaded %s to %s', scpSrcFilePath, iidAbbrev )
-                logResult( 'upload', scpSrcFilePath, iid )
+                logResult( 'operation', ['upload', scpSrcFilePath], iid )
             proc = None
             # execute cmd on remote, if non-null cmd given
             if cmd:
                 # substitute actual instanceId for '<<instanceId>>' in cmd
                 cmd = cmd.replace( '<<instanceId>>', iid )
+                logResult( 'operation', ['command', cmd], iid )
                 async with conn.create_process(cmd) as proc:
                     async for line in proc.stdout:
                         logger.info('stdout[%s] %s', iidAbbrev, line.strip() )
@@ -133,7 +135,7 @@ async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.
                     dlFileName, iidAbbrev, destDirPath )
                 await asyncssh.scp( (conn, dlFileName), destDirPath, preserve=True, recurse=True )
                 #logger.info( 'downloaded from %s to %s', iidAbbrev, destDirPath )
-                logResult( 'download', dlFileName, iid )
+                logResult( 'operation', ['download', dlFileName], iid )
             if proc:
                 return proc.returncode
             else:
@@ -193,11 +195,13 @@ async def run_multiple_clients( instances, cmd, timeLimit=None, sshAgent=None,
     nTimedOut = 0
     nOther = 0
     
+    statuses = []
     for i, result in enumerate(results, 1):
         inst = instances[i-1]
         iid = inst['instanceId']
         abbrevIid = iid[0:16]
 
+        statuses.append( {'instanceId': iid, 'status': result} )
         if isinstance(result, int):
             # the normal case, where each result is a return code from the remote
             if result:
@@ -230,10 +234,13 @@ async def run_multiple_clients( instances, cmd, timeLimit=None, sshAgent=None,
 
     logger.info( '%d good, %d exceptions, %d failed, %d timed out, %d other',
         nGood, nExceptions, nFailed, nTimedOut, nOther )
+    return statuses
 
-def tellInstances( launchedJsonFilePath, command, download, downloadDestDir,
+def tellInstances( instancesSpec, command, resultsLogFilePath, download, downloadDestDir,
     jsonOut, sshAgent, timeLimit, upload ):
     '''tellInstances to upload, execute, and/or download, things'''
+    args = locals().copy()
+
     dataDirPath = 'data'
     #launchedJsonFilePath = args.launchedJsonFilePath
 
@@ -250,16 +257,22 @@ def tellInstances( launchedJsonFilePath, command, download, downloadDestDir,
     eventTimings = []
     starterTiming = eventTiming('startInstaller')
 
+    # instancesSpec is a string, use it as a json instances file
+    if isinstance( instancesSpec, str ):
+        loadedInstances = None
+        with open( instancesSpec, 'r' ) as jsonFile:
+            loadedInstances = json.load(jsonFile)  # a list of dicts
+        startedInstances = [inst for inst in loadedInstances if inst['state'] == 'started' ]
+    else:
+        # check that the supposed list of instances is iterable
+        try:
+            _ = iter( instancesSpec )
+        except TypeError:
+            logger.error( 'the given instances argument is not iterabe')
+            return None
+        else:
+            startedInstances = instancesSpec
 
-    dateTimeTagFormat = '%Y-%m-%d_%H%M%S'  # cant use iso format dates in filenames because colons
-    dateTimeTag = startDateTime.strftime( dateTimeTagFormat )
-    logger.debug( 'dateTimeTag is %s', dateTimeTag )
-
-    loadedInstances = None
-    with open( launchedJsonFilePath, 'r' ) as jsonFile:
-        loadedInstances = json.load(jsonFile)  # a list of dicts
-
-    startedInstances = [inst for inst in loadedInstances if inst['state'] == 'started' ]
     '''
     instancesByIid = {}
     for inst in loadedInstances:
@@ -276,13 +289,11 @@ def tellInstances( launchedJsonFilePath, command, download, downloadDestDir,
     #program = command
 
     global resultsLogFile
-    #resultsLogFilePath = os.path.splitext( os.path.basename( __file__ ) )[0] + '_results.log'
-    resultsLogFilePath = dataDirPath + '/' \
-        + os.path.splitext( os.path.basename( __file__ ) )[0] \
-        + '_results_' + dateTimeTag  + '.log'
-
-    resultsLogFile = open( resultsLogFilePath, "w", encoding="utf8" )
-    #logResult( 'programArgs', vars(args), '<master>')
+    if resultsLogFilePath:
+        resultsLogFile = open( resultsLogFilePath, "w", encoding="utf8" )
+    else:
+        resultsLogFile = None
+    logResult( 'operation', ['tellInstances', {'args': args} ], '<master>')
     
     #installed = set()
     #failed = set()
@@ -301,12 +312,13 @@ def tellInstances( launchedJsonFilePath, command, download, downloadDestDir,
     # the main loop
     eventLoop = asyncio.get_event_loop()
     eventLoop.set_debug(True)
-    eventLoop.run_until_complete(run_multiple_clients( 
+    statuses = eventLoop.run_until_complete(run_multiple_clients( 
         startedInstances, program, scpSrcFilePath=upload,
         dlFileName=download, dlDirPath=downloadDestDir,
         sshAgent=sshAgent,
         timeLimit=timeLimit
         ))
+    #json.dump( statuses, sys.stdout, default=repr, indent=2 )
 
     mainTiming.finish()
     eventTimings.append(mainTiming)
@@ -319,7 +331,7 @@ def tellInstances( launchedJsonFilePath, command, download, downloadDestDir,
 
     elapsed = time.time() - startTime
     logger.info( 'finished; elapsed time %.1f seconds (%.1f minutes)', elapsed, elapsed/60 )
-
+    '''
     print('\nTiming Summary (durations in minutes)')
     for ev in eventTimings:
         s1 = ev.startDateTime.strftime( '%H:%M:%S' )
@@ -329,6 +341,8 @@ def tellInstances( launchedJsonFilePath, command, download, downloadDestDir,
             s2 = s1
         dur = ev.duration().total_seconds() / 60
         print( s1, s2, '%7.1f' % (dur), ev.eventName )
+    '''
+    return statuses
 
 
 if __name__ == "__main__":
@@ -342,6 +356,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser( description=__doc__ )
     ap.add_argument('launchedJsonFilePath', default='launched.json')
     ap.add_argument('--command', help='the command to execute')
+    ap.add_argument('--resultsLog', help='file path to write detailed output log in json format')
     ap.add_argument('--download', help='optional fileName to download from all targets')
     ap.add_argument('--downloadDestDir', default='./download', help='dest dir for download (default="./download")')
     ap.add_argument('--jsonOut', help='file path to write updated instance info in json format')
@@ -351,7 +366,7 @@ if __name__ == "__main__":
     args = ap.parse_args()
     logger.info( "args: %s", str(args) )
     
-    tellInstances( args.launchedJsonFilePath, args.command,
+    tellInstances( args.launchedJsonFilePath, args.command, args.resultsLog,
         args.download, args.downloadDestDir, args.jsonOut, args.sshAgent,
         args.timeLimit, args.upload
         )

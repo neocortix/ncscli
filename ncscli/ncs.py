@@ -37,6 +37,9 @@ def queryNcsSc( urlTail, authToken, reqParams=None, maxRetries=1 ):
     # jsonize the reqParams, but only if it's not a string (to avoid jsonizing if already json)
     if not isinstance( reqParams, str ):
         reqParams = json.dumps( reqParams )
+    if False:
+        logger.info( 'querying url <%s> with data <%s> and headers <%s>', 
+            url, reqParams, headers )
     resp = requests.get( url, headers=headers, data=reqParams )
     if (resp.status_code < 200) or (resp.status_code >= 300):
         logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
@@ -59,6 +62,79 @@ def getAppVersions( authToken ):
     return versions
 
 def launchNcscInstances( authToken, numReq=1,
+        regions=[], abis=[], sshClientKeyName=None, jsonFilter=None ):
+    appVersions = getAppVersions( authToken )
+    if not appVersions:
+        # something is very wrong
+        logger.error( 'could got get AppVersions from server')
+        return {}
+    #minAppVersion = 1623
+    #latestVersion = max( appVersions )
+
+    headers = ncscReqHeaders( authToken )
+
+    reqId = str( uuid.uuid4() )
+
+    reqData = {
+        #"user":"hacky.sack@gmail.com",
+        #'mobile-app-versions': [minAppVersion, latestVersion],
+        'abis': abis,
+        'id': reqId,
+        'regions': regions,
+        'ssh_key': sshClientKeyName,
+        'count': numReq
+        }
+    if jsonFilter:
+        try:
+            filters = json.loads( jsonFilter )
+        except Exception:
+            logger.error( 'invalid json in filter "%s"', jsonFilter )
+            raise
+        else:
+            if filters:
+                if not isinstance( filters, dict ):
+                    logger.error( 'json in filter is not a dict "%s"', jsonFilter )
+                    raise TypeError('json in filter is not a dict')
+                reqData.update( filters )
+    reqDataStr = json.dumps( reqData )
+
+    logger.info( 'reqData: %s', reqDataStr )
+    url = 'https://cloud.neocortix.com/cloud-api/sc/jobs'
+    #logger.info( 'posting with auth %s', authToken )
+    resp = requests.post( url, headers=headers, data=reqDataStr )
+    logger.info( 'response code %s', resp.status_code )
+    if (resp.status_code < 200) or (resp.status_code >= 300):
+        logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
+        # try recovering by retrieving list of instances that match job id
+    logger.info( 'job request returned %s', resp.json() )
+    queryNeeded = resp.status_code == 200
+    logger.info( 'resp.status_code %d; queryNeeded %s ', resp.status_code, queryNeeded )
+    while queryNeeded:
+        jobId = resp.json()['id']
+        try:
+            logger.info( 'getting instance list for job %s', jobId )
+            resp2 = queryNcsSc( 'jobs/'+jobId, authToken, maxRetries=20 )
+        except Exception as exc:
+            logger.error( 'exception getting list of instances (%s) "%s"',
+                type(exc), exc )
+            # in case of excption, return the original error code
+            return {'serverError': resp.status_code, 'reqId': jobId}
+        else:
+            if (resp2['statusCode'] < 200) or (resp2['statusCode'] >= 300):
+                # in case of persistent error, return the last error code
+                logger.info( 'returning server error')
+                return {'serverError': resp2['statusCode'], 'reqId': jobId}
+            else:
+                #logger.info( 'resp2 content %s', resp2['content'].keys() )
+                queryNeeded = resp2['content']['launching']
+                if not queryNeeded:
+                    return resp2['content']['instances']
+                logger.info( 'waiting for server (%d instances allocated)',
+                    len(resp2['content']['instances']) )
+                time.sleep( 5 )
+    return resp.json()
+
+def launchNcscInstancesOld( authToken, numReq=1,
         regions=[], abis=[], sshClientKeyName=None, jsonFilter=None ):
     appVersions = getAppVersions( authToken )
     if not appVersions:
@@ -104,7 +180,7 @@ def launchNcscInstances( authToken, numReq=1,
         logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
         # try recovering by retrieving list of instances that match job id
         logger.info( 'attempting recovery from launch error' )
-        time.sleep( 90 )
+        time.sleep( 120 )
         listReqData = {
             'job': reqId,
             }
@@ -187,28 +263,31 @@ def doCmdLaunch( args ):
             for iid in iids:
                 if iid in startedSet:
                     continue
+                if iid in failedSet:
+                    continue
                 try:
                     details = queryNcsSc( 'instances/%s' % iid, authToken, reqParams )['content']
                 except Exception as exc:
                     logger.warning( 'exception checking instance state (%s) "%s"',
                         type(exc), exc )
                     continue
-                if 'state' not in details:
+                if 'state' in details:
+                    iState = details['state']
+                else:
+                    iState = '<unknown>'
                     logger.warning( 'no "state" in content of response (%s)', details )
-                    continue
-                iState = details['state']
                 launcherStates[ iState ] += 1
-                if details['state'] == 'started':
+                if iState == 'started':
                     startedSet.add( iid )
                     startedInstances[ iid ] = details
-                if (details['state'] == 'failed') or (details['state'] == 'exhausted'):
+                if (iState == 'failed') or (iState == 'exhausted'):
                     failedSet.add( iid )
-                if details['state'] == 'initial':
-                    logger.info( '%s %s', details['state'], iid )
-                #if details['state'] in ['initial', 'starting']:
-                if details['state'] != 'started':
+                if iState == 'initial':
+                    logger.debug( '%s %s', iState, iid )
+                #if iState in ['initial', 'starting']:
+                if iState != 'started':
                     starting = True
-                    #logger.debug( '%s %s', details['state'], iid )
+                    #logger.debug( '%s %s', iState, iid )
             logger.info( '%d instance(s) launched so far; %s',
                 len( startedSet ), launcherStates )
             if not starting:
@@ -236,7 +315,7 @@ def doCmdLaunch( args ):
                 #logger.debug( 'reusing instance info')
                 details = startedInstances[iid]
             else:
-                logger.info( 're-querying instance info')
+                logger.info( 're-querying instance info for %s', iid )
                 details = queryNcsSc( 'instances/%s' % iid, authToken, reqParams )['content']
         except Exception as exc:
             logger.error( 'exception getting instance details (%s) "%s"',
@@ -255,7 +334,7 @@ def doCmdLaunch( args ):
                 print( ',', end=' ')
             print( json.dumps( outRec ) )
         else:
-            print( "%s,%s,%s" % (iid, details['state'], details['job']) )
+            print( "%s,%s,%s" % (iid, iState, details['job']) )
     if args.json:
         print( ']')
     logger.info( 'finished')
