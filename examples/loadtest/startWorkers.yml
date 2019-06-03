@@ -35,7 +35,7 @@
         #mode: a+x
 
     - name: start worker
-      shell: "(cd ~/loadtest; python3 -u ./runLocust.py --host={{ victimUrl }} --slave --master-host={{ masterHost }} >locustWorker.log 2>&1 &)"
+      shell: "(cd ~/loadtest; python3 -u ./runLocust.py --host={{ victimUrl }} --heartbeat-interval=10 --slave --master-host={{ masterHost }} >locustWorker.log 2>&1 &)"
       #command: chdir=~/loadtest ./runLocust.py
       #command: chdir=~/loadtest ./startWorker.sh
       async: 45
