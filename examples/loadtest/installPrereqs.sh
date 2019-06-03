@@ -2,14 +2,14 @@
 instanceId=$1
 set -e
 
-date --iso-8601=seconds
+#date --iso-8601=seconds
 date --iso-8601=seconds > installerDateTimes.txt
 
 
 # add backports repo to apt sources
 #/bin/bash --login -c "echo 'deb http://deb.debian.org/debian stretch-backports main' >> /etc/apt/sources.list"
 
-apt-get update
+#apt-get update
 #date --iso-8601=seconds >> installerDateTimes.txt
 
 
@@ -22,7 +22,7 @@ apt-get update
 #/bin/bash --login -c "apt-get install -q -y -t stretch-backports  python3-msgpack"
 
 # install rsync
-/bin/bash --login -c "apt-get install -q -y rsync"
+#/bin/bash --login -c "apt-get install -q -y rsync"
 
 # create instanceId.txt
 echo $instanceId > instanceId.txt

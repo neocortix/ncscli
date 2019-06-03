@@ -6,24 +6,28 @@
 
   tasks:
 
-  - name: upload script
-    copy: 
-      src: installPrereqs.sh
-      dest: .
-      mode: a+x
-
-  - name: run scripted installation
-    command: ./installPrereqs.sh {{ inventory_hostname }}
-    #shell: ./installPrereqs.sh {{ inventory_hostname }} 2>&1
-    changed_when: True
-    register: installer
-    #async: 780
-    #poll: 30
+#  - name: upload script
+#    copy: 
+#      src: installPrereqs.sh
+#      dest: .
+#      mode: a+x
 
 #  - name: run scripted installation
-#    script: installPrereqs.sh {{ inventory_hostname }}
+#    command: ./installPrereqs.sh {{ inventory_hostname }}
 #    changed_when: True
 #    register: installer
+    #async: 3600
+    #poll: 30
+
+  - name: which rsync
+    shell: "which rsync"
+    changed_when: False
+    #ignore_errors: yes
+
+  - name: install instanceId.txt file
+    shell: echo {{ inventory_hostname }} > ./instanceId.txt
+    changed_when: True
+    register: installer
 
 
   - name: create installed.inv (on master)
@@ -31,11 +35,11 @@
     run_once: true
     raw: truncate --size 0 installed.inv
 
-  - name: show dateTimes
-    debug:
+#  - name: show dateTimes
+#    debug:
       #msg: "installerFinish {{ installer.stdout }}"
-      msg: "installerDateTimes,{{ inventory_hostname }},{{ installer.stdout_lines[0] }},{{ installer.stdout_lines[-1] }}"
-    ignore_errors: yes
+#      msg: "installerDateTimes,{{ inventory_hostname }},{{ installer.stdout_lines[0] }},{{ installer.stdout_lines[-1] }}"
+#    ignore_errors: yes
 
 - hosts: all
   gather_facts: False

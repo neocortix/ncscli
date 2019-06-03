@@ -5,6 +5,7 @@ analyze statistics from load test
 
 
 # standard library modules
+import datetime
 import json
 import logging
 #import logging.handlers
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 g_geoip2Client = None
+g_stats = pd.DataFrame()  # HACK, should not need to be global
 
 
 def initLogging():
@@ -28,6 +30,7 @@ def initLogging():
     logFmt = '%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s'
     logDateFmt = '%Y/%m/%d %H:%M:%S'
     logging.basicConfig(format=logFmt, datefmt=logDateFmt)
+    logger.setLevel( logging.INFO )
 
     # done
     logger.debug('the logger is configured')
@@ -66,16 +69,21 @@ def getHostLocationsNcs():
     launchedJsonFilePath = 'launched.json'
     with open( launchedJsonFilePath, 'r' ) as inFile:
         instancesAllocated = json.load( inFile )
+    #logger.debug( 'instancesAllocated %s', instancesAllocated ) 
     locations = []
     for inst in instancesAllocated:
         if 'device-location' in inst:
             #ansibleName = 'phone_'+inst['instanceId']
+            #logger.info( 'inst %s, loc %s', inst['instanceId'], inst['device-location'] )
             rec = { 'addr': inst['instanceId'] }
             locInfo = inst['device-location']
+            if not locInfo['locality']:
+                print( 'no locality for', inst['instanceId'], locInfo )
             rec['city'] = locInfo['locality']
             rec['stateCode'] = locInfo['area']
             rec['countryCode'] = locInfo['country-code']
             locations.append( rec )
+            #logger.info( 'locRec %s', rec )
     locationTable = pd.DataFrame( list(locations) )
     #print( 'locationTable', locationTable )
     return locationTable.set_index( 'addr' )
@@ -86,7 +94,8 @@ def getLocKey( addr, locs ):
     #return str( (row.latitude, row.longitude) )  #str of tuple
 
 def extractWorkerId( workerName ):
-    if '_phone_' in workerName:
+    #if '_phone_' in workerName:
+    if '_' in workerName:
         return workerName.split('_')[-1]  # instance id
         #return workerName.split('_')[0]  # IP addr
     else:
@@ -117,14 +126,24 @@ def loadStats( inFilePath, workerLocs ):
     #stats['locKey'] = stats.workerIP.apply( getLocKey, locs=workerLocs )
     return stats
 
-def reportStats( stats ):
+def reportCompiledStats( stats ):
+    resultsSummary = {}
+
     startDateTime = dateutil.parser.parse(stats.dateTime.min())
+    startDateTimeUtc = startDateTime.replace( tzinfo=datetime.timezone.utc )
+    resultsSummary['startDateTimeStr'] = startDateTimeUtc.isoformat()
+
     endDateTime = dateutil.parser.parse(stats.endDateTimeStr.max())
     durSeconds = (endDateTime-startDateTime).total_seconds()
+    resultsSummary['durSeconds'] = durSeconds
     durMinutes = durSeconds / 60
-    
+
     nDevices = len( stats['workerIP'].unique() )
+    resultsSummary['nDevices'] = nDevices
     
+    nFails = stats['nFails'].sum() if 'nFails' in stats else 0
+    resultsSummary['nFails'] = nFails
+
     print( 'Load Test started:', startDateTime.strftime('%Y/%m/%d %H:%M:%S%z') )
     print( 'Duration %.1f minutes'% durMinutes )
 
@@ -133,14 +152,28 @@ def reportStats( stats ):
 
 
     #print( '\nGlobal Summary' )
-    print( '# of requests:', stats['nr'].sum() )
+    nReqsSatisfied = int(stats['nr'].sum())
+    resultsSummary['nReqsSatisfied'] = int(nReqsSatisfied)
+    print( '# of requests satisfied:', nReqsSatisfied )
     rps = stats['nr'].sum() / durSeconds
     print( 'requests per second: %.1f' % (rps) )
     print( 'RPS per device: %.2f' % (rps / nDevices) )
-    print( 'mean response time: %.1f ms' % (stats['mspr'].mean()) )
+
+    if (nFails + nReqsSatisfied):
+        failRate = nFails / (nFails + nReqsSatisfied)
+    else:
+        failRate = 0
+    print( '# of requests failed:', nFails )
+    print( 'failure rate: %.1f%%' % (failRate * 100) )
+
+    meanResponseTime = stats['mspr'].mean()
+    print( 'mean response time: %.1f ms' % meanResponseTime )
+    resultsSummary['meanResponseTimeMs'] = meanResponseTime
     print( 'response time range: %.1f-%.1f ms' % (stats['msprMin'].min(), stats['msprMax'].max() ) )
  
-    
+
+    return resultsSummary
+
     #print( '\nRPS (per worker)' )
     #print( stats.rps.describe( [.05, .95] ) )
     
@@ -187,7 +220,7 @@ def deriveStats( stats ):
     result = result.append( pd.Series( { 'devices': nDevices } ) )
     result = result.append( pd.Series( { 'requests': numReqs } ) )
     result = result.append( pd.Series( { 'failures': numFails } ) )
-    result = result.append( pd.Series( { 'failPct': numFails * 100 / numReqs } ) )
+    result = result.append( pd.Series( { 'failPct': numFails * 100 / (numReqs+numFails) } ) )
     result = result.append( pd.Series( { 'rps': rps } ) )
     result = result.append( pd.Series( { 'rpsPerDev': (rps / nDevices) } ) )
     result = result.append( pd.Series( { 'mean rt': stats['mspr'].mean() } ) )
@@ -264,7 +297,6 @@ def compileStats( dataDirPath ):
         #print( '\nGlobal Summary' )
         #print( '# of geo regions:', len( locKeys ) )
         #print( locKeys )
-        #reportStats( g_stats )
         these = deriveStats( g_stats )
         these = pd.Series( {'locKey': '.global'} ).append( these )
         outDf = outDf.append( [these] )
@@ -276,7 +308,6 @@ def compileStats( dataDirPath ):
                 these = deriveStats( lStats )
                 these = pd.Series( {'locKey': locKey} ).append( these )
                 outDf = outDf.append( [these] )
-                #reportStats( lStats )
     perRegion = outDf.reset_index( drop=True )
     
     outDf = pd.DataFrame()
@@ -294,12 +325,11 @@ def compileStats( dataDirPath ):
                 locKey = '.unknown'
             these = pd.Series( {'worker': key, 'locKey': locKey} ).append( these )
             outDf = outDf.append( [these] )
-            #reportStats( lStats )
 
     perWorker = outDf.reset_index( drop=True )
     perWorker = perWorker.drop( ['devices', 'rps'], 1 )
     
-    worstCases = g_stats[ (g_stats.msprMax >= 7000) | (g_stats.mspr >= 1500) | (g_stats.msprMed >= 1500)  ]
+    worstCases = g_stats[ (g_stats.msprMax > 15000) | (g_stats.mspr > 3000) | (g_stats.msprMed > 3000)  ]
 
     regionTable = perRegion.to_html( index=False, classes=['sortable'], justify='left', float_format=lambda x: '%.1f' % x )
     workerTable = perWorker.to_html( index=False, classes=['sortable'], justify='left', float_format=lambda x: '%.1f' % x )
@@ -312,15 +342,32 @@ def compileStats( dataDirPath ):
                 )
         template = envir.get_template('ltStats.html.j2')
         html = template.render( ltRegionTable=regionTable,
-            ltWorkerTable=workerTable,ltWorstCasesTable=worstCasesTable )
+            ltWorkerTable=workerTable,ltWorstCasesTable=None )
     else:
         html = '<html> <body>\n%s\n</body></html>\n' % regionTable
 
     return html    
 
+def reportStats( dataDirPath = 'data' ):
+    global g_stats
+    g_stats = pd.DataFrame()
+    
+
+    html = compileStats( dataDirPath )
+        
+    with open( dataDirPath+'/ltStats.html', 'w', encoding='utf8') as htmlOutFile:
+        htmlOutFile.write( html )
+
+    resultsSummary = reportCompiledStats( g_stats )
+    logger.info( 'resultsSummary %s', resultsSummary )
+    return resultsSummary
+
+
 if __name__ == "__main__":
     initLogging()
     
+    reportStats()
+    '''
     g_dataDirPath = 'data'
     g_stats = pd.DataFrame()
     
@@ -330,4 +377,6 @@ if __name__ == "__main__":
     with open( g_dataDirPath+'/ltStats.html', 'w', encoding='utf8') as htmlOutFile:
         htmlOutFile.write( html )
 
-    reportStats( g_stats )
+    resultsSummary = reportCompiledStats( g_stats )
+    logger.info( 'resultsSummary %s', resultsSummary )
+    '''

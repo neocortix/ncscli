@@ -36,16 +36,6 @@ def openStatsOutFile( dataFilePath ):
     g_statsOutFile.write( 'dateTime,endDateTimeStr,worker,nr,rps,rpsMax,rpsMin,mspr,msprMax,msprMed,msprMin,nFails\n' )
     g_statsOutFile.flush()
 
-
-g_workerListFile = None
-
-def openWorkerListFile( dataFilePath ):
-    global g_workerListFile
-    g_workerListFile = open( dataFilePath, 'w' )
-    g_workerListFile.write( 'id\n' )
-    g_workerListFile.flush()
-
-
 def median_from_dict(total, count):
     """
     total is the number of requests made
@@ -159,11 +149,6 @@ if True:
     if os.path.exists( dataFilePath ):
         os.remove( dataFilePath )
     openStatsOutFile( dataFilePath )
-
-    dataFilePath = dataDirPath+'/workerList.csv'
-    #if os.path.exists( dataFilePath ):
-    #    os.remove( dataFilePath )
-    #openWorkerListFile( dataFilePath )
 
 
 events.slave_report += on_slave_report
