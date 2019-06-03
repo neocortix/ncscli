@@ -125,10 +125,12 @@ def launchNcscInstances( authToken, numReq=1,
                 logger.info( 'returning server error')
                 return {'serverError': resp2['statusCode'], 'reqId': jobId}
             else:
-                logger.info( 'resp2 content %s', resp2['content'].keys() )
+                #logger.info( 'resp2 content %s', resp2['content'].keys() )
                 queryNeeded = resp2['content']['launching']
                 if not queryNeeded:
                     return resp2['content']['instances']
+                logger.info( 'waiting for server (%d instances allocated)',
+                    len(resp2['content']['instances']) )
                 time.sleep( 5 )
     return resp.json()
 
