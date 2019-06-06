@@ -280,8 +280,9 @@ def doCmdLaunch( args ):
                 if iState == 'started':
                     startedSet.add( iid )
                     startedInstances[ iid ] = details
-                if (iState == 'failed') or (iState == 'exhausted'):
+                if iState in ['exhausted', 'ise', 'timedout']:
                     failedSet.add( iid )
+                    logger.warning( 'instance state %s for %s', iState, iid )
                 if iState == 'initial':
                     logger.debug( '%s %s', iState, iid )
                 #if iState in ['initial', 'starting']:
