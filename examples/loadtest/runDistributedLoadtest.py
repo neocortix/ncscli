@@ -12,11 +12,57 @@ import sys
 import threading
 import time
 
-# third-party modules
+# third-party module(s)
 import requests
+
+# neocortix modules
+import analyzeLtStats
+import ncs
+
 
 logger = logging.getLogger(__name__)
 
+def launchInstances( authToken, nInstances, sshClientKeyName, filtersJson=None ):
+    results = {}
+    # call ncs launch via command-line
+    filtersArg = "--filter '" + filtersJson + "'" if filtersJson else " "
+    cmd = 'ncs.py sc --authToken %s launch --count %d %s --sshClientKeyName %s --json > launched.json' % \
+        (authToken, nInstances, filtersArg, sshClientKeyName )
+    try:
+        subprocess.check_call( cmd, shell=True, stdout=sys.stderr )
+    except subprocess.CalledProcessError as exc: 
+        logger.error( '%s', exc.output )
+        #raise  # TODO raise a more helpful specific type of error
+        results['cloudServerErrorCode'] = exc.returncode
+        results['instancesAllocated'] = []
+    return results
+
+def terminateThese( authToken, inRecs ):
+    logger.info( 'to terminate %d instances', len(inRecs) )
+    iids = [inRec['instanceId'] for inRec in inRecs]
+    ncs.terminateInstances( authToken, iids )
+
+def jsonToInv():
+    cmd = 'cat launched.json | jsonToInv.py > launched.inv'
+    try:
+        subprocess.check_call( cmd, shell=True, stdout=sys.stderr )
+    except subprocess.CalledProcessError as exc: 
+        logger.error( '%s', exc.output )
+        raise  # TODO raise a more helpful specific type of error
+
+def installPrereqs():
+    invFilePath = 'launched.inv'
+    jsonToInv()
+    logger.info( 'calling installPrereqsQuicker.yml' )
+    cmd = 'ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook installPrereqsQuicker.yml -i %s | tee data/installPrereqsDeb.temp; wc installed.inv' \
+        % invFilePath
+    try:
+        exitCode = subprocess.call( cmd, shell=True, stdout=sys.stderr )
+        if exitCode:
+            logger.warning( 'ansible-playbook installPrereqs returned exit code %d', exitCode )
+    except subprocess.CalledProcessError as exc: 
+        logger.error( '%s', exc.output )
+        raise  # TODO raise a more helpful specific type of error
 
 def startWorkers( victimUrl, masterHost ):
     cmd = 'ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook startWorkers.yml -e "victimUrl=%s masterHost=%s" -i installed.inv |tee data/startWorkers.out' \
@@ -25,6 +71,15 @@ def startWorkers( victimUrl, masterHost ):
         subprocess.check_call( cmd, shell=True, stdout=sys.stderr )
     except subprocess.CalledProcessError as exc: 
         logger.warning( 'startWorkers returnCode %d (%s)', exc.returncode, exc.output )
+
+def killWorkerProcs():
+    logger.info( 'calling killWorkerProcs.yml' )
+    cmd = 'ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook killWorkerProcs.yml -i installed.inv'
+    try:
+        subprocess.check_call( cmd, shell=True, stdout=sys.stderr )
+    except subprocess.CalledProcessError as exc: 
+        logger.info( 'exception from killWorkerProcs %s', exc.output )
+
 
 def output_reader(proc):
     for line in iter(proc.stdout.readline, b''):
@@ -106,7 +161,7 @@ def conductLoadtest( masterUrl, nWorkersWanted, usersPerWorker,
     if workersFound:
         url = masterUrl+'swarm'
         nUsersWanted = nWorkersWanted * usersPerWorker
-        reqParams = {'locust_count': nUsersWanted,'hatch_rate': nWorkersWanted/2 }
+        reqParams = {'locust_count': nUsersWanted,'hatch_rate': nWorkersWanted/1 }
         resp = requests.post( url, data=reqParams )
         if (resp.status_code < 200) or (resp.status_code >= 300):
             logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
@@ -119,20 +174,23 @@ def conductLoadtest( masterUrl, nWorkersWanted, usersPerWorker,
                 respJson = resp.json()
                 rps = respJson['total_rps']
                 maxRps = max( maxRps, rps )
-                logger.info( 'total_rps %.1f', rps )
+                #logger.info( 'total_rps %.1f', rps )
                 if 'slaves' in respJson:
                     workerData = respJson['slaves']
                     workersFound = len(workerData)
                     logger.info( '%d workers found', workersFound )
                     nGoodWorkers = 0
+                    nUsers = 0
                     # loop for each worker, getting actual number of users
                     for worker in workerData:
-                        if worker['user_count'] >= usersPerWorker:
+                        #logger.debug( 'worker %s user_count %d', worker['id'][0:16], worker['user_count'] )
+                        if worker['user_count'] > 0: # could check for >= usersPerWorker
                             nGoodWorkers += 1
-                        #else:
-                        #    logger.info( '%s %d %s', 
-                        #        worker['state'], worker['user_count'], worker['id'] )
-                    logger.info( '%d workers working', nGoodWorkers )
+                            nUsers += worker['user_count']
+                        else:
+                            logger.info( '%s %d %s', 
+                                worker['state'], worker['user_count'], worker['id'] )
+                    logger.info( '%d workers working; %d simulated users', nGoodWorkers, nUsers )
             except Exception as exc:
                 logger.warning( 'exception (%s) %s', type(exc), exc )
             time.sleep(5)
@@ -167,7 +225,7 @@ def conductLoadtest( masterUrl, nWorkersWanted, usersPerWorker,
                 #else:
                 #    print( '$$$ %s %d %s' % 
                 #        (worker['state'], worker['user_count'], worker['id']), file=sys.stderr )
-    print( 'peak RPS (nominal)', maxRps )
+    #print( 'peak RPS (nominal)', maxRps )
     print( '%d simulated users' % (respJson['user_count']) )
     if nReqInstances:
         pctGood = 100 * nGoodWorkers / nReqInstances
@@ -181,21 +239,38 @@ if __name__ == "__main__":
     logDateFmt = '%Y/%m/%d %H:%M:%S'
     formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
     logging.basicConfig(format=logFmt, datefmt=logDateFmt)
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(logging.INFO)
     logger.debug('the logger is configured')
 
-    ap = argparse.ArgumentParser( description=__doc__ )
+    ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@' )
     ap.add_argument( 'victimHostUrl', help='url of the host to target as victim' )
     ap.add_argument( 'masterHost', help='hostname or ip addr of the Locust master' )
+    ap.add_argument( '--authToken', help='the NCS authorization token to use' )
     ap.add_argument( '--masterUrl', default='http://127.0.0.1:8089', help='url of the Locust master to control' )
-    ap.add_argument( '--nWorkers', type=int, default=1, help='# of expected workers' )
-    ap.add_argument( '--usersPerWorker', type=int, default=35, help='# of users per worker' )
-    ap.add_argument( '--startTimeLimit', type=int, default=10, help='time to wait for startup (in seconds)' )
+    ap.add_argument( '--nWorkers', type=int, default=1, help='# of worker devices' )
+    ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use' )
+    ap.add_argument( '--usersPerWorker', type=int, default=35, help='# of simulated users per worker' )
+    ap.add_argument( '--startTimeLimit', type=int, default=10, help='time to wait for startup of workers (in seconds)' )
     ap.add_argument( '--susTime', type=int, default=10, help='time to sustain the test after startup (in seconds)' )
-    ap.add_argument( '--nReqInstances', type=int, help='the # of instances originally requested (or zero if not known)' )
+    ap.add_argument( '--nReqInstances', type=int, help='the # of instances to launch (or zero for all available)' )
     ap.add_argument( '--stop', action='store_true', help='to stop load before and after test' )
     args = ap.parse_args()
     #logger.info( 'args: %s', str(args) )
+
+    dataDirPath = 'data'
+    launchedJsonFilePath = 'launched.json'
+    launchWanted = True
+
+    nWorkersWanted = args.nWorkers
+    if launchWanted:
+        nAvail = ncs.getAvailableDeviceCount( args.authToken ) # could pass filtersJson
+        logger.info( '%d devices available to launch', nAvail )
+
+        if nWorkersWanted == 0:
+            nWorkersWanted = nAvail
+        launchInstances( args.authToken, nWorkersWanted, args.sshClientKeyName ) # could pass filtersJson
+
+        installPrereqs()
 
     masterSpecs = None
     if args.stop:
@@ -205,10 +280,34 @@ if __name__ == "__main__":
         masterSpecs = startMaster( args.victimHostUrl )
         time.sleep(5)
     
-    conductLoadtest( args.masterUrl, args.nWorkers, args.usersPerWorker,
+    conductLoadtest( args.masterUrl, nWorkersWanted, args.usersPerWorker,
         args.startTimeLimit, args.susTime,
         stopWanted=args.stop, nReqInstances=args.nReqInstances )
     
     if masterSpecs:
         time.sleep(5)
         stopMaster( masterSpecs )
+
+    killWorkerProcs()
+
+    if launchWanted:
+
+        with open( launchedJsonFilePath, 'r') as jsonInFile:
+            launchedInstances = json.load(jsonInFile)  # an array
+        terminateThese( args.authToken, launchedInstances )
+        # purgeKnownHosts works well only when known_hosts is not hashed
+        cmd='purgeKnownHosts.py launched.json > /dev/null'
+        try:
+            subprocess.check_call( cmd, shell=True )
+        except Exception as exc:
+            logger.error( 'purgeKnownHosts threw exception (%s) %s',type(exc), exc )
+
+    try:
+        time.sleep( 5 )
+        loadTestStats = analyzeLtStats.reportStats(dataDirPath)
+    except Exception as exc:
+        logger.warning( 'got exception from analyzeLtStats (%s) %s',
+            type(exc), exc, exc_info=True )
+    else:
+        #json.dump( loadTestStats, sys.stdout, indent=2, sort_keys=True, default=str )
+        pass
