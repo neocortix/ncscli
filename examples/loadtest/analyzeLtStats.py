@@ -142,7 +142,7 @@ def reportCompiledStats( stats ):
     resultsSummary['nDevices'] = nDevices
     
     nFails = stats['nFails'].sum() if 'nFails' in stats else 0
-    resultsSummary['nFails'] = nFails
+    resultsSummary['nFails'] = int( nFails )
 
     print( 'Load Test started:', startDateTime.strftime('%Y/%m/%d %H:%M:%S%z') )
     print( 'Duration %.1f minutes'% durMinutes )
