@@ -1,0 +1,35 @@
+---
+- hosts: all
+  gather_facts: False
+  remote_user: root
+  vars:
+    PROC: runLocust
+  tasks:
+#    - name: list processes that match {{ PROC }} pattern
+#      shell: "ps -ef | grep -v grep | grep -w {{ PROC }} | awk '{print $2}'"
+#      register: running_processes
+#      changed_when: False
+
+#    - name: Kill running processes
+#      shell: "kill {{ item }}"
+#      with_items: "{{ running_processes.stdout_lines }}"
+
+    - name: pkill running processes
+      shell: "pkill -f {{ PROC }} || sleep 10; pkill -SIGKILL -f {{ PROC }}"
+      #shell: "pkill -o -f {{ PROC }} || sleep 10; pkill -o -SIGKILL -f '^((?!pkill).)*runLocust((?!pkill).)*$'"
+      #shell: "pgrep {{ PROC }} | xargs kill || sleep 30; pkill -SIGKILL -f {{ PROC }}"
+      ignore_errors: yes
+
+
+#    - name: Waiting until all designated processes are killed
+#      wait_for:
+#        path: "/proc/{{ item }}/status"
+#        state: absent
+#      with_items: "{{ running_processes.stdout_lines }}"
+#      ignore_errors: yes
+#      register: killed_processes
+
+#    - name: Force kill stuck processes
+#      shell: "kill -9 {{ item }}"
+#      with_items: "{{ killed_processes.results | select('failed') | map(attribute='item') | list }}"
+      
