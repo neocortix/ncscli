@@ -61,6 +61,29 @@ def getAppVersions( authToken ):
     logger.debug( 'appVersions: %s', versions )
     return versions
 
+def _updateFromJson( dataDict, jsonStr ):
+    if jsonStr:
+        try:
+            jx = json.loads( jsonStr )
+        except Exception:
+            logger.error( 'invalid json in filter "%s"', jsonStr )
+            raise
+        else:
+            if jx:
+                if not isinstance( jx, dict ):
+                    logger.error( 'json in arg is not a dict "%s"', jsonStr )
+                    raise TypeError('json in arg is not a dict')
+                dataDict.update( jx )
+
+def getAvailableDeviceCount( authToken, filtersJson=None ):
+    reqParams = {}
+    if filtersJson:
+        _updateFromJson( reqParams, filtersJson )
+    response = queryNcsSc( 'instances', authToken, reqParams )
+    respContent = response['content']
+    nAvail = respContent[ 'available' ]
+    return nAvail
+
 def launchNcscInstances( authToken, numReq=1,
         regions=[], abis=[], sshClientKeyName=None, jsonFilter=None ):
     appVersions = getAppVersions( authToken )
@@ -428,7 +451,7 @@ def terminateInstances( authToken, instanceIds ):
         logger.info( 'terminating %s', iid )
         terminateNcscInstance( authToken, iid )
     if instanceIds and (len(instanceIds) >0) and (isinstance(instanceIds[0], str )):
-        nWorkers = 3
+        nWorkers = 4
         with futures.ThreadPoolExecutor( max_workers=nWorkers ) as executor:
             parIter = executor.map( terminateOne, instanceIds )
             parResultList = list( parIter )
