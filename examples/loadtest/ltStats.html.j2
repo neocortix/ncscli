@@ -17,10 +17,12 @@
     </h2>
     {{ ltWorkerTable }}
 
-    <h2>
-    Worst Cases
-    </h2>
-    {{ ltWorstCasesTable }}
+    {% if ltWorstCasesTable %}
+        <h2>
+        Worst Cases
+        </h2>
+        {{ ltWorstCasesTable }}
+    {% endif %}
 </body>
 
 </html>
