@@ -132,10 +132,6 @@ def conductLoadtest( masterUrl, nWorkersWanted, usersPerWorker,
         logger.info( 'requesting stop via %s', masterUrl+'stop' )
         resp = requests.get( masterUrl+'stop' )
         logger.info( '%s', resp.json() )
-        # might be good to do a "reset" here 
-        #resp = requests.get( masterUrl+'stats/reset' )
-        #logger.info( '%s', resp.text )
-        #time.sleep(1)
 
     startTime = time.time()
     deadline = startTime + startTimeLimit
@@ -174,7 +170,6 @@ def conductLoadtest( masterUrl, nWorkersWanted, usersPerWorker,
                 respJson = resp.json()
                 rps = respJson['total_rps']
                 maxRps = max( maxRps, rps )
-                #logger.info( 'total_rps %.1f', rps )
                 if 'slaves' in respJson:
                     workerData = respJson['slaves']
                     workersFound = len(workerData)
@@ -183,7 +178,6 @@ def conductLoadtest( masterUrl, nWorkersWanted, usersPerWorker,
                     nUsers = 0
                     # loop for each worker, getting actual number of users
                     for worker in workerData:
-                        #logger.debug( 'worker %s user_count %d', worker['id'][0:16], worker['user_count'] )
                         if worker['user_count'] > 0: # could check for >= usersPerWorker
                             nGoodWorkers += 1
                             nUsers += worker['user_count']
@@ -201,11 +195,8 @@ def conductLoadtest( masterUrl, nWorkersWanted, usersPerWorker,
     # get final status of workers
     resp = requests.get( masterUrl+'stats/requests' )
     respJson = resp.json()
-    #logger.info( 'resp keys %s', respJson.keys() )
-    #logger.info( '%s', respJson )
     if stopWanted:
         resp = requests.get( masterUrl+'stop' )
-        #logger.info( '%s', resp.json() )
 
     # save final status of workers as json
     with open( 'data/locustWorkers.json', 'w' ) as jsonOutFile:
@@ -222,10 +213,6 @@ def conductLoadtest( masterUrl, nWorkersWanted, usersPerWorker,
             for worker in workerData:
                 if worker['user_count'] >= usersPerWorker:
                     print( worker['id'], file=wwOutFile )
-                #else:
-                #    print( '$$$ %s %d %s' % 
-                #        (worker['state'], worker['user_count'], worker['id']), file=sys.stderr )
-    #print( 'peak RPS (nominal)', maxRps )
     print( '%d simulated users' % (respJson['user_count']) )
     if nReqInstances:
         pctGood = 100 * nGoodWorkers / nReqInstances
@@ -247,15 +234,12 @@ if __name__ == "__main__":
     ap.add_argument( 'masterHost', help='hostname or ip addr of the Locust master' )
     ap.add_argument( '--authToken', help='the NCS authorization token to use' )
     ap.add_argument( '--masterUrl', default='http://127.0.0.1:8089', help='url of the Locust master to control' )
-    ap.add_argument( '--nWorkers', type=int, default=1, help='# of worker devices' )
+    ap.add_argument( '--nWorkers', type=int, default=1, help='the # of worker instances to launch (or zero for all available)' )
     ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use' )
     ap.add_argument( '--usersPerWorker', type=int, default=35, help='# of simulated users per worker' )
     ap.add_argument( '--startTimeLimit', type=int, default=10, help='time to wait for startup of workers (in seconds)' )
     ap.add_argument( '--susTime', type=int, default=10, help='time to sustain the test after startup (in seconds)' )
-    ap.add_argument( '--nReqInstances', type=int, help='the # of instances to launch (or zero for all available)' )
-    ap.add_argument( '--stop', action='store_true', help='to stop load before and after test' )
     args = ap.parse_args()
-    #logger.info( 'args: %s', str(args) )
 
     dataDirPath = 'data'
     launchedJsonFilePath = 'launched.json'
@@ -263,26 +247,22 @@ if __name__ == "__main__":
 
     nWorkersWanted = args.nWorkers
     if launchWanted:
-        nAvail = ncs.getAvailableDeviceCount( args.authToken ) # could pass filtersJson
-        logger.info( '%d devices available to launch', nAvail )
-
         if nWorkersWanted == 0:
+            nAvail = ncs.getAvailableDeviceCount( args.authToken ) # could pass filtersJson
+            logger.info( '%d devices available to launch', nAvail )
             nWorkersWanted = nAvail
         launchInstances( args.authToken, nWorkersWanted, args.sshClientKeyName ) # could pass filtersJson
-
         installPrereqs()
 
-    masterSpecs = None
-    if args.stop:
-        startWorkers( args.victimHostUrl, args.masterHost )
-        time.sleep(5)
+    startWorkers( args.victimHostUrl, args.masterHost )
+    time.sleep(5)
 
-        masterSpecs = startMaster( args.victimHostUrl )
-        time.sleep(5)
+    masterSpecs = startMaster( args.victimHostUrl )
+    time.sleep(5)
     
     conductLoadtest( args.masterUrl, nWorkersWanted, args.usersPerWorker,
         args.startTimeLimit, args.susTime,
-        stopWanted=args.stop, nReqInstances=args.nReqInstances )
+        stopWanted=True, nReqInstances=nWorkersWanted )
     
     if masterSpecs:
         time.sleep(5)
@@ -291,7 +271,7 @@ if __name__ == "__main__":
     killWorkerProcs()
 
     if launchWanted:
-
+        # get instances from json file, to see which ones to terminate
         with open( launchedJsonFilePath, 'r') as jsonInFile:
             launchedInstances = json.load(jsonInFile)  # an array
         terminateThese( args.authToken, launchedInstances )
@@ -308,6 +288,4 @@ if __name__ == "__main__":
     except Exception as exc:
         logger.warning( 'got exception from analyzeLtStats (%s) %s',
             type(exc), exc, exc_info=True )
-    else:
-        #json.dump( loadTestStats, sys.stdout, indent=2, sort_keys=True, default=str )
-        pass
+    logger.info( 'finished')
