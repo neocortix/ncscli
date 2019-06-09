@@ -22,6 +22,16 @@ import ncs
 
 logger = logging.getLogger(__name__)
 
+
+def boolArg( v ):
+    '''use with ArgumentParser add_argument for (case-insensitive) boolean arg'''
+    if v.lower() == 'true':
+        return True
+    elif v.lower() == 'false':
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 def launchInstances( authToken, nInstances, sshClientKeyName, filtersJson=None ):
     results = {}
     # call ncs launch via command-line
@@ -57,7 +67,7 @@ def installPrereqs():
     cmd = 'ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook installPrereqsQuicker.yml -i %s | tee data/installPrereqsDeb.temp; wc installed.inv' \
         % invFilePath
     try:
-        exitCode = subprocess.call( cmd, shell=True, stdout=sys.stderr )
+        exitCode = subprocess.call( cmd, shell=True, stdout=subprocess.DEVNULL )
         if exitCode:
             logger.warning( 'ansible-playbook installPrereqs returned exit code %d', exitCode )
     except subprocess.CalledProcessError as exc: 
@@ -76,9 +86,9 @@ def killWorkerProcs():
     logger.info( 'calling killWorkerProcs.yml' )
     cmd = 'ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook killWorkerProcs.yml -i installed.inv'
     try:
-        subprocess.check_call( cmd, shell=True, stdout=sys.stderr )
+        subprocess.check_call( cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
     except subprocess.CalledProcessError as exc: 
-        logger.info( 'exception from killWorkerProcs %s', exc.output )
+        logger.info( 'exception from killWorkerProcs %s', exc.returncode )
 
 
 def output_reader(proc):
@@ -114,7 +124,6 @@ def stopMaster( specs ):
             proc.wait(timeout=5)
             if proc.returncode:
                 logger.warning( 'runLocust return code %d', proc.returncode )
-            #print(outs.decode('utf-8'))
         except subprocess.TimeoutExpired:
             logger.warning( 'runLocust did not terminate in time' )
     thread = specs.get('thread')
@@ -173,7 +182,7 @@ def conductLoadtest( masterUrl, nWorkersWanted, usersPerWorker,
                 if 'slaves' in respJson:
                     workerData = respJson['slaves']
                     workersFound = len(workerData)
-                    logger.info( '%d workers found', workersFound )
+                    #logger.info( '%d workers found', workersFound )
                     nGoodWorkers = 0
                     nUsers = 0
                     # loop for each worker, getting actual number of users
@@ -184,12 +193,13 @@ def conductLoadtest( masterUrl, nWorkersWanted, usersPerWorker,
                         else:
                             logger.info( '%s %d %s', 
                                 worker['state'], worker['user_count'], worker['id'] )
-                    logger.info( '%d workers working; %d simulated users', nGoodWorkers, nUsers )
+                    logger.info( '%d workers found, %d working; %d simulated users',
+                        workersFound, nGoodWorkers, nUsers )
             except Exception as exc:
                 logger.warning( 'exception (%s) %s', type(exc), exc )
             time.sleep(5)
     # print summary
-    print( '%d of %d workers showed up, %d workers working'
+    print( '%d of %d workers showed up, %d workers working at the end'
         % (workersFound, nWorkersWanted, nGoodWorkers) )
 
     # get final status of workers
@@ -214,9 +224,11 @@ def conductLoadtest( masterUrl, nWorkersWanted, usersPerWorker,
                 if worker['user_count'] >= usersPerWorker:
                     print( worker['id'], file=wwOutFile )
     print( '%d simulated users' % (respJson['user_count']) )
+    '''
     if nReqInstances:
         pctGood = 100 * nGoodWorkers / nReqInstances
         print( '\n%d out of %d = %.0f%% success rate' % (nGoodWorkers, nReqInstances, pctGood ) )
+    '''
 
 
 
@@ -229,11 +241,12 @@ if __name__ == "__main__":
     logger.setLevel(logging.INFO)
     logger.debug('the logger is configured')
 
-    ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@' )
+    ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( 'victimHostUrl', help='url of the host to target as victim' )
     ap.add_argument( 'masterHost', help='hostname or ip addr of the Locust master' )
-    ap.add_argument( '--authToken', help='the NCS authorization token to use' )
-    ap.add_argument( '--masterUrl', default='http://127.0.0.1:8089', help='url of the Locust master to control' )
+    ap.add_argument( '--authToken', required=True, help='the NCS authorization token to use' )
+    ap.add_argument('--launch', type=boolArg, default=True, help='to launch and terminate instances' )
+    #ap.add_argument( '--masterUrl', default='http://127.0.0.1:8089', help='url of the Locust master to control' )
     ap.add_argument( '--nWorkers', type=int, default=1, help='the # of worker instances to launch (or zero for all available)' )
     ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use' )
     ap.add_argument( '--usersPerWorker', type=int, default=35, help='# of simulated users per worker' )
@@ -243,7 +256,7 @@ if __name__ == "__main__":
 
     dataDirPath = 'data'
     launchedJsonFilePath = 'launched.json'
-    launchWanted = True
+    launchWanted = args.launch
 
     nWorkersWanted = args.nWorkers
     if launchWanted:
@@ -252,7 +265,7 @@ if __name__ == "__main__":
             logger.info( '%d devices available to launch', nAvail )
             nWorkersWanted = nAvail
         launchInstances( args.authToken, nWorkersWanted, args.sshClientKeyName ) # could pass filtersJson
-        installPrereqs()
+    installPrereqs()
 
     startWorkers( args.victimHostUrl, args.masterHost )
     time.sleep(5)
@@ -260,7 +273,7 @@ if __name__ == "__main__":
     masterSpecs = startMaster( args.victimHostUrl )
     time.sleep(5)
     
-    conductLoadtest( args.masterUrl, nWorkersWanted, args.usersPerWorker,
+    conductLoadtest( 'http://127.0.0.1:8089', nWorkersWanted, args.usersPerWorker,
         args.startTimeLimit, args.susTime,
         stopWanted=True, nReqInstances=nWorkersWanted )
     
