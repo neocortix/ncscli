@@ -78,7 +78,7 @@ def startWorkers( victimUrl, masterHost ):
     cmd = 'ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook startWorkers.yml -e "victimUrl=%s masterHost=%s" -i installed.inv |tee data/startWorkers.out' \
         % (victimUrl, masterHost)
     try:
-        subprocess.check_call( cmd, shell=True, stdout=sys.stderr )
+        subprocess.check_call( cmd, shell=True, stdout=subprocess.DEVNULL )
     except subprocess.CalledProcessError as exc: 
         logger.warning( 'startWorkers returnCode %d (%s)', exc.returncode, exc.output )
 
@@ -88,7 +88,7 @@ def killWorkerProcs():
     try:
         subprocess.check_call( cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
     except subprocess.CalledProcessError as exc: 
-        logger.info( 'exception from killWorkerProcs %s', exc.returncode )
+        logger.info( 'exception from killWorkerProcs (return code %d)', exc.returncode )
 
 
 def output_reader(proc):
@@ -245,8 +245,8 @@ if __name__ == "__main__":
     ap.add_argument( 'victimHostUrl', help='url of the host to target as victim' )
     ap.add_argument( 'masterHost', help='hostname or ip addr of the Locust master' )
     ap.add_argument( '--authToken', required=True, help='the NCS authorization token to use' )
+    ap.add_argument( '--filter', help='json to filter instances for launch' )
     ap.add_argument('--launch', type=boolArg, default=True, help='to launch and terminate instances' )
-    #ap.add_argument( '--masterUrl', default='http://127.0.0.1:8089', help='url of the Locust master to control' )
     ap.add_argument( '--nWorkers', type=int, default=1, help='the # of worker instances to launch (or zero for all available)' )
     ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use' )
     ap.add_argument( '--usersPerWorker', type=int, default=35, help='# of simulated users per worker' )
@@ -261,10 +261,10 @@ if __name__ == "__main__":
     nWorkersWanted = args.nWorkers
     if launchWanted:
         if nWorkersWanted == 0:
-            nAvail = ncs.getAvailableDeviceCount( args.authToken ) # could pass filtersJson
+            nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
             logger.info( '%d devices available to launch', nAvail )
             nWorkersWanted = nAvail
-        launchInstances( args.authToken, nWorkersWanted, args.sshClientKeyName ) # could pass filtersJson
+        launchInstances( args.authToken, nWorkersWanted, args.sshClientKeyName, filtersJson=args.filter )
     installPrereqs()
 
     startWorkers( args.victimHostUrl, args.masterHost )
