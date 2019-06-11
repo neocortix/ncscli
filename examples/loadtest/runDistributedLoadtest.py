@@ -7,6 +7,7 @@ does distributed load testing using Locust on NCS instances
 import argparse
 import json
 import logging
+import os
 import subprocess
 import sys
 import threading
@@ -264,6 +265,8 @@ if __name__ == "__main__":
     dataDirPath = 'data'
     launchedJsonFilePath = 'launched.json'
     launchWanted = args.launch
+
+    os.makedirs( dataDirPath, exist_ok=True )
 
     nWorkersWanted = args.nWorkers
     if launchWanted:
