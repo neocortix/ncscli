@@ -120,6 +120,19 @@ def extractRecap( inFilePath ):
     #logger.debug( 'msgs %s', msgs.keys() )
     return recap
 
+def getGoodInstances( recap ):
+    ''' return dict of instances from a recap that had "ok" and neither failed nor unreachable '''
+    goodList = [x for x in recap if (x['ok'] > 0) and not (x['failed'] or x['unreachable']) ]
+    goodDict = {}
+    for rec in goodList:
+        ansibleName = rec['host']
+        if ansibleName.startswith('phone_'):
+            iid = ansibleName.replace( 'phone_', '' )
+        else:
+            iid = ansibleName
+        goodDict[iid] = rec
+    return goodDict
+
 
 if __name__ == "__main__":
     logging.basicConfig(format='%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s', datefmt='%Y/%m/%d %H:%M:%S')
