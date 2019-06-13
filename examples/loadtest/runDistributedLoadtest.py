@@ -18,10 +18,11 @@ import requests
 
 # neocortix modules
 import analyzeLtStats
+import extractAnsibleRecap
 try:
     import ncs
 except ImportError:
-    # set syetem and python paths for default places, since path seems to be not set properly
+    # set system and python paths for default places, since path seems to be not set properly
     ncscliPath = os.path.expanduser('~/ncscli/ncscli')
     sys.path.append( ncscliPath )
     os.environ["PATH"] += os.pathsep + ncscliPath
@@ -70,9 +71,10 @@ def jsonToInv():
 
 def installPrereqs():
     invFilePath = 'launched.inv'
+    tempFilePath = 'data/installPrereqsDeb.temp'
     jsonToInv()
     logger.info( 'calling installPrereqsQuicker.yml' )
-    cmd = 'ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook installPrereqsQuicker.yml -i %s | tee data/installPrereqsDeb.temp; wc installed.inv' \
+    cmd = 'ANSIBLE_HOST_KEY_CHECKING=False ANSIBLE_DISPLAY_FAILED_STDERR=yes ansible-playbook installPrereqsQuicker.yml -i %s | tee data/installPrereqsDeb.temp; wc installed.inv' \
         % invFilePath
     try:
         exitCode = subprocess.call( cmd, shell=True, stdout=subprocess.DEVNULL )
@@ -81,6 +83,10 @@ def installPrereqs():
     except subprocess.CalledProcessError as exc: 
         logger.error( '%s', exc.output )
         raise  # TODO raise a more helpful specific type of error
+    installerRecap = extractAnsibleRecap.extractRecap( tempFilePath )
+    wellInstalled = extractAnsibleRecap.getGoodInstances( installerRecap )
+    sys.stderr.flush()
+    return wellInstalled
 
 def startWorkers( victimUrl, masterHost ):
     cmd = 'ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook startWorkers.yml -e "victimUrl=%s masterHost=%s" -i installed.inv |tee data/startWorkers.out' \
@@ -224,13 +230,6 @@ def conductLoadtest( masterUrl, nWorkersWanted, usersPerWorker,
             workerData = []
         json.dump( workerData, jsonOutFile, sort_keys=True, indent=2 )
 
-    # print lists of working and not-fully-working workers
-    with open( 'data/workingWorkers.txt', 'w' ) as wwOutFile:
-        if 'slaves' in respJson:
-            workerData = respJson['slaves']
-            for worker in workerData:
-                if worker['user_count'] >= usersPerWorker:
-                    print( worker['id'], file=wwOutFile )
     print( '%d simulated users' % (respJson['user_count']) )
     '''
     if nReqInstances:
@@ -275,23 +274,31 @@ if __name__ == "__main__":
             logger.info( '%d devices available to launch', nAvail )
             nWorkersWanted = nAvail
         launchInstances( args.authToken, nWorkersWanted, args.sshClientKeyName, filtersJson=args.filter )
-    installPrereqs()
+    wellInstalled = installPrereqs()
+    logger.info( 'installPrereqs succeeded on %d instances', len( wellInstalled ))
 
-    startWorkers( args.victimHostUrl, args.masterHost )
-    time.sleep(5)
-
-    masterSpecs = startMaster( args.victimHostUrl )
-    time.sleep(5)
-    
-    conductLoadtest( 'http://127.0.0.1:8089', nWorkersWanted, args.usersPerWorker,
-        args.startTimeLimit, args.susTime,
-        stopWanted=True, nReqInstances=nWorkersWanted )
-    
-    if masterSpecs:
+    if len( wellInstalled ):
+        startWorkers( args.victimHostUrl, args.masterHost )
         time.sleep(5)
-        stopMaster( masterSpecs )
 
-    killWorkerProcs()
+        masterSpecs = startMaster( args.victimHostUrl )
+        time.sleep(5)
+        
+        conductLoadtest( 'http://127.0.0.1:8089', nWorkersWanted, args.usersPerWorker,
+            args.startTimeLimit, args.susTime,
+            stopWanted=True, nReqInstances=nWorkersWanted )
+        
+        if masterSpecs:
+            time.sleep(5)
+            stopMaster( masterSpecs )
+
+        killWorkerProcs()
+        try:
+            time.sleep( 5 )
+            loadTestStats = analyzeLtStats.reportStats(dataDirPath)
+        except Exception as exc:
+            logger.warning( 'got exception from analyzeLtStats (%s) %s',
+                type(exc), exc, exc_info=True )
 
     if launchWanted:
         # get instances from json file, to see which ones to terminate
@@ -305,10 +312,4 @@ if __name__ == "__main__":
         except Exception as exc:
             logger.error( 'purgeKnownHosts threw exception (%s) %s',type(exc), exc )
 
-    try:
-        time.sleep( 5 )
-        loadTestStats = analyzeLtStats.reportStats(dataDirPath)
-    except Exception as exc:
-        logger.warning( 'got exception from analyzeLtStats (%s) %s',
-            type(exc), exc, exc_info=True )
     logger.info( 'finished')
