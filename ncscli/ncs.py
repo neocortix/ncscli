@@ -85,7 +85,7 @@ def getAvailableDeviceCount( authToken, filtersJson=None ):
     return nAvail
 
 def launchNcscInstances( authToken, numReq=1,
-        regions=[], abis=[], sshClientKeyName=None, jsonFilter=None ):
+        regions=[], abis=[], sshClientKeyName=None, jsonFilter=None, jobId=None ):
     appVersions = getAppVersions( authToken )
     if not appVersions:
         # something is very wrong
@@ -96,7 +96,10 @@ def launchNcscInstances( authToken, numReq=1,
 
     headers = ncscReqHeaders( authToken )
 
-    reqId = str( uuid.uuid4() )
+    if jobId:
+        reqId = jobId
+    else:
+        reqId = str( uuid.uuid4() )
 
     reqData = {
         #"user":"hacky.sack@gmail.com",
@@ -125,11 +128,13 @@ def launchNcscInstances( authToken, numReq=1,
     url = 'https://cloud.neocortix.com/cloud-api/sc/jobs'
     #logger.info( 'posting with auth %s', authToken )
     resp = requests.post( url, headers=headers, data=reqDataStr )
-    logger.info( 'response code %s', resp.status_code )
+    #logger.info( 'response code %s', resp.status_code )
     if (resp.status_code < 200) or (resp.status_code >= 300):
         logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
-        # try recovering by retrieving list of instances that match job id
-    logger.info( 'job request returned %s', resp.json() )
+        #TODO need retry code here, but only for specific response codes
+        return {'serverError': resp.status_code, 'reqId': jobId}
+    else:
+        logger.info( 'job request returned (%s) %s', resp.status_code, resp.text )
     queryNeeded = resp.status_code == 200
     logger.info( 'resp.status_code %d; queryNeeded %s ', resp.status_code, queryNeeded )
     while queryNeeded:
@@ -239,6 +244,20 @@ def terminateNcscInstance( authToken, iid ):
             return terminateNcscInstance( authToken, iid )
     return resp.status_code
 
+def terminateJobInstances( authToken, jobId, maxRetries=1000 ):
+    headers = ncscReqHeaders( authToken )
+    url = 'https://cloud.neocortix.com/cloud-api/sc/jobs/' + jobId
+    logger.info( 'deleting instances for job %s', jobId )
+    resp = requests.delete( url, headers=headers )
+    if (resp.status_code < 200) or (resp.status_code >= 300):
+        logger.warn( 'response code %s', resp.status_code )
+        if len( resp.text ):
+            logger.info( 'response "%s"', resp.text, maxRetries-1 )
+        if maxRetries and resp.status_code not in [403, 404]:
+            time.sleep( 10 )
+            return terminateJobInstances( authToken, jobId )
+    return resp.status_code
+
 
 def doCmdLaunch( args ):
     authToken = args.authToken
@@ -253,9 +272,10 @@ def doCmdLaunch( args ):
     try:
         infos = launchNcscInstances( authToken, args.count, 
             sshClientKeyName=args.sshClientKeyName,
-            regions=args.region, abis=instanceAbis, jsonFilter=args.filter )
+            regions=args.region, abis=instanceAbis, jsonFilter=args.filter,
+            jobId=args.jobId )
         if 'serverError' in infos:
-            logger.warning( 'got serverError %d', infos['serverError'])
+            logger.error( 'got serverError %d', infos['serverError'])
             return infos['serverError']
     except Exception as exc:
         logger.error( 'exception launching instances (%s) "%s"',
@@ -451,7 +471,7 @@ def terminateInstances( authToken, instanceIds ):
         logger.info( 'terminating %s', iid )
         terminateNcscInstance( authToken, iid )
     if instanceIds and (len(instanceIds) >0) and (isinstance(instanceIds[0], str )):
-        nWorkers = 4
+        nWorkers = 3
         with futures.ThreadPoolExecutor( max_workers=nWorkers ) as executor:
             parIter = executor.map( terminateOne, instanceIds )
             parResultList = list( parIter )
@@ -461,7 +481,12 @@ def doCmdTerminate( args ):
 
     startTime = time.time()
     threading = True
-    if args.instanceId == ['ALL']:
+    if args.jobId and args.instanceId:
+        logger.error( 'combining instance id with job id is not supported for terminate' )
+    elif args.jobId:
+        logger.info( 'terminating instances for job %s', args.jobId )
+        terminateJobInstances( authToken, args.jobId )
+    elif args.instanceId == ['ALL']:
         try:
             response = queryNcsSc( 'instances', authToken)
         except Exception as exc:
@@ -510,8 +535,9 @@ if __name__ == "__main__":
     #ap.add_argument('--verbose', '-v', action='count', default=0)
     ap.add_argument( '--count', type=int, default=1, help='the number of instances required (default=1)' )
     ap.add_argument( '--instanceId', type=str, nargs='+', help='one or more instance IDs (or ALL to terminate all)' )
-    ap.add_argument( '--filter', help='json to filter instances for launch (or maybe list)' )
+    ap.add_argument( '--filter', help='json to filter instances for launch' )
     ap.add_argument( '--json', action='store_true', help='for json-format output' )
+    ap.add_argument( '--jobId', help='unique job id for launch or terminate' )
     ap.add_argument( '--region', nargs='+', help='the geographic region(s) to target' )
     ap.add_argument( '--showPasswords', action='store_true', help='if you want launch or list to show passwords' )
     ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use' )
