@@ -304,12 +304,18 @@ if __name__ == "__main__":
         # get instances from json file, to see which ones to terminate
         with open( launchedJsonFilePath, 'r') as jsonInFile:
             launchedInstances = json.load(jsonInFile)  # an array
-        terminateThese( args.authToken, launchedInstances )
-        # purgeKnownHosts works well only when known_hosts is not hashed
-        cmd='purgeKnownHosts.py launched.json > /dev/null'
-        try:
-            subprocess.check_call( cmd, shell=True )
-        except Exception as exc:
-            logger.error( 'purgeKnownHosts threw exception (%s) %s',type(exc), exc )
+        if len( launchedInstances ):
+            jobId = launchedInstances[0].get('job')
+            if jobId:
+                logger.info( 'calling terminateJobInstances for job "%s"', jobId )
+                ncs.terminateJobInstances( args.authToken, jobId )
+            else:
+                terminateThese( args.authToken, launchedInstances )
+            # purgeKnownHosts works well only when known_hosts is not hashed
+            cmd='purgeKnownHosts.py launched.json > /dev/null'
+            try:
+                subprocess.check_call( cmd, shell=True )
+            except Exception as exc:
+                logger.error( 'purgeKnownHosts threw exception (%s) %s',type(exc), exc )
 
     logger.info( 'finished')
