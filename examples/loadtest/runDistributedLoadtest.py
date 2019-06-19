@@ -259,6 +259,7 @@ if __name__ == "__main__":
     ap.add_argument( '--usersPerWorker', type=int, default=35, help='# of simulated users per worker' )
     ap.add_argument( '--startTimeLimit', type=int, default=10, help='time to wait for startup of workers (in seconds)' )
     ap.add_argument( '--susTime', type=int, default=10, help='time to sustain the test after startup (in seconds)' )
+    ap.add_argument( '--testId', help='to identify this test' )
     args = ap.parse_args()
 
     dataDirPath = 'data'
