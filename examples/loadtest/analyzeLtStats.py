@@ -9,6 +9,7 @@ import datetime
 import json
 import logging
 #import logging.handlers
+import sys
 # third-party modules
 import dateutil
 import dateutil.parser
@@ -337,7 +338,7 @@ def compileStats( dataDirPath ):
 
     if True:
         envir = jinja2.Environment( 
-                loader = jinja2.FileSystemLoader('.'),
+                loader = jinja2.FileSystemLoader(sys.path),
                 autoescape=jinja2.select_autoescape(['html', 'xml'])
                 )
         template = envir.get_template('ltStats.html.j2')
