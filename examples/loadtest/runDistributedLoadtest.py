@@ -50,7 +50,7 @@ def launchInstances( authToken, nInstances, sshClientKeyName, filtersJson=None )
     try:
         subprocess.check_call( cmd, shell=True, stdout=sys.stderr )
     except subprocess.CalledProcessError as exc: 
-        logger.error( '%s', exc.output )
+        logger.error( 'CalledProcessError %s', exc.output )
         #raise  # TODO raise a more helpful specific type of error
         results['cloudServerErrorCode'] = exc.returncode
         results['instancesAllocated'] = []
@@ -145,9 +145,10 @@ def stopMaster( specs ):
         thread.join()
 
 def conductLoadtest( masterUrl, nWorkersWanted, usersPerWorker,
-    startTimeLimit, susTime, stopWanted, nReqInstances
+    startTimeLimit, susTime, stopWanted, nReqInstances, rampUpRate
     ):
     logger.info( 'locals %s', locals() )
+    hatch_rate = rampUpRate if rampUpRate else nWorkersWanted  # force it non-zero
     if not masterUrl.endswith( '/' ):
         masterUrl = masterUrl + '/'
 
@@ -180,7 +181,7 @@ def conductLoadtest( masterUrl, nWorkersWanted, usersPerWorker,
     if workersFound:
         url = masterUrl+'swarm'
         nUsersWanted = nWorkersWanted * usersPerWorker
-        reqParams = {'locust_count': nUsersWanted,'hatch_rate': nWorkersWanted/1 }
+        reqParams = {'locust_count': nUsersWanted,'hatch_rate': hatch_rate }
         resp = requests.post( url, data=reqParams )
         if (resp.status_code < 200) or (resp.status_code >= 300):
             logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
@@ -255,6 +256,7 @@ if __name__ == "__main__":
     ap.add_argument( '--filter', help='json to filter instances for launch' )
     ap.add_argument('--launch', type=boolArg, default=True, help='to launch and terminate instances' )
     ap.add_argument( '--nWorkers', type=int, default=1, help='the # of worker instances to launch (or zero for all available)' )
+    ap.add_argument( '--rampUpRate', type=float, default=0, help='# of simulated users to start per second (overall)' )
     ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use' )
     ap.add_argument( '--usersPerWorker', type=int, default=35, help='# of simulated users per worker' )
     ap.add_argument( '--startTimeLimit', type=int, default=10, help='time to wait for startup of workers (in seconds)' )
@@ -266,6 +268,10 @@ if __name__ == "__main__":
     launchedJsonFilePath = 'launched.json'
     launchWanted = args.launch
 
+    rampUpRate = args.rampUpRate
+    if not rampUpRate:
+        rampUpRate = args.nWorkers
+
     os.makedirs( dataDirPath, exist_ok=True )
 
     nWorkersWanted = args.nWorkers
@@ -274,6 +280,7 @@ if __name__ == "__main__":
             nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
             logger.info( '%d devices available to launch', nAvail )
             nWorkersWanted = nAvail
+        #TODO handle error from launchInstances
         launchInstances( args.authToken, nWorkersWanted, args.sshClientKeyName, filtersJson=args.filter )
     wellInstalled = installPrereqs()
     logger.info( 'installPrereqs succeeded on %d instances', len( wellInstalled ))
@@ -287,7 +294,7 @@ if __name__ == "__main__":
         
         conductLoadtest( 'http://127.0.0.1:8089', nWorkersWanted, args.usersPerWorker,
             args.startTimeLimit, args.susTime,
-            stopWanted=True, nReqInstances=nWorkersWanted )
+            stopWanted=True, nReqInstances=nWorkersWanted, rampUpRate=rampUpRate )
         
         if masterSpecs:
             time.sleep(5)
