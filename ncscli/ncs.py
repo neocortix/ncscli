@@ -84,6 +84,19 @@ def getAvailableDeviceCount( authToken, filtersJson=None ):
     nAvail = respContent[ 'available' ]
     return nAvail
 
+def uploadSshClientKey( authToken, keyName, keyContents ):
+    headers = ncscReqHeaders( authToken )
+    reqData = {
+        'title': keyName,
+        'key': keyContents
+        }
+    reqDataStr = json.dumps( reqData )
+    url = 'https://cloud.neocortix.com/cloud-api/profile/ssh-keys'
+    logger.info( 'uploading key "%s" %s...', keyName, keyContents[0:16] )
+    print( 'uploading key "%s" %s...', keyName, keyContents[0:16] )
+    resp = requests.post( url, headers=headers, data=reqDataStr )
+    return resp.status_code
+  
 def launchNcscInstances( authToken, numReq=1,
         regions=[], abis=[], sshClientKeyName=None, jsonFilter=None, jobId=None ):
     appVersions = getAppVersions( authToken )
