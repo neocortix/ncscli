@@ -5,9 +5,11 @@ does distributed load testing using Locust on NCS instances
 
 # standard library modules
 import argparse
+import getpass
 import json
 import logging
 import os
+import socket
 import subprocess
 import sys
 import threading
@@ -40,6 +42,12 @@ def boolArg( v ):
         return False
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
+
+def loadSshPubKey():
+    pubKeyFilePath = os.path.expanduser( '~/.ssh/id_rsa.pub' )
+    with open( pubKeyFilePath ) as inFile:
+        contents = inFile.read()
+    return contents
 
 def launchInstances( authToken, nInstances, sshClientKeyName, filtersJson=None ):
     results = {}
@@ -280,8 +288,17 @@ if __name__ == "__main__":
             nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
             logger.info( '%d devices available to launch', nAvail )
             nWorkersWanted = nAvail
+        if args.sshClientKeyName:
+            sshClientKeyName = args.sshClientKeyName
+        else:
+            keyContents = loadSshPubKey()
+            sshClientKeyName = 'loadtest_%s@%s' % (getpass.getuser(), socket.gethostname())
+            respCode = ncs.uploadSshClientKey( args.authToken, sshClientKeyName, keyContents )
+            if respCode < 200 or respCode >= 300:
+                sys.exit( 'could not upload SSH client key')
+
         #TODO handle error from launchInstances
-        launchInstances( args.authToken, nWorkersWanted, args.sshClientKeyName, filtersJson=args.filter )
+        launchInstances( args.authToken, nWorkersWanted, sshClientKeyName, filtersJson=args.filter )
     wellInstalled = installPrereqs()
     logger.info( 'installPrereqs succeeded on %d instances', len( wellInstalled ))
 
