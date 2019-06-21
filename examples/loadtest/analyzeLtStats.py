@@ -79,7 +79,7 @@ def getHostLocationsNcs():
             rec = { 'addr': inst['instanceId'] }
             locInfo = inst['device-location']
             if not locInfo['locality']:
-                print( 'no locality for', inst['instanceId'], locInfo )
+                logger.warning( 'no locality for %s %s', inst['instanceId'], locInfo )
             rec['city'] = locInfo['locality']
             rec['stateCode'] = locInfo['area']
             rec['countryCode'] = locInfo['country-code']
