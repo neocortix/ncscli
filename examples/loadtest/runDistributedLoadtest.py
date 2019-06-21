@@ -254,6 +254,7 @@ if __name__ == "__main__":
     logDateFmt = '%Y/%m/%d %H:%M:%S'
     formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
     logging.basicConfig(format=logFmt, datefmt=logDateFmt)
+    ncs.logger.setLevel(logging.INFO)
     logger.setLevel(logging.INFO)
     logger.debug('the logger is configured')
 
@@ -295,6 +296,7 @@ if __name__ == "__main__":
             sshClientKeyName = 'loadtest_%s@%s' % (getpass.getuser(), socket.gethostname())
             respCode = ncs.uploadSshClientKey( args.authToken, sshClientKeyName, keyContents )
             if respCode < 200 or respCode >= 300:
+                logger.warning( 'ncs.uploadSshClientKey returned %s', respCode )
                 sys.exit( 'could not upload SSH client key')
 
         #TODO handle error from launchInstances
