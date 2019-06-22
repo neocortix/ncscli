@@ -263,10 +263,11 @@ if __name__ == "__main__":
     ap.add_argument( 'masterHost', help='hostname or ip addr of the Locust master' )
     ap.add_argument( '--authToken', required=True, help='the NCS authorization token to use' )
     ap.add_argument( '--filter', help='json to filter instances for launch' )
-    ap.add_argument('--launch', type=boolArg, default=True, help='to launch and terminate instances' )
+    ap.add_argument( '--launch', type=boolArg, default=True, help='to launch and terminate instances' )
     ap.add_argument( '--nWorkers', type=int, default=1, help='the # of worker instances to launch (or zero for all available)' )
     ap.add_argument( '--rampUpRate', type=float, default=0, help='# of simulated users to start per second (overall)' )
     ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use' )
+    ap.add_argument( '--targetUris', nargs='*', help='list of URIs to target' )
     ap.add_argument( '--usersPerWorker', type=int, default=35, help='# of simulated users per worker' )
     ap.add_argument( '--startTimeLimit', type=int, default=10, help='time to wait for startup of workers (in seconds)' )
     ap.add_argument( '--susTime', type=int, default=10, help='time to sustain the test after startup (in seconds)' )
@@ -305,6 +306,11 @@ if __name__ == "__main__":
     logger.info( 'installPrereqs succeeded on %d instances', len( wellInstalled ))
 
     if len( wellInstalled ):
+        if args.targetUris:
+            targetUriFilePath = dataDirPath + '/targetUris.json'
+            with open( targetUriFilePath, 'w' ) as outFile:
+                json.dump( args.targetUris, outFile, indent=1 )
+            #uploadTargetUris( targetUriFilePath )
         startWorkers( args.victimHostUrl, args.masterHost )
         time.sleep(5)
 
