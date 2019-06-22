@@ -34,6 +34,12 @@
         dest: ~/loadtest
         #mode: a+x
 
+    - name: propagate target URIs
+      synchronize:
+        src: "{{ lookup('env', 'PWD') }}/data/targetUris.json"
+        dest: ~/loadtest
+      ignore_errors: yes
+
     - name: start worker
       shell: "(cd ~/loadtest; python3 -u ./runLocust.py --host={{ victimUrl }} --heartbeat-interval=10 --slave --master-host={{ masterHost }} >locustWorker.log 2>&1 &)"
       #command: chdir=~/loadtest ./runLocust.py
