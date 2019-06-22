@@ -153,7 +153,9 @@ def reportCompiledStats( stats ):
 
 
     #print( '\nGlobal Summary' )
-    nReqsSatisfied = int(stats['nr'].sum())
+    nReqs = int(stats['nr'].sum())
+    nReqsSatisfied = nReqs - nFails
+    #nReqsSatisfied = int(stats['nr'].sum())  # probably includes failures now that locust bug is fixed
     resultsSummary['nReqsSatisfied'] = int(nReqsSatisfied)
     print( '# of requests satisfied:', nReqsSatisfied )
     rps = stats['nr'].sum() / durSeconds
