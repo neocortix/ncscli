@@ -93,7 +93,6 @@ def uploadSshClientKey( authToken, keyName, keyContents ):
     reqDataStr = json.dumps( reqData )
     url = 'https://cloud.neocortix.com/cloud-api/profile/ssh-keys'
     logger.info( 'uploading key "%s" %s...', keyName, keyContents[0:16] )
-    print( 'uploading key "%s" %s...', keyName, keyContents[0:16] )
     resp = requests.post( url, headers=headers, data=reqDataStr )
     return resp.status_code
   
