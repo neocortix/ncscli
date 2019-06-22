@@ -19,7 +19,10 @@ if __name__ == "__main__":
     args = ap.parse_args()
     #logger.info( 'args %s', args )
 
-    inRecs = json.load(sys.stdin)
+    try:
+        inRecs = json.load(sys.stdin)
+    except Exception as exc:
+        sys.exit( 'could not decode input as json (%s)' % (exc) )
 
     for inRec in inRecs:
         details = inRec
