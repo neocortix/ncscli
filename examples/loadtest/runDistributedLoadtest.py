@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import socket
+import signal
 import subprocess
 import sys
 import threading
@@ -34,6 +35,22 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+# possible place for globals is this class's attributes
+class g_:
+    signaled = False
+
+class SigTerm(BaseException):
+    pass
+
+def sigtermHandler( sig, frame ):
+    g_.signaled = True
+    logger.warning( 'SIGTERM received; will try to shut down gracefully' )
+    #raise SigTerm()
+
+def sigtermSignaled():
+    return g_.signaled
+
+
 def boolArg( v ):
     '''use with ArgumentParser add_argument for (case-insensitive) boolean arg'''
     if v.lower() == 'true':
@@ -49,7 +66,7 @@ def loadSshPubKey():
         contents = inFile.read()
     return contents
 
-def launchInstances( authToken, nInstances, sshClientKeyName, filtersJson=None ):
+def launchInstances_old( authToken, nInstances, sshClientKeyName, filtersJson=None ):
     results = {}
     # call ncs launch via command-line
     filtersArg = "--filter '" + filtersJson + "'" if filtersJson else " "
@@ -63,6 +80,49 @@ def launchInstances( authToken, nInstances, sshClientKeyName, filtersJson=None )
         results['cloudServerErrorCode'] = exc.returncode
         results['instancesAllocated'] = []
     return results
+
+def launchInstances( authToken, nInstances, sshClientKeyName, filtersJson=None ):
+    returnCode = 13
+    # call ncs launch via command-line
+    #filtersArg = "--filter '" + filtersJson + "'" if filtersJson else " "
+    #cmd = 'ncs.py sc --authToken %s launch --count %d %s --sshClientKeyName %s --json > launched.json' % \
+    #    (authToken, nInstances, filtersArg, sshClientKeyName )
+
+    cmd = [
+        'ncs.py', 'sc', '--authToken', authToken, 'launch',
+        '--count', str(nInstances), # filtersArg,
+        '--sshClientKeyName', sshClientKeyName, '--json'
+    ]
+    if filtersJson:
+        cmd.extend( ['--filter',  filtersJson] )
+    logger.info( 'cmd: %s', cmd )
+    try:
+        outFile = open('launched.json','w' )
+        #proc = subprocess.Popen( cmd, shell=True )
+        proc = subprocess.Popen( cmd, stdout=outFile )
+        while True:
+            #logger.debug( 'polling ncs')
+            proc.poll() # sets proc.returncode
+            if proc.returncode != None:
+                break
+            if sigtermSignaled():
+                logger.info( 'signaling ncs')
+                proc.send_signal( signal.SIGTERM )
+                try:
+                    logger.info( 'waiting ncs')
+                    proc.wait(timeout=60)
+                    if proc.returncode:
+                        logger.warning( 'ncs return code %d', proc.returncode )
+                except subprocess.TimeoutExpired:
+                    logger.warning( 'ncs launch did not terminate in time' )
+            time.sleep( 1 )
+        returnCode = proc.returncode
+        if outFile:
+            outFile.close()
+    except Exception as exc: 
+        logger.error( 'exception while launching instances (%s) %s', type(exc), exc, exc_info=True )
+        returnCode = 99
+    return returnCode
 
 def terminateThese( authToken, inRecs ):
     logger.info( 'to terminate %d instances', len(inRecs) )
@@ -167,7 +227,10 @@ def conductLoadtest( masterUrl, nWorkersWanted, usersPerWorker,
 
     startTime = time.time()
     deadline = startTime + startTimeLimit
+    workersFound = False
     while True:
+        if g_.signaled:
+            break
         try:
             reqUrl = masterUrl+'stats/requests'
             resp = requests.get( reqUrl )
@@ -197,6 +260,8 @@ def conductLoadtest( masterUrl, nWorkersWanted, usersPerWorker,
         logger.info( 'monitoring for %d seconds', susTime )
         deadline = time.time() + susTime
         while time.time() <= deadline:
+            if g_.signaled:
+                break
             try:
                 resp = requests.get( masterUrl+'stats/requests' )
                 respJson = resp.json()
@@ -247,7 +312,6 @@ def conductLoadtest( masterUrl, nWorkersWanted, usersPerWorker,
     '''
 
 
-
 if __name__ == "__main__":
     # configure logger formatting
     logFmt = '%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s'
@@ -274,6 +338,9 @@ if __name__ == "__main__":
     ap.add_argument( '--testId', help='to identify this test' )
     args = ap.parse_args()
 
+    signal.signal( signal.SIGTERM, sigtermHandler )
+
+
     dataDirPath = 'data'
     launchedJsonFilePath = 'launched.json'
     launchWanted = args.launch
@@ -286,57 +353,77 @@ if __name__ == "__main__":
 
     nWorkersWanted = args.nWorkers
     if launchWanted:
-        if nWorkersWanted == 0:
-            nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
-            logger.info( '%d devices available to launch', nAvail )
-            nWorkersWanted = nAvail
-        if args.sshClientKeyName:
-            sshClientKeyName = args.sshClientKeyName
-        else:
-            keyContents = loadSshPubKey()
-            sshClientKeyName = 'loadtest_%s@%s' % (getpass.getuser(), socket.gethostname())
-            respCode = ncs.uploadSshClientKey( args.authToken, sshClientKeyName, keyContents )
-            if respCode < 200 or respCode >= 300:
-                logger.warning( 'ncs.uploadSshClientKey returned %s', respCode )
-                sys.exit( 'could not upload SSH client key')
+        # overwrite the launchedJson file as empty list, so we won't have problems with stale contents
+        with open( launchedJsonFilePath, 'w' ) as outFile:
+            json.dump( [], outFile )
+    try:
+        masterSpecs = None
+        if launchWanted:
+            if nWorkersWanted == 0:
+                nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
+                logger.info( '%d devices available to launch', nAvail )
+                nWorkersWanted = nAvail
+            if args.sshClientKeyName:
+                sshClientKeyName = args.sshClientKeyName
+            else:
+                keyContents = loadSshPubKey()
+                sshClientKeyName = 'loadtest_%s@%s' % (getpass.getuser(), socket.gethostname())
+                respCode = ncs.uploadSshClientKey( args.authToken, sshClientKeyName, keyContents )
+                if respCode < 200 or respCode >= 300:
+                    logger.warning( 'ncs.uploadSshClientKey returned %s', respCode )
+                    sys.exit( 'could not upload SSH client key')
 
-        #TODO handle error from launchInstances
-        launchInstances( args.authToken, nWorkersWanted, sshClientKeyName, filtersJson=args.filter )
-    wellInstalled = installPrereqs()
-    logger.info( 'installPrereqs succeeded on %d instances', len( wellInstalled ))
+            #TODO handle error from launchInstances
+            launchInstances( args.authToken, nWorkersWanted, sshClientKeyName, filtersJson=args.filter )
+        wellInstalled = []
+        if not sigtermSignaled():
+            wellInstalled = installPrereqs()
+            logger.info( 'installPrereqs succeeded on %d instances', len( wellInstalled ))
 
-    if len( wellInstalled ):
-        if args.targetUris:
-            targetUriFilePath = dataDirPath + '/targetUris.json'
-            with open( targetUriFilePath, 'w' ) as outFile:
-                json.dump( args.targetUris, outFile, indent=1 )
-            #uploadTargetUris( targetUriFilePath )
-        startWorkers( args.victimHostUrl, args.masterHost )
-        time.sleep(5)
+        if len( wellInstalled ):
+            if args.targetUris:
+                targetUriFilePath = dataDirPath + '/targetUris.json'
+                with open( targetUriFilePath, 'w' ) as outFile:
+                    json.dump( args.targetUris, outFile, indent=1 )
+                #uploadTargetUris( targetUriFilePath )
+            if not sigtermSignaled():
+                startWorkers( args.victimHostUrl, args.masterHost )
+                time.sleep(5)
 
-        masterSpecs = startMaster( args.victimHostUrl )
-        time.sleep(5)
-        
-        conductLoadtest( 'http://127.0.0.1:8089', nWorkersWanted, args.usersPerWorker,
-            args.startTimeLimit, args.susTime,
-            stopWanted=True, nReqInstances=nWorkersWanted, rampUpRate=rampUpRate )
-        
+                masterSpecs = startMaster( args.victimHostUrl )
+                time.sleep(5)
+            if not sigtermSignaled():
+                conductLoadtest( 'http://127.0.0.1:8089', nWorkersWanted, args.usersPerWorker,
+                    args.startTimeLimit, args.susTime,
+                    stopWanted=True, nReqInstances=nWorkersWanted, rampUpRate=rampUpRate )
+            
+            if masterSpecs:
+                time.sleep(5)
+                stopMaster( masterSpecs )
+
+            killWorkerProcs()
+            try:
+                time.sleep( 5 )
+                loadTestStats = analyzeLtStats.reportStats(dataDirPath)
+            except Exception as exc:
+                logger.warning( 'got exception from analyzeLtStats (%s) %s',
+                    type(exc), exc, exc_info=False )
+
+    except KeyboardInterrupt:
+        logger.warning( '(ctrl-c) received, will shutdown gracefully' )
+    except SigTerm:
+        logger.warning( 'SIGTERM received, will shutdown gracefully' )
         if masterSpecs:
-            time.sleep(5)
+            logger.info( 'shutting down locust master')
             stopMaster( masterSpecs )
-
-        killWorkerProcs()
-        try:
-            time.sleep( 5 )
-            loadTestStats = analyzeLtStats.reportStats(dataDirPath)
-        except Exception as exc:
-            logger.warning( 'got exception from analyzeLtStats (%s) %s',
-                type(exc), exc, exc_info=True )
-
     if launchWanted:
         # get instances from json file, to see which ones to terminate
+        launchedInstances = []
         with open( launchedJsonFilePath, 'r') as jsonInFile:
-            launchedInstances = json.load(jsonInFile)  # an array
+            try:
+                launchedInstances = json.load(jsonInFile)  # an array
+            except Exception as exc:
+                logger.warning( 'could not load json (%s) %s', type(exc), exc )
         if len( launchedInstances ):
             jobId = launchedInstances[0].get('job')
             if jobId:
@@ -352,3 +439,5 @@ if __name__ == "__main__":
                 logger.error( 'purgeKnownHosts threw exception (%s) %s',type(exc), exc )
 
     logger.info( 'finished')
+    sys.exit(0)
+
