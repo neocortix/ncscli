@@ -9,6 +9,7 @@ from concurrent import futures
 import json
 import logging
 import os
+import signal
 import sys
 import random
 import time
@@ -19,6 +20,18 @@ import requests
 
 __version__ = '0.04'
 logger = logging.getLogger(__name__)
+
+
+# possible place for globals is this class's attributes
+class g_:
+    signaled = False
+
+def sigtermHandler( sig, frame ):
+    g_.signaled = True
+    logger.warning( 'SIGTERM received; will try to shut down gracefully' )
+
+def sigtermSignaled():
+    return g_.signaled
 
 
 def ncscReqHeaders( authToken ):
@@ -351,6 +364,9 @@ def doCmdLaunch( args ):
             if time.time() > deadline:
                 logger.warning( 'took too long for some instances to start' )
                 break
+            if sigtermSignaled():
+                logger.warning( 'incomplete launch due to sigterm' )
+                break
             time.sleep( 5 )
     except KeyboardInterrupt:
         logger.info( 'caught SIGINT (ctrl-c), skipping ahead' )
@@ -391,6 +407,8 @@ def doCmdLaunch( args ):
             print( json.dumps( outRec ) )
         else:
             print( "%s,%s,%s" % (iid, iState, details['job']) )
+        if g_.signaled:
+            break
     if args.json:
         print( ']')
     logger.info( 'finished')
@@ -557,9 +575,11 @@ if __name__ == "__main__":
     ap.add_argument( '--authToken', type=str, default=None,
         help='the NCS authorization token to use' )
     args = ap.parse_args()
-
     #logger.info( 'args %s', args ) # be careful not to leak authToken
     
+    logger.info( 'setting SIGTERM handler' )
+    signal.signal( signal.SIGTERM, sigtermHandler )
+
     if args.authToken == None:
         tok = os.getenv( 'NCS_AUTH_TOKEN' )
         if tok:
