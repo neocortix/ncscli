@@ -291,7 +291,6 @@ def compileStats( dataDirPath ):
     # to disable geo-grouping (thus enabling IP-grouping)
     #g_stats['locKey'] = g_stats.workerIP
 
-
     outDf = pd.DataFrame()
     if 'locKey' in g_stats:
         # do per-region summary
@@ -331,7 +330,11 @@ def compileStats( dataDirPath ):
 
     perWorker = outDf.reset_index( drop=True )
     perWorker = perWorker.drop( ['devices', 'rps'], 1 )
-    
+
+    print( 'per-country worker counts', file=sys.stderr )
+    countryCodes = perWorker['locKey'].str.slice(0, 2)
+    print( countryCodes.value_counts(), file=sys.stderr )
+
     worstCases = g_stats[ (g_stats.msprMax > 15000) | (g_stats.mspr > 3000) | (g_stats.msprMed > 3000)  ]
 
     regionTable = perRegion.to_html( index=False, classes=['sortable'], justify='left', float_format=lambda x: '%.1f' % x )
