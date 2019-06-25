@@ -95,7 +95,7 @@ def launchInstances( authToken, nInstances, sshClientKeyName, filtersJson=None )
     ]
     if filtersJson:
         cmd.extend( ['--filter',  filtersJson] )
-    logger.info( 'cmd: %s', cmd )
+    #logger.debug( 'cmd: %s', cmd )
     try:
         outFile = open('launched.json','w' )
         #proc = subprocess.Popen( cmd, shell=True )
@@ -340,6 +340,7 @@ if __name__ == "__main__":
 
     signal.signal( signal.SIGTERM, sigtermHandler )
 
+    #logger.info( '--filter arg <%s>', args.filter )
 
     dataDirPath = 'data'
     launchedJsonFilePath = 'launched.json'
