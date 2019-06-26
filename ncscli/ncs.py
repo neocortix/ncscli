@@ -162,6 +162,8 @@ def launchNcscInstances( authToken, numReq=1,
         logger.info( 'job request returned (%s) %s', resp.status_code, resp.text )
     queryNeeded = resp.status_code == 200
     logger.info( 'resp.status_code %d; queryNeeded %s ', resp.status_code, queryNeeded )
+    timeLimit = 600 # seconds
+    deadline = time.time() + timeLimit
     while queryNeeded:
         jobId = resp.json()['id']
         try:
@@ -182,8 +184,18 @@ def launchNcscInstances( authToken, numReq=1,
                 queryNeeded = resp2['content']['launching']
                 if not queryNeeded:
                     return resp2['content']['instances']
-                logger.info( 'waiting for server (%d instances allocated)',
-                    len(resp2['content']['instances']) )
+                nAllocated = len(resp2['content']['instances'])
+                logger.info( "resp2['content']['launching']: %s", resp2['content']['launching'] )
+                if sigtermSignaled() and nAllocated == 0:
+                    logger.info( 'breaking wait-allocate loop because sigterm and no instances' )
+                    return {'serverError': 404, 'reqId': jobId}
+                if time.time() >= deadline:
+                    logger.info( 'breaking wait-allocate loop because of time limit' )
+                    if nAllocated > 0:
+                        return resp2['content']['instances']
+                    else:
+                        return {'serverError': 404, 'reqId': jobId}
+                logger.info( 'waiting for server (%d instances allocated)', nAllocated )
                 time.sleep( 5 )
     return resp.json()
 
@@ -301,6 +313,8 @@ def doCmdLaunch( args ):
             jobId=args.jobId )
         if 'serverError' in infos:
             logger.error( 'got serverError %d', infos['serverError'])
+            if args.json:
+                print( '[]')
             return infos['serverError']
     except Exception as exc:
         logger.error( 'exception launching instances (%s) "%s"',
