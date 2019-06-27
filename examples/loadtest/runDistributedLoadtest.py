@@ -60,11 +60,18 @@ def boolArg( v ):
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
+def scriptDirPath():
+    '''returns the absolute path to the directory containing this script'''
+    return os.path.dirname(os.path.realpath(__file__))
+
 def loadSshPubKey():
     pubKeyFilePath = os.path.expanduser( '~/.ssh/id_rsa.pub' )
     with open( pubKeyFilePath ) as inFile:
         contents = inFile.read()
     return contents
+
+def pick3PortNumbers():
+    return [5560, 5561, 8090]
 
 def launchInstances_old( authToken, nInstances, sshClientKeyName, filtersJson=None ):
     results = {}
@@ -140,10 +147,11 @@ def jsonToInv():
 def installPrereqs():
     invFilePath = 'launched.inv'
     tempFilePath = 'data/installPrereqsDeb.temp'
+    scriptDirPath = os.path.dirname(os.path.realpath(__file__))
     jsonToInv()
     logger.info( 'calling installPrereqsQuicker.yml' )
-    cmd = 'ANSIBLE_HOST_KEY_CHECKING=False ANSIBLE_DISPLAY_FAILED_STDERR=yes ansible-playbook installPrereqsQuicker.yml -i %s | tee data/installPrereqsDeb.temp; wc installed.inv' \
-        % invFilePath
+    cmd = 'ANSIBLE_HOST_KEY_CHECKING=False ANSIBLE_DISPLAY_FAILED_STDERR=yes ansible-playbook %s/installPrereqsQuicker.yml -i %s | tee data/installPrereqsDeb.temp; wc installed.inv' \
+        % (scriptDirPath, invFilePath)
     try:
         exitCode = subprocess.call( cmd, shell=True, stdout=subprocess.DEVNULL )
         if exitCode:
@@ -156,9 +164,9 @@ def installPrereqs():
     sys.stderr.flush()
     return wellInstalled
 
-def startWorkers( victimUrl, masterHost ):
-    cmd = 'ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook startWorkers.yml -e "victimUrl=%s masterHost=%s" -i installed.inv |tee data/startWorkers.out' \
-        % (victimUrl, masterHost)
+def startWorkers( victimUrl, masterHost, dataPorts ):
+    cmd = 'ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook %s/startWorkers.yml -e "victimUrl=%s masterHost=%s masterPort=%s" -i installed.inv |tee data/startWorkers.out' \
+        % (scriptDirPath(), victimUrl, masterHost, dataPorts[0])
     try:
         subprocess.check_call( cmd, shell=True, stdout=subprocess.DEVNULL )
     except subprocess.CalledProcessError as exc: 
@@ -166,7 +174,8 @@ def startWorkers( victimUrl, masterHost ):
 
 def killWorkerProcs():
     logger.info( 'calling killWorkerProcs.yml' )
-    cmd = 'ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook killWorkerProcs.yml -i installed.inv'
+    cmd = 'ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook %s/killWorkerProcs.yml -i installed.inv' \
+        % (scriptDirPath())
     try:
         subprocess.check_call( cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
     except subprocess.CalledProcessError as exc: 
@@ -177,12 +186,13 @@ def output_reader(proc):
     for line in iter(proc.stdout.readline, b''):
         print('subprocess: {0}'.format(line.decode('utf-8')), end='', file=sys.stderr)
 
-def startMaster( victimHostUrl ):
+def startMaster( victimHostUrl, dataPorts, webPort ):
     logger.info( 'calling runLocust.py' )
     result = {}
     cmd = [
-        'python3', '-u', 'runLocust.py', '--host='+victimHostUrl, 
+        'python3', '-u', scriptDirPath()+'/runLocust.py', '--host='+victimHostUrl, 
         '--heartbeat-liveness=30',
+        '--master-bind-port', str(dataPorts[0]), '--web-port', str(webPort),
         '--master', '--loglevel', 'INFO', '-f', 'master_locust.py'
     ]
     try:
@@ -350,6 +360,10 @@ if __name__ == "__main__":
     if not rampUpRate:
         rampUpRate = args.nWorkers
 
+    portNumbers = pick3PortNumbers()
+    dataPorts = portNumbers[0:3]
+    webPort = portNumbers[2]
+
     os.makedirs( dataDirPath, exist_ok=True )
 
     nWorkersWanted = args.nWorkers
@@ -375,7 +389,9 @@ if __name__ == "__main__":
                     sys.exit( 'could not upload SSH client key')
 
             #TODO handle error from launchInstances
-            launchInstances( args.authToken, nWorkersWanted, sshClientKeyName, filtersJson=args.filter )
+            rc = launchInstances( args.authToken, nWorkersWanted, sshClientKeyName, filtersJson=args.filter )
+            if rc:
+                logger.debug( 'launchInstances returned %d', rc )
         wellInstalled = []
         if not sigtermSignaled():
             wellInstalled = installPrereqs()
@@ -388,13 +404,14 @@ if __name__ == "__main__":
                     json.dump( args.targetUris, outFile, indent=1 )
                 #uploadTargetUris( targetUriFilePath )
             if not sigtermSignaled():
-                startWorkers( args.victimHostUrl, args.masterHost )
+                startWorkers( args.victimHostUrl, args.masterHost, dataPorts )
                 time.sleep(5)
 
-                masterSpecs = startMaster( args.victimHostUrl )
+                masterSpecs = startMaster( args.victimHostUrl, dataPorts, webPort )
                 time.sleep(5)
             if not sigtermSignaled():
-                conductLoadtest( 'http://127.0.0.1:8089', nWorkersWanted, args.usersPerWorker,
+                masterUrl = 'http://127.0.0.1:%d' % webPort
+                conductLoadtest( masterUrl, nWorkersWanted, args.usersPerWorker,
                     args.startTimeLimit, args.susTime,
                     stopWanted=True, nReqInstances=nWorkersWanted, rampUpRate=rampUpRate )
             
