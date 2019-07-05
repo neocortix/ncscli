@@ -5,6 +5,7 @@ does distributed load testing using Locust on NCS instances
 
 # standard library modules
 import argparse
+import contextlib
 import getpass
 import json
 import logging
@@ -70,8 +71,52 @@ def loadSshPubKey():
         contents = inFile.read()
     return contents
 
-def pick3PortNumbers():
-    return [5560, 5561, 8090]
+# some port-reservation code adapted from https://github.com/Yelp/ephemeral-port-reserve
+
+def preopen(ip, port):
+    ''' open socket with SO_REUSEADDR and listen on it'''
+    port = int(port)
+    s = socket.socket()
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    logger.info( 'binding ip %s port %d', ip, port )
+    s.bind((ip, port))
+
+    # the connect below deadlocks on kernel >= 4.4.0 unless this arg is greater than zero
+    s.listen(1)
+    return s
+
+def preclose(s):
+    sockname = s.getsockname()
+    # get the port into a TIME_WAIT state
+    with contextlib.closing(socket.socket()) as s2:
+        s2.connect(sockname)
+        s.accept()
+    s.close()
+    # return sockname[1]
+
+def preopenPorts( startPort, maxPort, nPorts ):
+    sockets = []
+    gotPorts = False
+    while not gotPorts:
+        try:
+            for port in range( startPort, startPort+nPorts ):
+                logger.info( 'preopening port %d', port )
+                sock = preopen( '127.0.0.1', port )
+                sockets.append( sock )
+            gotPorts = True
+        except OSError as exc:
+            logger.warning( 'got exception (%s) %s', type(exc), exc, exc_info=False )
+            startPort += nPorts
+            sockets = []
+            if startPort >= maxPort:
+                break
+    results = {}
+    if not gotPorts:
+        logger.error( 'search for available ports exceeded maxPort (%d)', maxPort )
+        return results
+    results['ports'] = list( range( startPort, startPort+nPorts ) )
+    results['sockets'] = sockets
+    return results
 
 def launchInstances_old( authToken, nInstances, sshClientKeyName, filtersJson=None ):
     results = {}
@@ -201,8 +246,9 @@ def startMaster( victimHostUrl, dataPorts, webPort ):
         t = threading.Thread(target=output_reader, args=(proc,))
         result['thread'] = t
         t.start()
-    except subprocess.CalledProcessError as exc: 
-        logger.error( '%s', exc.output )
+    except subprocess.CalledProcessError as exc:
+        # this section never runs because Popen does not raise this exception
+        logger.error( 'return code: %d %s', exc.returncode,  exc.output )
         raise  # TODO raise a more helpful specific type of error
     finally:
         return result
@@ -263,6 +309,7 @@ def conductLoadtest( masterUrl, nWorkersWanted, usersPerWorker,
         url = masterUrl+'swarm'
         nUsersWanted = nWorkersWanted * usersPerWorker
         reqParams = {'locust_count': nUsersWanted,'hatch_rate': hatch_rate }
+        logger.info( 'swarming, count: %d, rate %.1f', nUsersWanted, hatch_rate )
         resp = requests.post( url, data=reqParams )
         if (resp.status_code < 200) or (resp.status_code >= 300):
             logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
@@ -341,9 +388,10 @@ if __name__ == "__main__":
     ap.add_argument( '--nWorkers', type=int, default=1, help='the # of worker instances to launch (or zero for all available)' )
     ap.add_argument( '--rampUpRate', type=float, default=0, help='# of simulated users to start per second (overall)' )
     ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use' )
+    ap.add_argument( '--startPort', type=int, default=30000, help='a starting port number to listen on' )
     ap.add_argument( '--targetUris', nargs='*', help='list of URIs to target' )
     ap.add_argument( '--usersPerWorker', type=int, default=35, help='# of simulated users per worker' )
-    ap.add_argument( '--startTimeLimit', type=int, default=10, help='time to wait for startup of workers (in seconds)' )
+    ap.add_argument( '--startTimeLimit', type=int, default=30, help='time to wait for startup of workers (in seconds)' )
     ap.add_argument( '--susTime', type=int, default=10, help='time to sustain the test after startup (in seconds)' )
     ap.add_argument( '--testId', help='to identify this test' )
     args = ap.parse_args()
@@ -359,10 +407,6 @@ if __name__ == "__main__":
     rampUpRate = args.rampUpRate
     if not rampUpRate:
         rampUpRate = args.nWorkers
-
-    portNumbers = pick3PortNumbers()
-    dataPorts = portNumbers[0:3]
-    webPort = portNumbers[2]
 
     os.makedirs( dataDirPath, exist_ok=True )
 
@@ -403,29 +447,70 @@ if __name__ == "__main__":
                 with open( targetUriFilePath, 'w' ) as outFile:
                     json.dump( args.targetUris, outFile, indent=1 )
                 #uploadTargetUris( targetUriFilePath )
+            masterStarted = False
+            masterFailed = False
             if not sigtermSignaled():
-                startWorkers( args.victimHostUrl, args.masterHost, dataPorts )
-                time.sleep(5)
+                startPort = args.startPort
+                maxPort=args.startPort+300
+                while (not masterStarted) and (not masterFailed):
+                    if startPort >= maxPort:
+                        logger.warning( 'startPort (%d) exceeding maxPort (%d)',
+                            startPort, maxPort )
+                        break
+                    preopened = preopenPorts( startPort, maxPort, nPorts=3 )
+                    reservedPorts = preopened['ports']
+                    sockets = preopened['sockets']
+                    dataPorts = reservedPorts[0:2]
+                    webPort = reservedPorts[2]
 
-                masterSpecs = startMaster( args.victimHostUrl, dataPorts, webPort )
-                time.sleep(5)
-            if not sigtermSignaled():
+                    for sock in sockets:
+                        preclose( sock )
+                    sockets = []
+
+                    masterSpecs = startMaster( args.victimHostUrl, dataPorts, webPort )
+                    if masterSpecs:
+                        proc = masterSpecs['proc']
+                        deadline = time.time() + 30
+                        while time.time() < deadline:
+                            proc.poll() # sets proc.returncode
+                            if proc.returncode != None:
+                                logger.warning( 'master gave returnCode %d', proc.returncode )
+                                if proc.returncode == 98:
+                                    logger.info( 'locust tried to bind to a busy port')
+                                    # continue outer loop with higher port numbers
+                                    startPort += 3
+                                else:
+                                    logger.error( 'locust gave an unexpected returnCode %d', proc.returncode )
+                                    # will break out of the outer loop
+                                    masterFailed = True
+                                break
+                            time.sleep(.5)
+                        if proc.returncode == None:
+                            masterStarted = True
+            workersStarted = False
+            if masterStarted and not sigtermSignaled():
+                logger.info( 'calling startWorkers' )
+                startWorkers( args.victimHostUrl, args.masterHost, dataPorts )
+                workersStarted = True
+            if masterStarted and not sigtermSignaled():
+                #time.sleep(5)
                 masterUrl = 'http://127.0.0.1:%d' % webPort
                 conductLoadtest( masterUrl, nWorkersWanted, args.usersPerWorker,
                     args.startTimeLimit, args.susTime,
                     stopWanted=True, nReqInstances=nWorkersWanted, rampUpRate=rampUpRate )
             
-            if masterSpecs:
+            if masterStarted and masterSpecs:
                 time.sleep(5)
                 stopMaster( masterSpecs )
-
-            killWorkerProcs()
-            try:
-                time.sleep( 5 )
-                loadTestStats = analyzeLtStats.reportStats(dataDirPath)
-            except Exception as exc:
-                logger.warning( 'got exception from analyzeLtStats (%s) %s',
-                    type(exc), exc, exc_info=False )
+            if workersStarted:
+                killWorkerProcs()
+            if masterStarted:
+                try:
+                    time.sleep( 5 )
+                    loadTestStats = analyzeLtStats.reportStats(dataDirPath)
+                except Exception as exc:
+                    logger.warning( 'got exception from analyzeLtStats (%s) %s',
+                        type(exc), exc, exc_info=False )
 
     except KeyboardInterrupt:
         logger.warning( '(ctrl-c) received, will shutdown gracefully' )
