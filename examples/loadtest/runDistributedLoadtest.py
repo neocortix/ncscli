@@ -78,7 +78,7 @@ def preopen(ip, port):
     port = int(port)
     s = socket.socket()
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    logger.info( 'binding ip %s port %d', ip, port )
+    #logger.info( 'binding ip %s port %d', ip, port )
     s.bind((ip, port))
 
     # the connect below deadlocks on kernel >= 4.4.0 unless this arg is greater than zero

@@ -105,7 +105,7 @@ def uploadSshClientKey( authToken, keyName, keyContents ):
         }
     reqDataStr = json.dumps( reqData )
     url = 'https://cloud.neocortix.com/cloud-api/profile/ssh-keys'
-    logger.info( 'uploading key "%s" %s...', keyName, keyContents[0:16] )
+    logger.debug( 'uploading key "%s" %s...', keyName, keyContents[0:16] )
     resp = requests.post( url, headers=headers, data=reqDataStr )
     return resp.status_code
   
@@ -149,7 +149,7 @@ def launchNcscInstances( authToken, numReq=1,
                 reqData.update( filters )
     reqDataStr = json.dumps( reqData )
 
-    logger.info( 'reqData: %s', reqDataStr )
+    logger.debug( 'reqData: %s', reqDataStr )
     url = 'https://cloud.neocortix.com/cloud-api/sc/jobs'
     #logger.info( 'posting with auth %s', authToken )
     resp = requests.post( url, headers=headers, data=reqDataStr )
@@ -591,7 +591,7 @@ if __name__ == "__main__":
     args = ap.parse_args()
     #logger.info( 'args %s', args ) # be careful not to leak authToken
     
-    logger.info( 'setting SIGTERM handler' )
+    logger.debug( 'setting SIGTERM handler' )
     signal.signal( signal.SIGTERM, sigtermHandler )
 
     if args.authToken == None:
