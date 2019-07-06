@@ -58,7 +58,7 @@ if False:  # '--master' in sys.argv:
         os.remove( dataFilePath )
     #locust.stats.openStatsOutFile( dataFilePath )
 
-if True:
+if '--master' not in sys.argv:
     readInstanceIdFile( os.path.expanduser( '~/instanceId.txt' ) )
     #readIpAddrFile( os.path.expanduser( '~/ipAddr.txt' ) )
     locust.events.report_to_master += onReportToMaster
