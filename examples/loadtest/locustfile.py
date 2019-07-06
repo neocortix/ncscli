@@ -8,7 +8,7 @@ def login(l):
     l.client.post("/login", {"username":"ellen_key", "password":"education"})
 
 def index(l):
-    l.client.get("/")
+    l.client.get("")
 
 def index_orig(l):
     l.client.get("/index_orig.html")
