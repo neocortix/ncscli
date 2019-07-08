@@ -57,7 +57,7 @@ def queryNcsSc( urlTail, authToken, reqParams=None, maxRetries=1 ):
     if (resp.status_code < 200) or (resp.status_code >= 300):
         logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
         logger.info( 'error url "%s"', url )
-        if True:  # resp.status_code in [500, 502, 504]:
+        if resp.status_code not in [401, 403]:  # resp.status_code in [500, 502, 504]:
             if maxRetries > 0:
                 time.sleep( 10 )
                 return queryNcsSc( urlTail, authToken, reqParams, maxRetries-1 )
@@ -94,7 +94,7 @@ def getAvailableDeviceCount( authToken, filtersJson=None ):
         _updateFromJson( reqParams, filtersJson )
     response = queryNcsSc( 'instances', authToken, reqParams )
     respContent = response['content']
-    nAvail = respContent[ 'available' ]
+    nAvail = respContent.get('available', 0)
     return nAvail
 
 def uploadSshClientKey( authToken, keyName, keyContents ):
