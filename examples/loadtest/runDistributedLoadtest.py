@@ -410,6 +410,18 @@ if __name__ == "__main__":
 
     os.makedirs( dataDirPath, exist_ok=True )
 
+    # check whether the victimHost is available
+    try:
+        resp = requests.head( args.victimHostUrl )
+        if (resp.status_code < 200) or (resp.status_code >= 400):
+            logger.error( 'got response %d from target host %s',
+                resp.status_code, args.victimHostUrl )
+            sys.exit(1)
+    except Exception as exc:
+        logger.warning( 'could not access target host %s',args.victimHostUrl )
+        logger.error( 'got exception %s', exc )
+        sys.exit(1)
+
     nWorkersWanted = args.nWorkers
     if launchWanted:
         # overwrite the launchedJson file as empty list, so we won't have problems with stale contents
@@ -418,8 +430,11 @@ if __name__ == "__main__":
     try:
         masterSpecs = None
         if launchWanted:
+            nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
+            if nWorkersWanted > (nAvail + 5):
+                logger.error( 'not enough devices available (%d requested)', nWorkersWanted )
+                sys.exit(1)
             if nWorkersWanted == 0:
-                nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
                 logger.info( '%d devices available to launch', nAvail )
                 nWorkersWanted = nAvail
             if args.sshClientKeyName:
