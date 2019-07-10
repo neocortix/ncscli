@@ -105,8 +105,10 @@ def uploadSshClientKey( authToken, keyName, keyContents ):
         }
     reqDataStr = json.dumps( reqData )
     url = 'https://cloud.neocortix.com/cloud-api/profile/ssh-keys'
-    logger.debug( 'uploading key "%s" %s...', keyName, keyContents[0:16] )
+    logger.info( 'uploading key "%s" %s...', keyName, keyContents[0:16] )
     resp = requests.post( url, headers=headers, data=reqDataStr )
+    if (resp.status_code < 200) or (resp.status_code >= 300):
+        logger.warning( 'response code %s', resp.status_code )
     return resp.status_code
 
 def deleteSshClientKey( authToken, keyName, maxRetries=1 ):
