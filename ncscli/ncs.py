@@ -108,7 +108,25 @@ def uploadSshClientKey( authToken, keyName, keyContents ):
     logger.debug( 'uploading key "%s" %s...', keyName, keyContents[0:16] )
     resp = requests.post( url, headers=headers, data=reqDataStr )
     return resp.status_code
-  
+
+def deleteSshClientKey( authToken, keyName, maxRetries=1 ):
+    headers = ncscReqHeaders( authToken )
+    reqData = {
+        'title': keyName,
+        }
+    reqDataStr = json.dumps( reqData )
+    url = 'https://cloud.neocortix.com/cloud-api/profile/ssh-keys/'
+    logger.debug( 'deleting SshClientKey %s', keyName )
+    resp = requests.delete( url, headers=headers, data=reqDataStr )
+    if (resp.status_code < 200) or (resp.status_code >= 300):
+        logger.warn( 'response code %s', resp.status_code )
+        if len( resp.text ):
+            logger.info( 'response "%s"', resp.text )
+        if (maxRetries > 0) and (resp.status_code == 502):  # "bad gateway"
+            time.sleep( 10 )
+            return deleteSshClientKey( authToken, keyName, maxRetries-1 )
+    return resp.status_code
+
 def launchNcscInstances( authToken, numReq=1,
         regions=[], abis=[], sshClientKeyName=None, jsonFilter=None, jobId=None ):
     appVersions = getAppVersions( authToken )
