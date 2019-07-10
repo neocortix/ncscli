@@ -444,6 +444,7 @@ if __name__ == "__main__":
                 keyContents = loadSshPubKey()
                 #sshClientKeyName = 'loadtest_%s@%s' % (getpass.getuser(), socket.gethostname())
                 randomPart = str( uuid.uuid4() )[0:13]
+                keyContents += ' #' + randomPart
                 sshClientKeyName = 'loadtest_%s' % (randomPart)
                 respCode = ncs.uploadSshClientKey( args.authToken, sshClientKeyName, keyContents )
                 if respCode < 200 or respCode >= 300:
