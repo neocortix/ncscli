@@ -68,8 +68,8 @@ def on_slave_report(client_id, data):
         return  # NO FURTHER PROCESSING of reports from zombies
 
     if len( data['stats']):
-        if len(data['stats']) != 1:
-            console_logger.info( '%d stats objects' % len(data['stats']) )
+        #if len(data['stats']) != 1:
+        #    console_logger.info( '%d stats objects' % len(data['stats']) )
         stats = data['stats_total']
         rpss = data['stats_total']['num_reqs_per_sec']
         #rpss = data['stats'][0]['num_reqs_per_sec']

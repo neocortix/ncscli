@@ -5,13 +5,18 @@ does distributed load testing using Locust on NCS instances
 
 # standard library modules
 import argparse
+import contextlib
+import getpass
 import json
 import logging
 import os
+import socket
+import signal
 import subprocess
 import sys
 import threading
 import time
+import uuid
 
 # third-party module(s)
 import requests
@@ -32,6 +37,22 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+# possible place for globals is this class's attributes
+class g_:
+    signaled = False
+
+class SigTerm(BaseException):
+    pass
+
+def sigtermHandler( sig, frame ):
+    g_.signaled = True
+    logger.warning( 'SIGTERM received; will try to shut down gracefully' )
+    #raise SigTerm()
+
+def sigtermSignaled():
+    return g_.signaled
+
+
 def boolArg( v ):
     '''use with ArgumentParser add_argument for (case-insensitive) boolean arg'''
     if v.lower() == 'true':
@@ -41,7 +62,64 @@ def boolArg( v ):
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
-def launchInstances( authToken, nInstances, sshClientKeyName, filtersJson=None ):
+def scriptDirPath():
+    '''returns the absolute path to the directory containing this script'''
+    return os.path.dirname(os.path.realpath(__file__))
+
+def loadSshPubKey():
+    pubKeyFilePath = os.path.expanduser( '~/.ssh/id_rsa.pub' )
+    with open( pubKeyFilePath ) as inFile:
+        contents = inFile.read()
+    return contents
+
+# some port-reservation code adapted from https://github.com/Yelp/ephemeral-port-reserve
+
+def preopen(ip, port):
+    ''' open socket with SO_REUSEADDR and listen on it'''
+    port = int(port)
+    s = socket.socket()
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    #logger.info( 'binding ip %s port %d', ip, port )
+    s.bind((ip, port))
+
+    # the connect below deadlocks on kernel >= 4.4.0 unless this arg is greater than zero
+    s.listen(1)
+    return s
+
+def preclose(s):
+    sockname = s.getsockname()
+    # get the port into a TIME_WAIT state
+    with contextlib.closing(socket.socket()) as s2:
+        s2.connect(sockname)
+        s.accept()
+    s.close()
+    # return sockname[1]
+
+def preopenPorts( startPort, maxPort, nPorts ):
+    sockets = []
+    gotPorts = False
+    while not gotPorts:
+        try:
+            for port in range( startPort, startPort+nPorts ):
+                logger.info( 'preopening port %d', port )
+                sock = preopen( '127.0.0.1', port )
+                sockets.append( sock )
+            gotPorts = True
+        except OSError as exc:
+            logger.warning( 'got exception (%s) %s', type(exc), exc, exc_info=False )
+            startPort += nPorts
+            sockets = []
+            if startPort >= maxPort:
+                break
+    results = {}
+    if not gotPorts:
+        logger.error( 'search for available ports exceeded maxPort (%d)', maxPort )
+        return results
+    results['ports'] = list( range( startPort, startPort+nPorts ) )
+    results['sockets'] = sockets
+    return results
+
+def launchInstances_old( authToken, nInstances, sshClientKeyName, filtersJson=None ):
     results = {}
     # call ncs launch via command-line
     filtersArg = "--filter '" + filtersJson + "'" if filtersJson else " "
@@ -50,11 +128,54 @@ def launchInstances( authToken, nInstances, sshClientKeyName, filtersJson=None )
     try:
         subprocess.check_call( cmd, shell=True, stdout=sys.stderr )
     except subprocess.CalledProcessError as exc: 
-        logger.error( '%s', exc.output )
+        logger.error( 'CalledProcessError %s', exc.output )
         #raise  # TODO raise a more helpful specific type of error
         results['cloudServerErrorCode'] = exc.returncode
         results['instancesAllocated'] = []
     return results
+
+def launchInstances( authToken, nInstances, sshClientKeyName, filtersJson=None ):
+    returnCode = 13
+    # call ncs launch via command-line
+    #filtersArg = "--filter '" + filtersJson + "'" if filtersJson else " "
+    #cmd = 'ncs.py sc --authToken %s launch --count %d %s --sshClientKeyName %s --json > launched.json' % \
+    #    (authToken, nInstances, filtersArg, sshClientKeyName )
+
+    cmd = [
+        'ncs.py', 'sc', '--authToken', authToken, 'launch',
+        '--count', str(nInstances), # filtersArg,
+        '--sshClientKeyName', sshClientKeyName, '--json'
+    ]
+    if filtersJson:
+        cmd.extend( ['--filter',  filtersJson] )
+    #logger.debug( 'cmd: %s', cmd )
+    try:
+        outFile = open('launched.json','w' )
+        #proc = subprocess.Popen( cmd, shell=True )
+        proc = subprocess.Popen( cmd, stdout=outFile )
+        while True:
+            #logger.debug( 'polling ncs')
+            proc.poll() # sets proc.returncode
+            if proc.returncode != None:
+                break
+            if sigtermSignaled():
+                logger.info( 'signaling ncs')
+                proc.send_signal( signal.SIGTERM )
+                try:
+                    logger.info( 'waiting ncs')
+                    proc.wait(timeout=60)
+                    if proc.returncode:
+                        logger.warning( 'ncs return code %d', proc.returncode )
+                except subprocess.TimeoutExpired:
+                    logger.warning( 'ncs launch did not terminate in time' )
+            time.sleep( 1 )
+        returnCode = proc.returncode
+        if outFile:
+            outFile.close()
+    except Exception as exc: 
+        logger.error( 'exception while launching instances (%s) %s', type(exc), exc, exc_info=True )
+        returnCode = 99
+    return returnCode
 
 def terminateThese( authToken, inRecs ):
     logger.info( 'to terminate %d instances', len(inRecs) )
@@ -72,10 +193,11 @@ def jsonToInv():
 def installPrereqs():
     invFilePath = 'launched.inv'
     tempFilePath = 'data/installPrereqsDeb.temp'
+    scriptDirPath = os.path.dirname(os.path.realpath(__file__))
     jsonToInv()
     logger.info( 'calling installPrereqsQuicker.yml' )
-    cmd = 'ANSIBLE_HOST_KEY_CHECKING=False ANSIBLE_DISPLAY_FAILED_STDERR=yes ansible-playbook installPrereqsQuicker.yml -i %s | tee data/installPrereqsDeb.temp; wc installed.inv' \
-        % invFilePath
+    cmd = 'ANSIBLE_HOST_KEY_CHECKING=False ANSIBLE_DISPLAY_FAILED_STDERR=yes ansible-playbook %s/installPrereqsQuicker.yml -i %s | tee data/installPrereqsDeb.temp; wc installed.inv' \
+        % (scriptDirPath, invFilePath)
     try:
         exitCode = subprocess.call( cmd, shell=True, stdout=subprocess.DEVNULL )
         if exitCode:
@@ -88,9 +210,9 @@ def installPrereqs():
     sys.stderr.flush()
     return wellInstalled
 
-def startWorkers( victimUrl, masterHost ):
-    cmd = 'ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook startWorkers.yml -e "victimUrl=%s masterHost=%s" -i installed.inv |tee data/startWorkers.out' \
-        % (victimUrl, masterHost)
+def startWorkers( victimUrl, masterHost, dataPorts ):
+    cmd = 'ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook %s/startWorkers.yml -e "victimUrl=%s masterHost=%s masterPort=%s" -i installed.inv |tee data/startWorkers.out' \
+        % (scriptDirPath(), victimUrl, masterHost, dataPorts[0])
     try:
         subprocess.check_call( cmd, shell=True, stdout=subprocess.DEVNULL )
     except subprocess.CalledProcessError as exc: 
@@ -98,7 +220,8 @@ def startWorkers( victimUrl, masterHost ):
 
 def killWorkerProcs():
     logger.info( 'calling killWorkerProcs.yml' )
-    cmd = 'ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook killWorkerProcs.yml -i installed.inv'
+    cmd = 'ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook %s/killWorkerProcs.yml -i installed.inv' \
+        % (scriptDirPath())
     try:
         subprocess.check_call( cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
     except subprocess.CalledProcessError as exc: 
@@ -109,12 +232,13 @@ def output_reader(proc):
     for line in iter(proc.stdout.readline, b''):
         print('subprocess: {0}'.format(line.decode('utf-8')), end='', file=sys.stderr)
 
-def startMaster( victimHostUrl ):
+def startMaster( victimHostUrl, dataPorts, webPort ):
     logger.info( 'calling runLocust.py' )
     result = {}
     cmd = [
-        'python3', '-u', 'runLocust.py', '--host='+victimHostUrl, 
+        'python3', '-u', scriptDirPath()+'/runLocust.py', '--host='+victimHostUrl, 
         '--heartbeat-liveness=30',
+        '--master-bind-port', str(dataPorts[0]), '--web-port', str(webPort),
         '--master', '--loglevel', 'INFO', '-f', 'master_locust.py'
     ]
     try:
@@ -123,8 +247,9 @@ def startMaster( victimHostUrl ):
         t = threading.Thread(target=output_reader, args=(proc,))
         result['thread'] = t
         t.start()
-    except subprocess.CalledProcessError as exc: 
-        logger.error( '%s', exc.output )
+    except subprocess.CalledProcessError as exc:
+        # this section never runs because Popen does not raise this exception
+        logger.error( 'return code: %d %s', exc.returncode,  exc.output )
         raise  # TODO raise a more helpful specific type of error
     finally:
         return result
@@ -145,9 +270,10 @@ def stopMaster( specs ):
         thread.join()
 
 def conductLoadtest( masterUrl, nWorkersWanted, usersPerWorker,
-    startTimeLimit, susTime, stopWanted, nReqInstances
+    startTimeLimit, susTime, stopWanted, nReqInstances, rampUpRate
     ):
     logger.info( 'locals %s', locals() )
+    hatch_rate = rampUpRate if rampUpRate else nWorkersWanted  # force it non-zero
     if not masterUrl.endswith( '/' ):
         masterUrl = masterUrl + '/'
 
@@ -158,7 +284,10 @@ def conductLoadtest( masterUrl, nWorkersWanted, usersPerWorker,
 
     startTime = time.time()
     deadline = startTime + startTimeLimit
+    workersFound = False
     while True:
+        if g_.signaled:
+            break
         try:
             reqUrl = masterUrl+'stats/requests'
             resp = requests.get( reqUrl )
@@ -180,7 +309,8 @@ def conductLoadtest( masterUrl, nWorkersWanted, usersPerWorker,
     if workersFound:
         url = masterUrl+'swarm'
         nUsersWanted = nWorkersWanted * usersPerWorker
-        reqParams = {'locust_count': nUsersWanted,'hatch_rate': nWorkersWanted/1 }
+        reqParams = {'locust_count': nUsersWanted,'hatch_rate': hatch_rate }
+        logger.info( 'swarming, count: %d, rate %.1f', nUsersWanted, hatch_rate )
         resp = requests.post( url, data=reqParams )
         if (resp.status_code < 200) or (resp.status_code >= 300):
             logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
@@ -188,6 +318,8 @@ def conductLoadtest( masterUrl, nWorkersWanted, usersPerWorker,
         logger.info( 'monitoring for %d seconds', susTime )
         deadline = time.time() + susTime
         while time.time() <= deadline:
+            if g_.signaled:
+                break
             try:
                 resp = requests.get( masterUrl+'stats/requests' )
                 respJson = resp.json()
@@ -238,13 +370,13 @@ def conductLoadtest( masterUrl, nWorkersWanted, usersPerWorker,
     '''
 
 
-
 if __name__ == "__main__":
     # configure logger formatting
     logFmt = '%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s'
     logDateFmt = '%Y/%m/%d %H:%M:%S'
     formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
     logging.basicConfig(format=logFmt, datefmt=logDateFmt)
+    ncs.logger.setLevel(logging.INFO)
     logger.setLevel(logging.INFO)
     logger.debug('the logger is configured')
 
@@ -253,58 +385,171 @@ if __name__ == "__main__":
     ap.add_argument( 'masterHost', help='hostname or ip addr of the Locust master' )
     ap.add_argument( '--authToken', required=True, help='the NCS authorization token to use' )
     ap.add_argument( '--filter', help='json to filter instances for launch' )
-    ap.add_argument('--launch', type=boolArg, default=True, help='to launch and terminate instances' )
+    ap.add_argument( '--launch', type=boolArg, default=True, help='to launch and terminate instances' )
     ap.add_argument( '--nWorkers', type=int, default=1, help='the # of worker instances to launch (or zero for all available)' )
-    ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use' )
+    ap.add_argument( '--rampUpRate', type=float, default=0, help='# of simulated users to start per second (overall)' )
+    ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use (default is random)' )
+    ap.add_argument( '--startPort', type=int, default=30000, help='a starting port number to listen on' )
+    ap.add_argument( '--targetUris', nargs='*', help='list of URIs to target' )
     ap.add_argument( '--usersPerWorker', type=int, default=35, help='# of simulated users per worker' )
-    ap.add_argument( '--startTimeLimit', type=int, default=10, help='time to wait for startup of workers (in seconds)' )
+    ap.add_argument( '--startTimeLimit', type=int, default=30, help='time to wait for startup of workers (in seconds)' )
     ap.add_argument( '--susTime', type=int, default=10, help='time to sustain the test after startup (in seconds)' )
     ap.add_argument( '--testId', help='to identify this test' )
     args = ap.parse_args()
+
+    signal.signal( signal.SIGTERM, sigtermHandler )
+
+    #logger.info( '--filter arg <%s>', args.filter )
 
     dataDirPath = 'data'
     launchedJsonFilePath = 'launched.json'
     launchWanted = args.launch
 
+    rampUpRate = args.rampUpRate
+    if not rampUpRate:
+        rampUpRate = args.nWorkers
+
     os.makedirs( dataDirPath, exist_ok=True )
+
+    # check whether the victimHost is available
+    try:
+        resp = requests.head( args.victimHostUrl )
+        if (resp.status_code < 200) or (resp.status_code >= 400):
+            logger.error( 'got response %d from target host %s',
+                resp.status_code, args.victimHostUrl )
+            sys.exit(1)
+    except Exception as exc:
+        logger.warning( 'could not access target host %s',args.victimHostUrl )
+        logger.error( 'got exception %s', exc )
+        sys.exit(1)
 
     nWorkersWanted = args.nWorkers
     if launchWanted:
-        if nWorkersWanted == 0:
+        # overwrite the launchedJson file as empty list, so we won't have problems with stale contents
+        with open( launchedJsonFilePath, 'w' ) as outFile:
+            json.dump( [], outFile )
+    try:
+        masterSpecs = None
+        if launchWanted:
             nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
-            logger.info( '%d devices available to launch', nAvail )
-            nWorkersWanted = nAvail
-        launchInstances( args.authToken, nWorkersWanted, args.sshClientKeyName, filtersJson=args.filter )
-    wellInstalled = installPrereqs()
-    logger.info( 'installPrereqs succeeded on %d instances', len( wellInstalled ))
+            if nWorkersWanted > (nAvail + 5):
+                logger.error( 'not enough devices available (%d requested)', nWorkersWanted )
+                sys.exit(1)
+            if nWorkersWanted == 0:
+                logger.info( '%d devices available to launch', nAvail )
+                nWorkersWanted = nAvail
+            if args.sshClientKeyName:
+                sshClientKeyName = args.sshClientKeyName
+            else:
+                keyContents = loadSshPubKey()
+                #sshClientKeyName = 'loadtest_%s@%s' % (getpass.getuser(), socket.gethostname())
+                randomPart = str( uuid.uuid4() )[0:13]
+                keyContents += ' #' + randomPart
+                sshClientKeyName = 'loadtest_%s' % (randomPart)
+                respCode = ncs.uploadSshClientKey( args.authToken, sshClientKeyName, keyContents )
+                if respCode < 200 or respCode >= 300:
+                    logger.warning( 'ncs.uploadSshClientKey returned %s', respCode )
+                    sys.exit( 'could not upload SSH client key')
 
-    if len( wellInstalled ):
-        startWorkers( args.victimHostUrl, args.masterHost )
-        time.sleep(5)
+            #TODO handle error from launchInstances
+            rc = launchInstances( args.authToken, nWorkersWanted, sshClientKeyName, filtersJson=args.filter )
+            if rc:
+                logger.debug( 'launchInstances returned %d', rc )
+            # delete sshClientKey only if we just uploaded it
+            if sshClientKeyName != args.sshClientKeyName:
+                logger.info( 'deleting sshClientKey %s', sshClientKeyName)
+                ncs.deleteSshClientKey( args.authToken, sshClientKeyName )
+        wellInstalled = []
+        if not sigtermSignaled():
+            wellInstalled = installPrereqs()
+            logger.info( 'installPrereqs succeeded on %d instances', len( wellInstalled ))
 
-        masterSpecs = startMaster( args.victimHostUrl )
-        time.sleep(5)
-        
-        conductLoadtest( 'http://127.0.0.1:8089', nWorkersWanted, args.usersPerWorker,
-            args.startTimeLimit, args.susTime,
-            stopWanted=True, nReqInstances=nWorkersWanted )
-        
+        if len( wellInstalled ):
+            if args.targetUris:
+                targetUriFilePath = dataDirPath + '/targetUris.json'
+                with open( targetUriFilePath, 'w' ) as outFile:
+                    json.dump( args.targetUris, outFile, indent=1 )
+                #uploadTargetUris( targetUriFilePath )
+            masterStarted = False
+            masterFailed = False
+            if not sigtermSignaled():
+                startPort = args.startPort
+                maxPort=args.startPort+300
+                while (not masterStarted) and (not masterFailed):
+                    if startPort >= maxPort:
+                        logger.warning( 'startPort (%d) exceeding maxPort (%d)',
+                            startPort, maxPort )
+                        break
+                    preopened = preopenPorts( startPort, maxPort, nPorts=3 )
+                    reservedPorts = preopened['ports']
+                    sockets = preopened['sockets']
+                    dataPorts = reservedPorts[0:2]
+                    webPort = reservedPorts[2]
+
+                    for sock in sockets:
+                        preclose( sock )
+                    sockets = []
+
+                    masterSpecs = startMaster( args.victimHostUrl, dataPorts, webPort )
+                    if masterSpecs:
+                        proc = masterSpecs['proc']
+                        deadline = time.time() + 30
+                        while time.time() < deadline:
+                            proc.poll() # sets proc.returncode
+                            if proc.returncode != None:
+                                logger.warning( 'master gave returnCode %d', proc.returncode )
+                                if proc.returncode == 98:
+                                    logger.info( 'locust tried to bind to a busy port')
+                                    # continue outer loop with higher port numbers
+                                    startPort += 3
+                                else:
+                                    logger.error( 'locust gave an unexpected returnCode %d', proc.returncode )
+                                    # will break out of the outer loop
+                                    masterFailed = True
+                                break
+                            time.sleep(.5)
+                        if proc.returncode == None:
+                            masterStarted = True
+            workersStarted = False
+            if masterStarted and not sigtermSignaled():
+                logger.info( 'calling startWorkers' )
+                startWorkers( args.victimHostUrl, args.masterHost, dataPorts )
+                workersStarted = True
+            if masterStarted and not sigtermSignaled():
+                #time.sleep(5)
+                masterUrl = 'http://127.0.0.1:%d' % webPort
+                conductLoadtest( masterUrl, nWorkersWanted, args.usersPerWorker,
+                    args.startTimeLimit, args.susTime,
+                    stopWanted=True, nReqInstances=nWorkersWanted, rampUpRate=rampUpRate )
+            
+            if masterStarted and masterSpecs:
+                time.sleep(5)
+                stopMaster( masterSpecs )
+            if workersStarted:
+                killWorkerProcs()
+            if masterStarted:
+                try:
+                    time.sleep( 5 )
+                    loadTestStats = analyzeLtStats.reportStats(dataDirPath)
+                except Exception as exc:
+                    logger.warning( 'got exception from analyzeLtStats (%s) %s',
+                        type(exc), exc, exc_info=False )
+
+    except KeyboardInterrupt:
+        logger.warning( '(ctrl-c) received, will shutdown gracefully' )
+    except SigTerm:
+        logger.warning( 'SIGTERM received, will shutdown gracefully' )
         if masterSpecs:
-            time.sleep(5)
+            logger.info( 'shutting down locust master')
             stopMaster( masterSpecs )
-
-        killWorkerProcs()
-        try:
-            time.sleep( 5 )
-            loadTestStats = analyzeLtStats.reportStats(dataDirPath)
-        except Exception as exc:
-            logger.warning( 'got exception from analyzeLtStats (%s) %s',
-                type(exc), exc, exc_info=True )
-
     if launchWanted:
         # get instances from json file, to see which ones to terminate
+        launchedInstances = []
         with open( launchedJsonFilePath, 'r') as jsonInFile:
-            launchedInstances = json.load(jsonInFile)  # an array
+            try:
+                launchedInstances = json.load(jsonInFile)  # an array
+            except Exception as exc:
+                logger.warning( 'could not load json (%s) %s', type(exc), exc )
         if len( launchedInstances ):
             jobId = launchedInstances[0].get('job')
             if jobId:
@@ -320,3 +565,5 @@ if __name__ == "__main__":
                 logger.error( 'purgeKnownHosts threw exception (%s) %s',type(exc), exc )
 
     logger.info( 'finished')
+    sys.exit(0)
+

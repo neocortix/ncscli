@@ -3,6 +3,7 @@
 - hosts: all
   gather_facts: False
   remote_user: root
+  #strategy: free
 
   tasks:
 
@@ -20,7 +21,7 @@
     #poll: 30
 
   - name: which rsync
-    shell: "which rsync"
+    raw: "which rsync"
     changed_when: False
     #ignore_errors: yes
 

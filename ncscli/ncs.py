@@ -9,6 +9,7 @@ from concurrent import futures
 import json
 import logging
 import os
+import signal
 import sys
 import random
 import time
@@ -19,6 +20,18 @@ import requests
 
 __version__ = '0.04'
 logger = logging.getLogger(__name__)
+
+
+# possible place for globals is this class's attributes
+class g_:
+    signaled = False
+
+def sigtermHandler( sig, frame ):
+    g_.signaled = True
+    logger.warning( 'SIGTERM received; will try to shut down gracefully' )
+
+def sigtermSignaled():
+    return g_.signaled
 
 
 def ncscReqHeaders( authToken ):
@@ -44,7 +57,7 @@ def queryNcsSc( urlTail, authToken, reqParams=None, maxRetries=1 ):
     if (resp.status_code < 200) or (resp.status_code >= 300):
         logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
         logger.info( 'error url "%s"', url )
-        if True:  # resp.status_code in [500, 502, 504]:
+        if resp.status_code not in [401, 403]:  # resp.status_code in [500, 502, 504]:
             if maxRetries > 0:
                 time.sleep( 10 )
                 return queryNcsSc( urlTail, authToken, reqParams, maxRetries-1 )
@@ -81,8 +94,40 @@ def getAvailableDeviceCount( authToken, filtersJson=None ):
         _updateFromJson( reqParams, filtersJson )
     response = queryNcsSc( 'instances', authToken, reqParams )
     respContent = response['content']
-    nAvail = respContent[ 'available' ]
+    nAvail = respContent.get('available', 0)
     return nAvail
+
+def uploadSshClientKey( authToken, keyName, keyContents ):
+    headers = ncscReqHeaders( authToken )
+    reqData = {
+        'title': keyName,
+        'key': keyContents
+        }
+    reqDataStr = json.dumps( reqData )
+    url = 'https://cloud.neocortix.com/cloud-api/profile/ssh-keys'
+    logger.info( 'uploading key "%s" %s...', keyName, keyContents[0:16] )
+    resp = requests.post( url, headers=headers, data=reqDataStr )
+    if (resp.status_code < 200) or (resp.status_code >= 300):
+        logger.warning( 'response code %s', resp.status_code )
+    return resp.status_code
+
+def deleteSshClientKey( authToken, keyName, maxRetries=1 ):
+    headers = ncscReqHeaders( authToken )
+    reqData = {
+        'title': keyName,
+        }
+    reqDataStr = json.dumps( reqData )
+    url = 'https://cloud.neocortix.com/cloud-api/profile/ssh-keys/'
+    logger.debug( 'deleting SshClientKey %s', keyName )
+    resp = requests.delete( url, headers=headers, data=reqDataStr )
+    if (resp.status_code < 200) or (resp.status_code >= 300):
+        logger.warn( 'response code %s', resp.status_code )
+        if len( resp.text ):
+            logger.info( 'response "%s"', resp.text )
+        if (maxRetries > 0) and (resp.status_code == 502):  # "bad gateway"
+            time.sleep( 10 )
+            return deleteSshClientKey( authToken, keyName, maxRetries-1 )
+    return resp.status_code
 
 def launchNcscInstances( authToken, numReq=1,
         regions=[], abis=[], sshClientKeyName=None, jsonFilter=None, jobId=None ):
@@ -124,7 +169,7 @@ def launchNcscInstances( authToken, numReq=1,
                 reqData.update( filters )
     reqDataStr = json.dumps( reqData )
 
-    logger.info( 'reqData: %s', reqDataStr )
+    logger.debug( 'reqData: %s', reqDataStr )
     url = 'https://cloud.neocortix.com/cloud-api/sc/jobs'
     #logger.info( 'posting with auth %s', authToken )
     resp = requests.post( url, headers=headers, data=reqDataStr )
@@ -137,6 +182,8 @@ def launchNcscInstances( authToken, numReq=1,
         logger.info( 'job request returned (%s) %s', resp.status_code, resp.text )
     queryNeeded = resp.status_code == 200
     logger.info( 'resp.status_code %d; queryNeeded %s ', resp.status_code, queryNeeded )
+    timeLimit = 600 # seconds
+    deadline = time.time() + timeLimit
     while queryNeeded:
         jobId = resp.json()['id']
         try:
@@ -157,8 +204,18 @@ def launchNcscInstances( authToken, numReq=1,
                 queryNeeded = resp2['content']['launching']
                 if not queryNeeded:
                     return resp2['content']['instances']
-                logger.info( 'waiting for server (%d instances allocated)',
-                    len(resp2['content']['instances']) )
+                nAllocated = len(resp2['content']['instances'])
+                logger.info( "resp2['content']['launching']: %s", resp2['content']['launching'] )
+                if sigtermSignaled() and nAllocated == 0:
+                    logger.info( 'breaking wait-allocate loop because sigterm and no instances' )
+                    return {'serverError': 404, 'reqId': jobId}
+                if time.time() >= deadline:
+                    logger.info( 'breaking wait-allocate loop because of time limit' )
+                    if nAllocated > 0:
+                        return resp2['content']['instances']
+                    else:
+                        return {'serverError': 404, 'reqId': jobId}
+                logger.info( 'waiting for server (%d instances allocated)', nAllocated )
                 time.sleep( 5 )
     return resp.json()
 
@@ -276,6 +333,8 @@ def doCmdLaunch( args ):
             jobId=args.jobId )
         if 'serverError' in infos:
             logger.error( 'got serverError %d', infos['serverError'])
+            if args.json:
+                print( '[]')
             return infos['serverError']
     except Exception as exc:
         logger.error( 'exception launching instances (%s) "%s"',
@@ -339,6 +398,9 @@ def doCmdLaunch( args ):
             if time.time() > deadline:
                 logger.warning( 'took too long for some instances to start' )
                 break
+            if sigtermSignaled():
+                logger.warning( 'incomplete launch due to sigterm' )
+                break
             time.sleep( 5 )
     except KeyboardInterrupt:
         logger.info( 'caught SIGINT (ctrl-c), skipping ahead' )
@@ -379,6 +441,8 @@ def doCmdLaunch( args ):
             print( json.dumps( outRec ) )
         else:
             print( "%s,%s,%s" % (iid, iState, details['job']) )
+        if g_.signaled:
+            break
     if args.json:
         print( ']')
     logger.info( 'finished')
@@ -545,9 +609,11 @@ if __name__ == "__main__":
     ap.add_argument( '--authToken', type=str, default=None,
         help='the NCS authorization token to use' )
     args = ap.parse_args()
-
     #logger.info( 'args %s', args ) # be careful not to leak authToken
     
+    logger.debug( 'setting SIGTERM handler' )
+    signal.signal( signal.SIGTERM, sigtermHandler )
+
     if args.authToken == None:
         tok = os.getenv( 'NCS_AUTH_TOKEN' )
         if tok:

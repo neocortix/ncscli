@@ -5,6 +5,8 @@
 import os
 import sys
 
+import zmq
+
 with open( 'runLocust.log', 'w') as outFile:
     print( 'running locust', file=outFile )
 
@@ -56,12 +58,20 @@ if False:  # '--master' in sys.argv:
         os.remove( dataFilePath )
     #locust.stats.openStatsOutFile( dataFilePath )
 
-if True:
+if '--master' not in sys.argv:
     readInstanceIdFile( os.path.expanduser( '~/instanceId.txt' ) )
     #readIpAddrFile( os.path.expanduser( '~/ipAddr.txt' ) )
     locust.events.report_to_master += onReportToMaster
 
-retCode =  main()
+try:
+    retCode =  main()
+except zmq.error.ZMQError as exc:
+    print( 'ZMQError exception, errno %d' % (exc.errno), file=sys.stderr )
+    sys.exit( exc.errno )
+except Exception as exc:
+    print( 'runLocust got exception from main() (%s) %s' % (type(exc), exc),
+        file=sys.stderr  )
+    sys.exit( 124 )  # arbitrary value, but distinct from more common errors
 print( 'runLocust exiting' )
 sys.stderr.flush()
 sys.stdout.flush()

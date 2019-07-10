@@ -5,6 +5,7 @@
   vars:
     victimUrl: http://35.163.117.219
     masterHost: 52.88.159.7
+    masterPort: 5557
   tasks:
     - name: sync locust code
       synchronize: 
@@ -34,8 +35,14 @@
         dest: ~/loadtest
         #mode: a+x
 
+    - name: propagate target URIs
+      synchronize:
+        src: "{{ lookup('env', 'PWD') }}/data/targetUris.json"
+        dest: ~/loadtest
+      ignore_errors: yes
+
     - name: start worker
-      shell: "(cd ~/loadtest; python3 -u ./runLocust.py --host={{ victimUrl }} --heartbeat-interval=10 --slave --master-host={{ masterHost }} >locustWorker.log 2>&1 &)"
+      shell: "(cd ~/loadtest; python3 -u ./runLocust.py --host={{ victimUrl }} --heartbeat-interval=10 --slave --master-host={{ masterHost }} --master-port={{ masterPort }} >locustWorker.log 2>&1 &)"
       #command: chdir=~/loadtest ./runLocust.py
       #command: chdir=~/loadtest ./startWorker.sh
       async: 45
