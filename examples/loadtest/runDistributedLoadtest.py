@@ -16,6 +16,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 
 # third-party module(s)
 import requests
@@ -387,7 +388,7 @@ if __name__ == "__main__":
     ap.add_argument( '--launch', type=boolArg, default=True, help='to launch and terminate instances' )
     ap.add_argument( '--nWorkers', type=int, default=1, help='the # of worker instances to launch (or zero for all available)' )
     ap.add_argument( '--rampUpRate', type=float, default=0, help='# of simulated users to start per second (overall)' )
-    ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use' )
+    ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use (default is random)' )
     ap.add_argument( '--startPort', type=int, default=30000, help='a starting port number to listen on' )
     ap.add_argument( '--targetUris', nargs='*', help='list of URIs to target' )
     ap.add_argument( '--usersPerWorker', type=int, default=35, help='# of simulated users per worker' )
@@ -441,7 +442,9 @@ if __name__ == "__main__":
                 sshClientKeyName = args.sshClientKeyName
             else:
                 keyContents = loadSshPubKey()
-                sshClientKeyName = 'loadtest_%s@%s' % (getpass.getuser(), socket.gethostname())
+                #sshClientKeyName = 'loadtest_%s@%s' % (getpass.getuser(), socket.gethostname())
+                randomPart = str( uuid.uuid4() )[0:13]
+                sshClientKeyName = 'loadtest_%s' % (randomPart)
                 respCode = ncs.uploadSshClientKey( args.authToken, sshClientKeyName, keyContents )
                 if respCode < 200 or respCode >= 300:
                     logger.warning( 'ncs.uploadSshClientKey returned %s', respCode )
@@ -451,6 +454,10 @@ if __name__ == "__main__":
             rc = launchInstances( args.authToken, nWorkersWanted, sshClientKeyName, filtersJson=args.filter )
             if rc:
                 logger.debug( 'launchInstances returned %d', rc )
+            # delete sshClientKey only if we just uploaded it
+            if sshClientKeyName != args.sshClientKeyName:
+                logger.info( 'deleting sshClientKey %s', sshClientKeyName)
+                ncs.deleteSshClientKey( args.authToken, sshClientKeyName )
         wellInstalled = []
         if not sigtermSignaled():
             wellInstalled = installPrereqs()
