@@ -3,24 +3,22 @@
 
 # standard library modules
 import argparse
-import asyncio
-import asyncio.subprocess
 import collections
 import datetime
 import getpass
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
 import time
 
 # third-party modules
-#import asyncssh
+import pandas as pd
 
 # neocortix modules
-import asyncRsync
 import tellInstances
 
 logger = logging.getLogger(__name__)
@@ -96,12 +94,176 @@ def demuxResults( inFilePath ):
             if 'returncode' in decoded:
                 rc = decoded['returncode']
                 if rc:
-                    logger.info( 'returncode %d for %s', rc, iid )
+                    #logger.info( 'returncode %d for %s', rc, iid )
                     badOnes.add( iid )
             if 'exception' in decoded:
-                logger.info( 'exception %s for %s', decoded['exception'], iid )
+                #logger.info( 'exception %s for %s', decoded['exception'], iid )
                 badOnes.add( iid )
     return byInstance
+
+def parseResults( byInstance, fullDetails=True, outFile=sys.stderr ):
+    outcomes = {}
+    for iid, data in sorted(byInstance.items()):
+        if iid == '<master>':
+            continue
+        outcome = {'stderr': []}
+        outcomes[ iid ] = outcome
+        for entry in data:
+            if 'exception' in entry:                   
+                outcome['exception'] = entry['exception']
+            elif 'operation' in entry:
+                pass
+            elif 'returncode' in entry:
+                outcome['returncode'] = entry['returncode']
+            elif 'stderr' in entry:
+                if 'ttyname' not in entry['stderr']:
+                    outcome['stderr'].append( entry['stderr'] )
+            elif 'stdout' in entry:
+                #print( entry['dateTime'], iid[0:16], 'stdout', entry['stdout'], file=outFile )
+                if 'packets transmitted, ' in entry['stdout']:
+                    pat = r'(.*) packets transmitted, (.*) received, .* packet loss, time (.*)ms'
+                    match = re.search( pat, entry['stdout'] )
+                    if match:
+                        nTrans = int( match.group(1) )
+                        outcome['nTrans'] = nTrans
+                        nRec = int( match.group(2) )
+                        outcome['nRec'] = nRec
+                        elapsedMs = int( match.group(3) )
+                        outcome['elapsedMs'] = elapsedMs
+                    else:
+                        logger.warning( 'no regex match on "packets transmitted" line')
+                elif 'rtt min/avg/max/mdev' in entry['stdout']:
+                    pat = r'rtt min/avg/max/mdev = (.*)/(.*)/(.*)/(.*) ms'
+                    match = re.search( pat, entry['stdout'] )
+                    if match:
+                        try:
+                            rttMinMs = float( match.group(1) )
+                            outcome['rttMinMs'] = rttMinMs
+                            rttAvgMs = float( match.group(2) )
+                            outcome['rttAvgMs'] = rttAvgMs
+                            rttMaxMs = float( match.group(3) )
+                            outcome['rttMaxMs'] = rttMaxMs
+                            rttMdevMs = float( match.group(4) )
+                            outcome['rttMdevMs'] = rttMdevMs
+                        except Exception:
+                            logger.warning( 'could not parse %s', entry['stdout'] )
+                    else:
+                        logger.warning( 'no regex match on "rtt min/avg/max/mdev" line')
+                elif 'bytes from' in entry['stdout']:
+                    pat = r'\[(.*)\] ([0-9]*) bytes from .* icmp_seq=(.*) ttl=(.*) time=(.*) ms'
+                    match = re.search( pat, entry['stdout'] )
+                    if match:
+                        rec = {}
+                        timeStamp = match.group(1)
+                        rec['timeStamp'] = timeStamp
+                        rxBytes = int( match.group(2) )
+                        rec['rxBytes'] = rxBytes
+                        seq = int( match.group(3) )
+                        rec['seq'] = seq
+                        ttl = int( match.group(4) )
+                        rec['ttl'] = ttl
+                        rttMs = float( match.group(5) )
+                        rec['rttMs'] = rttMs
+                        pings = outcome.get('pings', [] )
+                        pings.append( rec )
+                        outcome['pings'] = pings
+                    else:
+                        logger.warning( 'no regex match on "icmp_seq" line')
+                #else:
+                #    logger.info( 'other stdout: %s', entry['stdout'] )
+            else:
+                print( entry['dateTime'], iid[0:16], 'UNRECOGNIZED', entry, file=outFile )
+    return outcomes
+
+def reportSummaryWithLocs( outcomes, instances, outFile ):
+    instancesByIid = {}
+    for inst in loadedInstances:
+        iid = inst['instanceId']
+        instancesByIid[iid] = inst
+
+    for iid, data in sorted(outcomes.items()):
+        loc = instancesByIid[iid]['device-location']
+        if not data.get('nRec', 0):
+            logger.info( 'ANOMALY %s', data )
+            continue
+        rttAvgMs = data.get('rttAvgMs', 0)
+        if not rttAvgMs:
+            logger.info( 'no rttAvgMs in %s', data )
+            continue
+        if (rttAvgMs < 0) or (rttAvgMs >= 1000000):
+            logger.info( 'bad rttAvgMs in %s', data )
+            continue
+        print( iid[0:16],
+            loc['country-code'], loc['area'], loc['latitude'], loc['longitude'],
+            data['nRec'], rttAvgMs,
+            file=outFile )
+
+def getRegionSummaries( outcomes, instances ):
+    instancesByIid = {}
+    for inst in loadedInstances:
+        iid = inst['instanceId']
+        instancesByIid[iid] = inst
+
+    recs = []
+
+    for iid, data in sorted(outcomes.items()):
+        loc = instancesByIid[iid]['device-location']
+        if not data.get('nRec', 0):
+            continue
+        rttAvgMs = data.get('rttAvgMs', 0)
+        if not rttAvgMs:
+            continue
+        if (rttAvgMs < 0) or (rttAvgMs >= 1000000):
+            continue
+        if not loc.get('country-code'):
+            continue
+        rec = {'iid': iid,
+            'country-code': loc['country-code'],
+            'state': loc['area'],
+            'locKey': loc['country-code'] + '.' + (loc.get('area') or 'unknown'),
+            'lat': loc['latitude'], 
+            'lon': loc['longitude'],
+            'nRec': data['nRec'], 
+            'rttAvgMs': rttAvgMs
+        }
+        recs.append( rec )
+    #logger.info( 'recs %s', recs )
+    perInst = pd.DataFrame( recs )
+    locKeys = perInst['locKey'].unique()
+    logger.info( 'found %d locKeys for %d instances', len(locKeys), len(outcomes) )
+    logger.info( 'locKeys %s', sorted(locKeys) )
+
+    perRegion = pd.DataFrame()
+    for locKey in locKeys:
+        #print( '\nRegion: ', locKey )
+        subset = perInst[ perInst.locKey == locKey ]
+        summary = { 'locKey': locKey,
+            'devices': len(subset),
+            'lat': subset.lat.mean(),
+            'lon': subset.lon.mean(),
+            'nRec': subset.nRec.sum(),
+            #'rttAvgMs': subset.rttAvgMs.mean()  # FIX THIS MATH
+            'rttAvgMs': (subset.rttAvgMs * subset.nRec).sum() / subset.nRec.sum()
+        }
+        perRegion = perRegion.append( [summary] )
+    logger.info( 'perRegion %s', perRegion )
+
+    return perRegion
+
+def exportLocDataJs( placeInfo, outFilePath ):
+    # convert lat/lon values into list of coordinate pairs
+    pairList = []
+    for index, row in placeInfo.iterrows():
+        #print( row.latitude, row.longitude )
+        pairList.append( [ row.lat, row.lon ])
+    # jsonize
+    pairListJs = json.dumps( pairList ) 
+    rttJs = json.dumps( list( placeInfo.rttAvgMs) ) 
+    
+    with open( outFilePath, 'w') as outFile:
+        print( 'var hitCount1 = %d;\n' % (placeInfo.nRec.sum()), file=outFile )
+        print( 'var locations = \n%s;\n' % (pairListJs), file=outFile )
+        print( 'var rtts = \n%s;\n' % (rttJs), file=outFile )
 
 def reportResults( byInstance, fullDetails, outFile ):
     logger.info( '%d instance keys', len(byInstance) )
@@ -142,10 +304,7 @@ if __name__ == "__main__":
     logging.basicConfig(format='%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s', datefmt='%Y/%m/%d %H:%M:%S')
     logger.setLevel(logging.DEBUG)
     logger.debug('the logger is configured')
-    asyncRsync.logger.setLevel(logging.INFO)
     tellInstances.logger.setLevel(logging.INFO)
-    #asyncssh.set_log_level( logging.WARNING )
-    #logging.getLogger("asyncio").setLevel(logging.DEBUG)
 
     dataDirPath = 'data'
 
@@ -177,15 +336,16 @@ if __name__ == "__main__":
     loadedInstances = None
     with open( instanceJsonFilePath, 'r' ) as jsonFile:
         loadedInstances = json.load(jsonFile)  # a list of dicts
+    startedInstances = [inst for inst in loadedInstances if inst['state'] == 'started' ]
 
     fieldsWanted = ['instanceId', 'state', 'ssh', 'device-location']
     strippedInstances = []
-    for inst in loadedInstances:
+    for inst in startedInstances:
         stripped = { key: inst[key] for key in fieldsWanted }
         strippedInstances.append( stripped )
 
-    startedInstances = [inst for inst in strippedInstances if inst['state'] == 'started' ]
-    goodInstances = startedInstances
+    #startedInstances = [inst for inst in strippedInstances if inst['state'] == 'started' ]
+    goodInstances = strippedInstances
 
     starterTiming.finish()
     eventTimings.append(starterTiming)
@@ -193,8 +353,10 @@ if __name__ == "__main__":
     allBad = []
 
 
-    pingCmd = 'ping %s -D -c %s -w %f -i %f' \
+    pingCmd = 'ping %s -U -D -c %s -w %f -i %f' \
         % (args.targetHost, args.nPings, args.timeLimit,  args.interval )
+    # could use -s for different payload size
+    # could use -t (ttl) to limit nHops
     if not args.fullDetails:
         pingCmd += ' -q'
     # tell them to ping
@@ -209,7 +371,6 @@ if __name__ == "__main__":
     eventTimings.append(stepTiming)
     (goodOnes, badOnes) = triage( stepStatuses )
     allBad.extend( badOnes )
-    #logger.info( 'asyncRsync statuses %s', stepStatuses )
     logger.info( 'ping %d good', len(goodOnes) )
     logger.info( 'ping bad %s', badOnes )
 
@@ -223,7 +384,16 @@ if __name__ == "__main__":
 
 
     resultsByInstance = demuxResults( resultsLogFilePath )
+    outcomes = parseResults( resultsByInstance )
+
+    perRegion = getRegionSummaries( outcomes, startedInstances )
+    perRegion.to_csv( dataDirPath+'/regionSummaries.csv', index=False)
+    exportLocDataJs( perRegion, dataDirPath+'/locations.js')
+
     reportResults( resultsByInstance, args.fullDetails, sys.stdout )
+    reportSummaryWithLocs( outcomes, startedInstances, sys.stderr )
+    #print( 'outcomes', file=sys.stdout )
+    #json.dump( outcomes, sys.stdout, indent=2 )
 
     elapsed = time.time() - startTime
     logger.info( 'finished; elapsed time %.1f seconds (%.1f minutes)', elapsed, elapsed/60 )
