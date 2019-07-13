@@ -16,6 +16,7 @@ import sys
 import time
 
 # third-party modules
+import jinja2
 import pandas as pd
 
 # neocortix modules
@@ -171,8 +172,10 @@ def parseResults( byInstance, fullDetails=True, outFile=sys.stderr ):
                         logger.warning( 'no regex match on "icmp_seq" line')
                 #else:
                 #    logger.info( 'other stdout: %s', entry['stdout'] )
+            elif 'timeout' in entry:
+                outcome['timeout'] = entry['timeout']
             else:
-                print( entry['dateTime'], iid[0:16], 'UNRECOGNIZED', entry, file=outFile )
+                logger.info( 'UNRECOGNIZED %s', entry )
     return outcomes
 
 def reportSummaryWithLocs( outcomes, instances, outFile ):
@@ -198,9 +201,9 @@ def reportSummaryWithLocs( outcomes, instances, outFile ):
             data['nRec'], rttAvgMs,
             file=outFile )
 
-def getRegionSummaries( outcomes, instances ):
+def mergeInstanceData( outcomes, instances ):
     instancesByIid = {}
-    for inst in loadedInstances:
+    for inst in instances:
         iid = inst['instanceId']
         instancesByIid[iid] = inst
 
@@ -220,14 +223,18 @@ def getRegionSummaries( outcomes, instances ):
         rec = {'iid': iid,
             'country-code': loc['country-code'],
             'state': loc['area'],
-            'locKey': loc['country-code'] + '.' + (loc.get('area') or 'unknown'),
+            'locality': loc['locality'],
+            'locKey': loc['country-code'] + '.' + (loc.get('area') or '<unknown>'),
             'lat': loc['latitude'], 
             'lon': loc['longitude'],
             'nRec': data['nRec'], 
             'rttAvgMs': rttAvgMs
         }
         recs.append( rec )
-    #logger.info( 'recs %s', recs )
+    return recs
+
+def getRegionSummaries( outcomes, instances ):
+    recs = mergeInstanceData( outcomes, instances )
     perInst = pd.DataFrame( recs )
     locKeys = perInst['locKey'].unique()
     logger.info( 'found %d locKeys for %d instances', len(locKeys), len(outcomes) )
@@ -246,12 +253,12 @@ def getRegionSummaries( outcomes, instances ):
             'rttAvgMs': (subset.rttAvgMs * subset.nRec).sum() / subset.nRec.sum()
         }
         perRegion = perRegion.append( [summary] )
-    logger.info( 'perRegion %s', perRegion )
+    #logger.info( 'perRegion %s', perRegion )
 
     return perRegion
 
 def exportLocDataJs( placeInfo, outFilePath ):
-    # convert lat/lon values into list of coordinate pairs
+    # convert lat/lon values from dataframe into list of coordinate pairs
     pairList = []
     for index, row in placeInfo.iterrows():
         #print( row.latitude, row.longitude )
@@ -290,6 +297,8 @@ def reportResults( byInstance, fullDetails, outFile ):
                     print( entry['dateTime'], iid[0:16], entry['stdout'], file=outFile )
                 elif 'rtt min/avg/max/mdev' in entry['stdout']:
                     print( entry['dateTime'], iid[0:16], entry['stdout'], file=outFile )
+            elif 'timeout' in entry:
+                print( entry['dateTime'], iid[0:16], 'timeout', entry['timeout'], file=outFile )
             else:
                 print( entry['dateTime'], iid[0:16], 'UNRECOGNIZED', entry, file=outFile )
 
@@ -297,6 +306,18 @@ def reportResults( byInstance, fullDetails, outFile ):
     #    with open( outFilePath, 'w') as outFile:
     #        json.dump( byInstance, outFile, indent=2 )
 
+def renderStatsHtml( regionTable ):
+    if True:
+        envir = jinja2.Environment(
+                loader = jinja2.FileSystemLoader(sys.path),
+                autoescape=jinja2.select_autoescape(['html', 'xml'])
+                )
+        template = envir.get_template('stats.html.j2')
+        html = template.render( regionTable=regionTable,
+            otherTable=None )
+    else:
+        html = '<html> <body>\n%s\n</body></html>\n' % regionTable
+    return html
 
 
 if __name__ == "__main__":
@@ -307,6 +328,7 @@ if __name__ == "__main__":
     tellInstances.logger.setLevel(logging.INFO)
 
     dataDirPath = 'data'
+    wwwDirPath = 'www'
 
     ap = argparse.ArgumentParser( description=__doc__ )
     ap.add_argument('instanceJsonFilePath', default=dataDirPath+'/launched.json')
@@ -372,28 +394,41 @@ if __name__ == "__main__":
     (goodOnes, badOnes) = triage( stepStatuses )
     allBad.extend( badOnes )
     logger.info( 'ping %d good', len(goodOnes) )
-    logger.info( 'ping bad %s', badOnes )
+    #logger.info( 'ping bad %s', badOnes )
 
     goodInstances = [inst for inst in goodInstances if inst['instanceId'] in goodOnes ]
 
 
     logger.info( 'allBad has %d instances', len(allBad) )
-    for badInst in allBad:
-        status = badInst['status']
-        logger.info( '%s status (%s) %s', badInst['instanceId'][0:16], type(status), status )
+    if False:
+        for badInst in allBad:
+            status = badInst['status']
+            logger.info( '%s status (%s) %s', badInst['instanceId'][0:16], type(status), status )
 
 
     resultsByInstance = demuxResults( resultsLogFilePath )
     outcomes = parseResults( resultsByInstance )
 
+    merged = mergeInstanceData( outcomes, startedInstances )
+    perInstance = pd.DataFrame( merged )
+    perInstance.to_csv( dataDirPath+'/instanceSummaries.csv', index=False)
+    exportLocDataJs( perInstance, wwwDirPath+'/locations.js')
+
     perRegion = getRegionSummaries( outcomes, startedInstances )
     perRegion.to_csv( dataDirPath+'/regionSummaries.csv', index=False)
-    exportLocDataJs( perRegion, dataDirPath+'/locations.js')
+    #whatever perRegion.to_html( dataDirPath+'/regionSummaries.csv', index=False)
+    #exportLocDataJs( perRegion, wwwDirPath+'/locations.js')
 
     reportResults( resultsByInstance, args.fullDetails, sys.stdout )
-    reportSummaryWithLocs( outcomes, startedInstances, sys.stderr )
-    #print( 'outcomes', file=sys.stdout )
+    #reportSummaryWithLocs( outcomes, startedInstances, sys.stderr )
     #json.dump( outcomes, sys.stdout, indent=2 )
+
+    colsToRender = ['locKey', 'devices', 'nRec', 'lat', 'lon', 'rttAvgMs']
+    html = renderStatsHtml( perRegion[colsToRender].to_html(index=False,
+        classes=['sortable'], justify='left', float_format=lambda x: '%.1f' % x
+        ) )
+    with open( wwwDirPath+'/stats.html', 'w', encoding='utf8') as htmlOutFile:
+        htmlOutFile.write( html )
 
     elapsed = time.time() - startTime
     logger.info( 'finished; elapsed time %.1f seconds (%.1f minutes)', elapsed, elapsed/60 )
