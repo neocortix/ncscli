@@ -59,14 +59,6 @@ class eventTiming(object):
             ]
 
 
-def logResult( key, value, instanceId ):
-    pass
-    '''
-    if resultsLogFile:
-        toLog = {key: value, 'instanceId': instanceId,
-            'dateTime': datetime.datetime.now(datetime.timezone.utc).isoformat() }
-        print( json.dumps( toLog, sort_keys=True ), file=resultsLogFile )
-    '''
 def triage( statuses ):
     goodOnes = []
     badOnes = []
@@ -179,6 +171,7 @@ def parseResults( byInstance, fullDetails=True, outFile=sys.stderr ):
     return outcomes
 
 def reportSummaryWithLocs( outcomes, instances, outFile ):
+    # may not be needed
     instancesByIid = {}
     for inst in loadedInstances:
         iid = inst['instanceId']
@@ -319,41 +312,20 @@ def renderStatsHtml( regionTable ):
         html = '<html> <body>\n%s\n</body></html>\n' % regionTable
     return html
 
-
-if __name__ == "__main__":
-    # configure logging
-    logging.basicConfig(format='%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s', datefmt='%Y/%m/%d %H:%M:%S')
-    logger.setLevel(logging.DEBUG)
-    logger.debug('the logger is configured')
-    tellInstances.logger.setLevel(logging.INFO)
-
-    dataDirPath = 'data'
-    wwwDirPath = 'www'
-
-    ap = argparse.ArgumentParser( description=__doc__ )
-    ap.add_argument('instanceJsonFilePath', default=dataDirPath+'/launched.json')
-    ap.add_argument('--sshAgent', type=boolArg, default=False, help='whether or not to use ssh agent')
-    ap.add_argument('--extraTime', type=float, default=10, help='extra (in seconds) for master to wait for results')
-    ap.add_argument('--fullDetails', type=boolArg, default=False, help='true for full details, false for summaries only')
-    ap.add_argument('--interval', type=float, default=1, help='time (in seconds) between pings by an instance')
-    ap.add_argument('--nPings', type=int, default=10, help='# of ping packets to send per instance')
-    ap.add_argument('--timeLimit', type=float, default=10, help='maximum time (in seconds) to take (default=none (unlimited)')
-    ap.add_argument('--targetHost', default='codero2.neocortix.com')
-    args = ap.parse_args()
-    logger.info( "args: %s", str(args) )
-
-    startTime = time.time()
+def pingFromInstances( instanceJsonFilePath, dataDirPath, wwwDirPath, targetHost, 
+    nPings, interval, timeLimit, extraTime,
+    fullDetails, sshAgent
+    ):
     eventTimings = []
     starterTiming = eventTiming('startup')
 
-    instanceJsonFilePath = args.instanceJsonFilePath
-    resultsLogFilePath = dataDirPath + '/pingALot.jlog'
+    os.makedirs( dataDirPath, exist_ok=True )
+    os.makedirs( wwwDirPath, exist_ok=True )
+
+    resultsLogFilePath = dataDirPath + '/pingFromInstances.jlog'
     # truncate the resultsLogFile
     with open( resultsLogFilePath, 'wb' ) as xFile:
         pass # xFile.truncate()
-
-    timeLimit = args.timeLimit  # seconds
-
 
     loadedInstances = None
     with open( instanceJsonFilePath, 'r' ) as jsonFile:
@@ -376,18 +348,18 @@ if __name__ == "__main__":
 
 
     pingCmd = 'ping %s -U -D -c %s -w %f -i %f' \
-        % (args.targetHost, args.nPings, args.timeLimit,  args.interval )
+        % (targetHost, nPings, timeLimit,  interval )
     # could use -s for different payload size
     # could use -t (ttl) to limit nHops
-    if not args.fullDetails:
+    if not fullDetails:
         pingCmd += ' -q'
     # tell them to ping
     stepTiming = eventTiming('tellInstances ping')
     logger.info( 'calling tellInstances')
     stepStatuses = tellInstances.tellInstances( startedInstances, pingCmd,
         resultsLogFilePath=resultsLogFilePath,
-        download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
-        timeLimit=args.timeLimit+args.extraTime, upload=None
+        download=None, downloadDestDir=None, jsonOut=None, sshAgent=sshAgent,
+        timeLimit=timeLimit+extraTime, upload=None
         )
     stepTiming.finish()
     eventTimings.append(stepTiming)
@@ -419,7 +391,7 @@ if __name__ == "__main__":
     #whatever perRegion.to_html( dataDirPath+'/regionSummaries.csv', index=False)
     #exportLocDataJs( perRegion, wwwDirPath+'/locations.js')
 
-    reportResults( resultsByInstance, args.fullDetails, sys.stdout )
+    reportResults( resultsByInstance, fullDetails, sys.stdout )
     #reportSummaryWithLocs( outcomes, startedInstances, sys.stderr )
     #json.dump( outcomes, sys.stdout, indent=2 )
 
@@ -429,6 +401,45 @@ if __name__ == "__main__":
         ) )
     with open( wwwDirPath+'/stats.html', 'w', encoding='utf8') as htmlOutFile:
         htmlOutFile.write( html )
+    html = perRegion[colsToRender].to_html(index=False,
+        classes=['sortable'], justify='left', float_format=lambda x: '%.1f' % x
+        )
+    with open( wwwDirPath+'/areaTable.htm', 'w', encoding='utf8') as htmlOutFile:
+        htmlOutFile.write( html )
 
+
+    # not sure if these help
+    sys.stdout.flush()
+    sys.stderr.flush()
+    
+
+if __name__ == "__main__":
+    # configure logging
+    logging.basicConfig(format='%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s', datefmt='%Y/%m/%d %H:%M:%S')
+    logger.setLevel(logging.DEBUG)
+    logger.debug('the logger is configured')
+    tellInstances.logger.setLevel(logging.INFO)
+
+    dataDirPath = 'data'
+    wwwDirPath = 'www'
+
+    ap = argparse.ArgumentParser( description=__doc__ )
+    ap.add_argument('instanceJsonFilePath', default=dataDirPath+'/launched.json')
+    ap.add_argument('--sshAgent', type=boolArg, default=False, help='whether or not to use ssh agent')
+    ap.add_argument('--extraTime', type=float, default=10, help='extra (in seconds) for master to wait for results')
+    ap.add_argument('--fullDetails', type=boolArg, default=False, help='true for full details, false for summaries only')
+    ap.add_argument('--interval', type=float, default=1, help='time (in seconds) between pings by an instance')
+    ap.add_argument('--nPings', type=int, default=10, help='# of ping packets to send per instance')
+    ap.add_argument('--timeLimit', type=float, default=10, help='maximum time (in seconds) to take (default=none (unlimited)')
+    ap.add_argument('--targetHost', default='codero2.neocortix.com')
+    args = ap.parse_args()
+    logger.info( "args: %s", str(args) )
+
+    startTime = time.time()
+
+    pingFromInstances( args.instanceJsonFilePath, dataDirPath, wwwDirPath, args.targetHost, 
+        args.nPings, args.interval, args.timeLimit, args.extraTime,
+        args.fullDetails, args.sshAgent
+        )
     elapsed = time.time() - startTime
     logger.info( 'finished; elapsed time %.1f seconds (%.1f minutes)', elapsed, elapsed/60 )
