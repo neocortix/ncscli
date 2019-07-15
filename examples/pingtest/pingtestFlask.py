@@ -203,6 +203,12 @@ def getTestInfo( testId ):
             statsText = inFile.read()
         info['stats'] = statsText
 
+    locInfoFilePath = wwwDirPath + '/locInfo.json'
+    if os.path.isfile( locInfoFilePath ):
+        with open( locInfoFilePath ) as inFile:
+            locInfo = inFile.read()
+        info['locInfo'] = locInfo
+
     return jsonify(info), 200
 
 def launchTest( args ):
