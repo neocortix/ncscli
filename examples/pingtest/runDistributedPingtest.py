@@ -110,14 +110,29 @@ def launchInstances( authToken, launchedJsonFilePath, nInstances, sshClientKeyNa
         returnCode = 99
     return returnCode
 
+def getStartedInstances( instanceJsonFilePath ):
+    try:
+        with open( instanceJsonFilePath, 'r' ) as jsonFile:
+            loadedInstances = json.load(jsonFile)  # a list of dicts
+    except Exception as exc:
+        logger.warning( 'could not load json (%s) %s', type(exc), exc )
+        return []
+    startedInstances = [inst for inst in loadedInstances if inst['state'] == 'started' ]
+    return startedInstances
+
 def terminateThese( authToken, inRecs ):
     logger.info( 'to terminate %d instances', len(inRecs) )
     iids = [inRec['instanceId'] for inRec in inRecs]
     ncs.terminateInstances( authToken, iids )
 
-def canPing( targetHost ):
-    # stub version
-    return True
+def canPing( targetHost, timeLimit=15 ):
+    '''ping the target and return true iff successful'''
+    # does a ping to the targetHost, just to prove that it can
+    proc = subprocess.run( 
+        ['ping', str(targetHost), '-c', '1', '-w', str(timeLimit), '-q'],
+        stdout=subprocess.DEVNULL
+        )
+    return proc.returncode == 0
 
 
 
@@ -145,10 +160,10 @@ if __name__ == "__main__":
     ap.add_argument('--nPings', type=int, default=10, help='# of ping packets to send per instance')
     ap.add_argument('--interval', type=float, default=1, help='time (in seconds) between pings by an instance')
     ap.add_argument('--timeLimit', type=float, default=10, help='maximum time (in seconds) to take (default=none (unlimited)')
-    ap.add_argument('--extraTime', type=float, default=10, help='extra (in seconds) for master to wait for results')
+    ap.add_argument('--extraTime', type=float, help='extra (in seconds) for master to wait for results')
     ap.add_argument('--fullDetails', type=boolArg, default=False, help='true for full details, false for summaries only')
     args = ap.parse_args()
-    logger.info( 'args %s', args )
+    #logger.debug( 'args %s', args )
 
     signal.signal( signal.SIGTERM, sigtermHandler )
 
@@ -200,7 +215,6 @@ if __name__ == "__main__":
                     logger.warning( 'ncs.uploadSshClientKey returned %s', respCode )
                     sys.exit( 'could not upload SSH client key')
 
-            #TODO handle error from launchInstances
             rc = launchInstances( args.authToken, launchedJsonFilePath, nWorkersWanted, sshClientKeyName, filtersJson=args.filter )
             # delete sshClientKey only if we just uploaded it
             if sshClientKeyName != args.sshClientKeyName:
@@ -208,10 +222,11 @@ if __name__ == "__main__":
                 ncs.deleteSshClientKey( args.authToken, sshClientKeyName )
             if rc:
                 logger.warning( 'launchInstances returned %d', rc )
-                sys.exit( 'could not launch instance')
-        #TODO check for non-zero nStarted
-
-        if not sigtermSignaled():
+                sys.exit( 'could not launch instances')
+        # find out if any instances were started
+        startedInstances = getStartedInstances( launchedJsonFilePath )  # a list of instance dicts
+        # do the actual work, unless we shouldn't
+        if startedInstances and not sigtermSignaled():
             pingFromInstances.pingFromInstances( launchedJsonFilePath, dataDirPath, wwwDirPath, args.targetHost, 
                 args.nPings, args.interval, args.timeLimit, args.extraTime,
                 args.fullDetails, args.sshAgent
