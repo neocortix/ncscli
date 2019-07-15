@@ -10,7 +10,7 @@ import json
 import logging
 import os
 import re
-import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -250,6 +250,18 @@ def getRegionSummaries( outcomes, instances ):
 
     return perRegion
 
+def exportLocDataJson( placeInfo, outFilePath ):
+    # export location info from dataframe to a json file
+    locList = []
+    for index, row in placeInfo.iterrows():
+        #print( row.latitude, row.longitude )
+        locList.append( {'lat': row.lat, 'lon': row.lon, 'rttAvgMs': row.rttAvgMs} )
+    locObj = {'totPings': int(placeInfo.nRec.sum()) }
+    locObj['locs'] = locList
+    
+    with open( outFilePath, 'w') as outFile:
+        json.dump( locObj, outFile, indent=2 )
+
 def exportLocDataJs( placeInfo, outFilePath ):
     # convert lat/lon values from dataframe into list of coordinate pairs
     pairList = []
@@ -341,6 +353,16 @@ def pingFromInstances( instanceJsonFilePath, dataDirPath, wwwDirPath, targetHost
     #startedInstances = [inst for inst in strippedInstances if inst['state'] == 'started' ]
     goodInstances = strippedInstances
 
+    if extraTime == None:
+        extraTime = 10 + len(goodInstances)/10
+    logger.info( 'using extraTime %.1f', extraTime )
+
+    # if no targetHost specified try using this host by fully-qualified name
+    # sometimes the fqdn does not work
+    if not targetHost:
+        targetHost = socket.getfqdn()
+    logger.info( 'using targetHost %s', targetHost )
+
     starterTiming.finish()
     eventTimings.append(starterTiming)
 
@@ -381,31 +403,34 @@ def pingFromInstances( instanceJsonFilePath, dataDirPath, wwwDirPath, targetHost
     resultsByInstance = demuxResults( resultsLogFilePath )
     outcomes = parseResults( resultsByInstance )
 
-    merged = mergeInstanceData( outcomes, startedInstances )
-    perInstance = pd.DataFrame( merged )
-    perInstance.to_csv( dataDirPath+'/instanceSummaries.csv', index=False)
-    exportLocDataJs( perInstance, wwwDirPath+'/locations.js')
-
-    perRegion = getRegionSummaries( outcomes, startedInstances )
-    perRegion.to_csv( dataDirPath+'/regionSummaries.csv', index=False)
-    #whatever perRegion.to_html( dataDirPath+'/regionSummaries.csv', index=False)
-    #exportLocDataJs( perRegion, wwwDirPath+'/locations.js')
-
     reportResults( resultsByInstance, fullDetails, sys.stdout )
-    #reportSummaryWithLocs( outcomes, startedInstances, sys.stderr )
-    #json.dump( outcomes, sys.stdout, indent=2 )
+    if len(outcomes):
+        merged = mergeInstanceData( outcomes, startedInstances )
+        perInstance = pd.DataFrame( merged )
+        perInstance.to_csv( dataDirPath+'/instanceSummaries.csv', index=False)
+        if 'rttAvgMs' in perInstance:
+            exportLocDataJs( perInstance, wwwDirPath+'/locations.js')
+            exportLocDataJson( perInstance, wwwDirPath+'/locInfo.json')
 
-    colsToRender = ['locKey', 'devices', 'nRec', 'lat', 'lon', 'rttAvgMs']
-    html = renderStatsHtml( perRegion[colsToRender].to_html(index=False,
-        classes=['sortable'], justify='left', float_format=lambda x: '%.1f' % x
-        ) )
-    with open( wwwDirPath+'/stats.html', 'w', encoding='utf8') as htmlOutFile:
-        htmlOutFile.write( html )
-    html = perRegion[colsToRender].to_html(index=False,
-        classes=['sortable'], justify='left', float_format=lambda x: '%.1f' % x
-        )
-    with open( wwwDirPath+'/areaTable.htm', 'w', encoding='utf8') as htmlOutFile:
-        htmlOutFile.write( html )
+            perRegion = getRegionSummaries( outcomes, startedInstances )
+            perRegion.to_csv( dataDirPath+'/regionSummaries.csv', index=False)
+            #whatever perRegion.to_html( dataDirPath+'/regionSummaries.csv', index=False)
+            #exportLocDataJs( perRegion, wwwDirPath+'/locations.js')
+
+            #reportSummaryWithLocs( outcomes, startedInstances, sys.stderr )
+            #json.dump( outcomes, sys.stdout, indent=2 )
+
+            colsToRender = ['locKey', 'devices', 'nRec', 'lat', 'lon', 'rttAvgMs']
+            html = renderStatsHtml( perRegion[colsToRender].to_html(index=False,
+                classes=['sortable'], justify='left', float_format=lambda x: '%.1f' % x
+                ) )
+            with open( wwwDirPath+'/stats.html', 'w', encoding='utf8') as htmlOutFile:
+                htmlOutFile.write( html )
+            html = perRegion[colsToRender].to_html(index=False,
+                classes=['sortable'], justify='left', float_format=lambda x: '%.1f' % x
+                )
+            with open( wwwDirPath+'/areaTable.htm', 'w', encoding='utf8') as htmlOutFile:
+                htmlOutFile.write( html )
 
 
     # not sure if these help
@@ -426,12 +451,12 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser( description=__doc__ )
     ap.add_argument('instanceJsonFilePath', default=dataDirPath+'/launched.json')
     ap.add_argument('--sshAgent', type=boolArg, default=False, help='whether or not to use ssh agent')
-    ap.add_argument('--extraTime', type=float, default=10, help='extra (in seconds) for master to wait for results')
+    ap.add_argument('--extraTime', type=float, help='extra time (in seconds) for master to wait for results')
     ap.add_argument('--fullDetails', type=boolArg, default=False, help='true for full details, false for summaries only')
     ap.add_argument('--interval', type=float, default=1, help='time (in seconds) between pings by an instance')
     ap.add_argument('--nPings', type=int, default=10, help='# of ping packets to send per instance')
     ap.add_argument('--timeLimit', type=float, default=10, help='maximum time (in seconds) to take (default=none (unlimited)')
-    ap.add_argument('--targetHost', default='codero2.neocortix.com')
+    ap.add_argument('--targetHost', help='the hostname or ip addr to ping (default is this host)' )
     args = ap.parse_args()
     logger.info( "args: %s", str(args) )
 
