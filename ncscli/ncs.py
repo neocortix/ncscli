@@ -363,6 +363,9 @@ def doCmdLaunch( args ):
             starting = False
             launcherStates = collections.Counter()
             for iid in iids:
+                if sigtermSignaled():
+                    logger.warning( 'incomplete launch due to sigterm' )
+                    break
                 if iid in startedSet:
                     continue
                 if iid in failedSet:
