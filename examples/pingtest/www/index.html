@@ -89,7 +89,7 @@ function onStatusBut() {
     }
     saveSettings();
 
-    var urlPrefix='/api/tests/';
+    var urlPrefix='./api/tests/';
     var queryParams = testId
     //var urlSuffix='&callback=?&json.wrf=on_data';
     var url=urlPrefix + queryParams;
@@ -173,7 +173,7 @@ function onLaunchBut() {
     var timeLimit = nPings * interval;
 
 
-    var url='/api/tests/';
+    var url='./api/tests/';
     var args = ["--authToken", authToken, 
         "--targetHost", targetHost,
         "--nWorkers", nWorkers,
@@ -224,7 +224,7 @@ function onStopBut() {
         return;
     }
 
-    var urlPrefix='/api/tests/';
+    var urlPrefix='./api/tests/';
     var myUrl=urlPrefix + testId;
     //args = {}  // will want to put 'state': 'stopped' here
     //argsStr = JSON.stringify( args )
@@ -248,7 +248,7 @@ function checkAvail() {
     if( document.hidden ) {
         return;
     }
-    var url='/api/instances/available';
+    var url='./api/instances/available';
 
     var regions = $('#regions').val();
     var regionExpr = {"regions": regions }
