@@ -32,13 +32,11 @@ g_workingDirPath = os.getcwd() + '/pingtestData'
 
 @app.route('/')
 @app.route('/api/')
-@app.route('/pingtest/api/')
 def hello_world():
     '''the root URI does nothing useful'''
     return jsonify( 'Please refer to the documentation' ), 200
 
 @app.route('/api/tests/', methods=['GET', 'POST'])
-@app.route('/pingtest/api/tests/', methods=['GET', 'POST'])
 def testsHandler():
     logger.info( 'handling a request %s ', flask.request )
     if flask.request.method == 'POST':
@@ -54,7 +52,6 @@ def testsHandler():
         return jsonify( getTests() )
 
 @app.route('/api/tests/<testId>', methods=['GET', 'PUT'])
-@app.route('/pingtest/api/tests/<testId>', methods=['GET', 'PUT'])
 def testHandler( testId ):
     logger.info( 'handling a request %s ', flask.request )
     if flask.request.method == 'GET':
@@ -69,7 +66,6 @@ def testHandler( testId ):
         return returns
 
 @app.route('/api/instances/available' )
-@app.route('/pingtest/api/instances/available')
 def instancesAvailableHandler():
     #logger.info( 'handling a request %s ', flask.request )
     args = flask.request.args
