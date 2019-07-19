@@ -309,7 +309,7 @@ def terminateJobInstances( authToken, jobId, maxRetries=1000 ):
     if (resp.status_code < 200) or (resp.status_code >= 300):
         logger.warn( 'response code %s', resp.status_code )
         if len( resp.text ):
-            logger.info( 'response "%s"', resp.text, maxRetries-1 )
+            logger.info( 'response "%s; maxRetries %d"', resp.text, maxRetries-1 )
         if maxRetries and resp.status_code not in [403, 404]:
             time.sleep( 10 )
             return terminateJobInstances( authToken, jobId )
