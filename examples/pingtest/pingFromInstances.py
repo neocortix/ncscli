@@ -409,23 +409,24 @@ def pingFromInstances( instanceJsonFilePath, dataDirPath, wwwDirPath, targetHost
         perInstance = pd.DataFrame( merged )
         perInstance.to_csv( dataDirPath+'/instanceSummaries.csv', index=False)
         if 'rttAvgMs' in perInstance:
-            exportLocDataJs( perInstance, wwwDirPath+'/locations.js')
+            # exportLocDataJs( perInstance, wwwDirPath+'/locations.js')  # old way
             exportLocDataJson( perInstance, wwwDirPath+'/locInfo.json')
 
             perRegion = getRegionSummaries( outcomes, startedInstances )
             perRegion.to_csv( dataDirPath+'/regionSummaries.csv', index=False)
             #whatever perRegion.to_html( dataDirPath+'/regionSummaries.csv', index=False)
-            #exportLocDataJs( perRegion, wwwDirPath+'/locations.js')
 
             #reportSummaryWithLocs( outcomes, startedInstances, sys.stderr )
             #json.dump( outcomes, sys.stdout, indent=2 )
 
             colsToRender = ['locKey', 'devices', 'nRec', 'lat', 'lon', 'rttAvgMs']
-            html = renderStatsHtml( perRegion[colsToRender].to_html(index=False,
-                classes=['sortable'], justify='left', float_format=lambda x: '%.1f' % x
-                ) )
-            with open( wwwDirPath+'/stats.html', 'w', encoding='utf8') as htmlOutFile:
-                htmlOutFile.write( html )
+            if False:
+                # can render one or more dataframes to html using template, if desired
+                html = renderStatsHtml( perRegion[colsToRender].to_html(index=False,
+                    classes=['sortable'], justify='left', float_format=lambda x: '%.1f' % x
+                    ) )
+                with open( wwwDirPath+'/stats.html', 'w', encoding='utf8') as htmlOutFile:
+                    htmlOutFile.write( html )
             html = perRegion[colsToRender].to_html(index=False,
                 classes=['sortable'], justify='left', float_format=lambda x: '%.1f' % x
                 )
