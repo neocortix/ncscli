@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8"/>
+	<meta name="viewport" content="width=device-width">
+    <title>neocortix Last Mile Pingtest</title>
+	<style>
+	body {
+		font-family: "Helvetica Neue", Helvetica, Arial, Sans-Serif;
+	} 
+	pre {
+		font-family: Helvetica, Sans-Serif; font-size: 85%;
+	} 
+	</style>
+</head>
+<body>
+    <script src="sorttable.js"></script>
+
+    <a href="https://cloud.neocortix.com/dashboard">
+    <img src="CloudLogo_006.png"
+        style="height: 3em" id="logo"       
+        />
+    </a>
+    <h3>Last Mile Pingtest Demo</h3>
+
+    <div id="settings">
+        Auth Token: <input id="authToken", size=37 type=password required placeholder="(required)" />
+    </div>
+    <br>
+    # of available devices: <span id="nAvail">x</span>
+    <br>
+    <br>
+    # of workers: <input id="nWorkers", size=6 value = 1 />
+    <br>
+    # of pings per worker: <input id="nPings", size=3 value = 10 />
+    <br>
+    ping interval: <input id="interval", size=3 value = 1 /> seconds per ping
+    <br><br>
+    Target Host: <input id="targetHost", size=37 placeholder="(required)" >
+    <br><br>
+    <label for="regions" >
+        Choose one or more regions (or select none, to allow all regions):
+    </label>
+    <br>
+    <select id="regions" multiple size=7 >
+        <option value="usa" >United States of America</option>
+        <option value="asia" >Asia</option>
+        <option value="europe" >Europe</option>
+        <option value="middle-east" >Middle East</option>
+        <option value="north-america" >North America</option>
+        <option value="oceania" >Oceania</option>
+        <option value="russia-ukraine-belarus" >Russia & Ukraine & Belarus</option>
+    </select>
+
+    <br><br>
+    <button id="launchBut" style="font-size: 120%;" >Launch</button>
+    <button id="stopBut" disabled style="font-size: 120%;" >Stop</button>
+    <hr/>
+    Test ID: <input id="testId", size=37 /> 
+    <button id="statusBut" >Get Status</button>
+
+    <div id="results">
+        <h4>state</h4>
+        <pre id="state">(no query done)</pre>
+        <div id="mapDiv" hidden style="height: 250px;" ></div>
+        <div id="tableDiv" >
+            <script src="sorttable.js"></script>
+        </div>
+        <h4>stderr log</h4>
+        <pre id="stderr" style="overflow-y: auto; height: 20em; font-size: 65%; font-family:'Lucida Console', monospace;" >
+        </pre>
+        <h4>stdout</h4>
+        <pre id="stdout" style="overflow-y: auto; height: 20em; font-size: 65%; font-family:'Lucida Console', monospace;" >
+        </pre>
+
+    </div>
+
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+
+<script>
+var g_checkerTask = null;
+var g_availTask = null;
+
+function onStatusBut() {
+    var testId = $('#testId').val();
+    if (testId.length <= 0) {
+        return;
+    }
+    saveSettings();
+
+    var urlPrefix='./api/tests/';
+    var queryParams = testId
+    //var urlSuffix='&callback=?&json.wrf=on_data';
+    var url=urlPrefix + queryParams;
+    var jx = $.getJSON(url);
+    jx.done(function( data, textStatus, jqxhr ) {
+        //console.log( "onStatusBut .done()" );
+        //console.log( "jx data", data );
+        if( typeof data === 'object' && data !== null && data.hasOwnProperty("state") ) {
+            $('#state').text( data["state"])
+            $('#stdout').text( data["stdout"])
+            $('#stderr').text( data["stderr"])
+            //console.log( $( '#stderr' )[0].scrollHeight  );
+            $( "#stderr" ).scrollTop( $( '#stderr' )[0].scrollHeight );
+            $('#mapDiv').show();
+            if( data.hasOwnProperty("locInfo") ) {
+                //console.log( data['locInfo'] );
+                locObj = JSON.parse( data['locInfo'] );
+                populateMap( locObj['locs'] );
+                console.log( locObj );
+            }
+            if( data.hasOwnProperty("stats") ) {
+                var tagg = '<script src="sorttable.js"> </scrip' + 't>'
+                $('#tableDiv').html( tagg+data["stats"] );
+                //$('#tableDiv').addClass( "sortable" );
+            }
+            else {
+                $('#mapDiv').hide();
+                $('#tableDiv').empty();
+            }
+        }
+        else {
+            $('#state').empty()
+            $('#stdout').empty()
+            $('#stderr').text( data)
+            $('#tableDiv').empty();
+        }
+    })
+    jx.fail(function( jqxhr, textStatus, error ) {
+        console.log( "onStatusBut .fail()" );
+        //console.log( "jx error", error );
+        //console.log( "jx text", textStatus );
+        //console.log( "jqxhr", jqxhr );
+        //console.log( "jx responseJSON", jqxhr.responseJSON );
+        $('#state').text( 'could not get status from Pingtest master')
+        })
+}
+
+function onLaunchBut() {
+    var nWorkers = $('#nWorkers').val();
+    if (nWorkers.length <= 0) {
+        return;
+    }
+    var nPings = $('#nPings').val();
+    if (nPings.length <= 0) {
+        return;
+    }
+    var interval = $('#interval').val();
+    if (interval.length <= 0) {
+        return;
+    }
+    var authToken = $('#authToken').val();
+    if (authToken.length <= 0) {
+        return;
+    }
+    var targetHost = $('#targetHost').val();
+    if (targetHost.length > 0) {
+        targetHost = targetHost.trim();
+    }
+    if (! isHostValid( targetHost )) {
+        alert( 'the "target host" value is not a valid URL');
+        return;
+    }
+    if (targetHost.length <= 0) {
+        return;
+    }
+    var regions = $('#regions').val();
+    regionExpr = {"regions": regions }
+    var filterArg = JSON.stringify( regionExpr )
+    //console.log( 'filterArg', filterArg )
+
+    var timeLimit = nPings * interval;
+
+
+    var url='./api/tests/';
+    var args = ["--authToken", authToken, 
+        "--targetHost", targetHost,
+        "--nWorkers", nWorkers,
+        "--nPings", nPings,
+        "--interval", interval,
+        "--filter", filterArg,
+        "--timeLimit", timeLimit
+        ];
+    argsStr = JSON.stringify( args )
+    //console.log( 'posting with argsStr', argsStr )
+    var jx = $.post(url, argsStr);
+    jx.done(function( data, textStatus, jqxhr ) {
+        //console.log( "onLaunchBut .done()" );
+        //console.log( "jx data", data );
+        var testId = data.id
+        //console.log( 'testId', testId)
+        $('#testId').val( testId )
+        $('#stopBut').prop( 'disabled', false )
+        // emulate the "get status" button
+        setTimeout( onStatusBut, 1000 );
+        g_checkerTask = setInterval( checkTest, 2000 )
+    })
+    jx.fail(function( jqxhr, textStatus, error ) {
+        console.log( "onLaunchBut .fail()" );
+        console.log( "jx error", error );
+        console.log( "jx text", textStatus );
+        console.log( "jqxhr", jqxhr );
+        console.log( "jqxhr.status", jqxhr.status );
+        console.log( "jx responseJSON", jqxhr.responseText );
+        $('#state').text( 'launch failure: ' + error )
+        $('#stderr').text( jqxhr.responseText )
+        })
+}
+
+function onRegionsChanged() {
+    console.log( "onRegionsChanged()" );
+    checkAvail()
+}
+
+function onStopBut() {
+    console.log( "onStopBut()" );
+    var testId = $('#testId').val();
+    if (testId.length <= 0) {
+        return;
+    }
+    if( $('#state').text() != 'running' ) {
+        console.log( "onStopBut() but not running" );
+        return;
+    }
+
+    var urlPrefix='./api/tests/';
+    var myUrl=urlPrefix + testId;
+    //args = {}  // will want to put 'state': 'stopped' here
+    //argsStr = JSON.stringify( args )
+    //console.log( 'putting with argsStr', argsStr )
+    var jx = $.ajax( { url: myUrl, type: 'PUT' });
+    jx.done(function( data, textStatus, jqxhr ) {
+        console.log( "onStopBut .done()" );
+    })
+    jx.fail(function( jqxhr, textStatus, error ) {
+        console.log( "onStopBut .fail()" );
+    })
+
+}
+
+function checkAvail() {
+    // this version only does something if authToken field is not empty
+    var authToken = $('#authToken').val();
+    if (authToken.length <= 0) {
+        return;
+    }
+    if( document.hidden ) {
+        return;
+    }
+    var url='./api/instances/available';
+
+    var regions = $('#regions').val();
+    var regionExpr = {"regions": regions }
+    var filterArg = JSON.stringify( regionExpr )
+
+    var queryParams = { "filter": filterArg }
+    //var jx = $.getJSON(url, queryParams );
+    var jx = $.ajax({
+        dataType: "json",
+        url: url,
+        data: queryParams,
+        headers: {"X-Neocortix-Cloud-API-AuthToken": authToken }
+    });
+    jx.done(function( data, textStatus, jqxhr ) {
+        console.log( "checkAvail jx data", data );
+        $('#nAvail').text( data );
+    })
+}
+
+function checkTest() {
+    // this version stops when the status is no longer 'running'
+    onStatusBut()
+    if( $('#state').text() != 'running' ) {
+        $('#stopBut').prop( 'disabled', true )
+        clearInterval( g_checkerTask )
+        g_checkerTask = null;
+    }
+}
+
+function saveSettings() {
+    localStorage.setItem("authToken", $('#authToken').val() );
+    localStorage.setItem("nWorkers", $('#nWorkers').val() );
+    localStorage.setItem("regions", $('#regions').val() );
+    localStorage.setItem("nPings", $('#nPings').val() );
+    localStorage.setItem("interval", $('#interval').val() );
+    localStorage.setItem("testId", $('#testId').val() );
+    localStorage.setItem("targetHost", $('#targetHost').val() );
+}
+
+function loadSettings() {
+    $('#authToken').val( localStorage.getItem("authToken") );
+    if( localStorage.getItem("nWorkers") ) {
+        $('#nWorkers').val( localStorage.getItem("nWorkers") );
+    }
+    if( localStorage.getItem("nPings") ) {
+        $('#nPings').val( localStorage.getItem("nPings") );
+    }
+    if( localStorage.getItem("interval") ) {
+        $('#interval').val( localStorage.getItem("interval") );
+    }
+    if( localStorage.getItem("regions") ) {
+        $('#regions').val( localStorage.getItem("regions").split(",") );
+    }
+    $('#testId').val( localStorage.getItem("testId") );
+    $('#targetHost').val( localStorage.getItem("targetHost") );
+}
+
+function isHostValid( arg ){
+    return true;
+    try {
+        new URL(arg);
+        return true;
+    } catch (x) {
+        return false;
+    }
+}
+
+var g_map = null;
+var g_markers = [];
+
+function initMap() {
+    const centerLatLng = {lat: 39.83, lng: 0};
+
+    g_map = new google.maps.Map(document.getElementById('mapDiv'), {
+        zoom: 1.6,
+        center: centerLatLng
+    });
+}
+
+function populateMap( locs ) {
+    // first depopulate any existing g_markers
+    for (i = 0; i < g_markers.length; i++) {
+        g_markers[ i ].setMap( null );
+    }
+    g_markers = []
+
+    for (i = 0; i < locs.length; i++) {
+        var marker = new google.maps.Marker({
+            position: new google.maps.LatLng(locs[i]['lat'], locs[i]['lon']),
+            icon: {
+                path: google.maps.SymbolPath.CIRCLE,
+                scale: 2,
+                strokeColor: '#0110C2',
+                strokeOpacity: 0.75,
+                strokeWeight: 1,
+                fillColor: '#0110C2',
+                fillOpacity: 0.95,
+            },
+            map: g_map
+        });
+        g_markers.push( marker );
+
+        var marker2 = new google.maps.Marker({
+            position: new google.maps.LatLng(locs[i]['lat'], locs[i]['lon']),
+            icon: {
+                path: google.maps.SymbolPath.CIRCLE,
+                //scale: Math.min( rtts[i], 2000) /18,
+                scale: Math.sqrt( Math.min( locs[i]['rttAvgMs'], 2000) ) * .5,
+                strokeColor: '#7E8ADF',
+                strokeOpacity: 0.75,
+                strokeWeight: 1,
+                fillColor: '#0120ee',
+                fillOpacity: 0.15,
+            },
+            map: g_map
+        });
+        g_markers.push( marker2 );
+    }
+
+}
+
+function on_ready() {
+    $('#launchBut').click(onLaunchBut);
+    $('#statusBut').click(onStatusBut);
+    $('#stopBut').click(onStopBut);
+    $('#regions').change(onRegionsChanged);
+    loadSettings();
+    checkAvail();
+    g_availTask = setInterval( checkAvail, 15 * 1000 )
+}
+
+$(document).ready(on_ready);
+
+</script>
+    <script async defer
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyARYkShv9PYdB9lonMjaOChIKjPtoFHZFM&callback=initMap">
+</script>
+</body>
