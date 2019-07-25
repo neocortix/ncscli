@@ -239,7 +239,7 @@ def startMaster( victimHostUrl, dataPorts, webPort ):
         'python3', '-u', scriptDirPath()+'/runLocust.py', '--host='+victimHostUrl, 
         '--heartbeat-liveness=30',
         '--master-bind-port', str(dataPorts[0]), '--web-port', str(webPort),
-        '--master', '--loglevel', 'INFO', '-f', 'master_locust.py'
+        '--master', '--loglevel', 'INFO', '-f', scriptDirPath()+'/master_locust.py'
     ]
     try:
         proc = subprocess.Popen( cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT )
