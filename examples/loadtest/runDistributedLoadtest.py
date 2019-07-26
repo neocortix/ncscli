@@ -411,6 +411,9 @@ if __name__ == "__main__":
 
     os.makedirs( dataDirPath, exist_ok=True )
 
+    os.environ['ANSIBLE_CONFIG'] = os.path.join( scriptDirPath(), 'ansible.cfg' )
+    logger.info( 'ANSIBLE_CONFIG: %s', os.getenv('ANSIBLE_CONFIG') )
+
     # check whether the victimHost is available
     try:
         resp = requests.head( args.victimHostUrl )
