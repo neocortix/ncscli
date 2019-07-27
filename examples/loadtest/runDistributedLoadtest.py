@@ -230,7 +230,7 @@ def killWorkerProcs():
 
 def output_reader(proc):
     for line in iter(proc.stdout.readline, b''):
-        print('subprocess: {0}'.format(line.decode('utf-8')), end='', file=sys.stderr)
+        print('Locust: {0}'.format(line.decode('utf-8')), end='', file=sys.stderr)
 
 def startMaster( victimHostUrl, dataPorts, webPort ):
     logger.info( 'calling runLocust.py' )
@@ -431,6 +431,7 @@ if __name__ == "__main__":
         # overwrite the launchedJson file as empty list, so we won't have problems with stale contents
         with open( launchedJsonFilePath, 'w' ) as outFile:
             json.dump( [], outFile )
+    loadTestStats = None
     try:
         masterSpecs = None
         if launchWanted:
@@ -536,7 +537,7 @@ if __name__ == "__main__":
                     loadTestStats = analyzeLtStats.reportStats(dataDirPath)
                 except Exception as exc:
                     logger.warning( 'got exception from analyzeLtStats (%s) %s',
-                        type(exc), exc, exc_info=False )
+                        type(exc), exc, exc_info=True )
 
     except KeyboardInterrupt:
         logger.warning( '(ctrl-c) received, will shutdown gracefully' )
@@ -566,7 +567,10 @@ if __name__ == "__main__":
                 subprocess.check_call( cmd, shell=True )
             except Exception as exc:
                 logger.error( 'purgeKnownHosts threw exception (%s) %s',type(exc), exc )
-
-    logger.info( 'finished')
-    sys.exit(0)
+    if loadTestStats and loadTestStats.get('nReqsSatisfied', 0) > 0:
+        rc = 0
+    else:
+        rc=1
+    logger.info( 'finished with rc %d', rc)
+    sys.exit(rc)
 
