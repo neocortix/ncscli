@@ -145,6 +145,9 @@ def reportCompiledStats( stats ):
     nFails = stats['nFails'].sum() if 'nFails' in stats else 0
     resultsSummary['nFails'] = int( nFails )
 
+    medianResponseTime = stats['msprMed'].median()
+    resultsSummary['medianResponseTimeMs'] = medianResponseTime
+
     print( 'Load Test started:', startDateTime.strftime('%Y/%m/%d %H:%M:%S%z') )
     print( 'Duration %.1f minutes'% durMinutes )
 
@@ -169,9 +172,12 @@ def reportCompiledStats( stats ):
     print( '# of requests failed:', nFails )
     print( 'failure rate: %.1f%%' % (failRate * 100) )
 
-    meanResponseTime = stats['mspr'].mean()
+    # meanResponseTime = stats['mspr'].mean()  # unweighted
+    meanResponseTime = (stats['mspr'] * stats['nr']).sum() / stats['nr'].sum()
+
     print( 'mean response time: %.1f ms' % meanResponseTime )
     resultsSummary['meanResponseTimeMs'] = meanResponseTime
+    print( 'median response time: %.1f ms' % resultsSummary['medianResponseTimeMs'] )
     print( 'response time range: %.1f-%.1f ms' % (stats['msprMin'].min(), stats['msprMax'].max() ) )
  
 
@@ -191,6 +197,8 @@ def reportCompiledStats( stats ):
 
 def deriveStats( stats ):
     result = pd.Series()
+    if len(stats) <= 0:
+        return result
     startDateTime = dateutil.parser.parse(stats.dateTime.min())
     endDateTime = dateutil.parser.parse(stats.endDateTimeStr.max())
     durSeconds = (endDateTime-startDateTime).total_seconds()
@@ -226,7 +234,9 @@ def deriveStats( stats ):
     result = result.append( pd.Series( { 'failPct': numFails * 100 / (numReqs+numFails) } ) )
     result = result.append( pd.Series( { 'rps': rps } ) )
     result = result.append( pd.Series( { 'rpsPerDev': (rps / nDevices) } ) )
-    result = result.append( pd.Series( { 'mean rt': stats['mspr'].mean() } ) )
+    #result = result.append( pd.Series( { 'mean rt': stats['mspr'].mean() } ) )
+    meanResponseTime = (stats['mspr'] * stats['nr']).sum() / stats['nr'].sum()
+    result = result.append( pd.Series( { 'mean rt': meanResponseTime } ) )
     result = result.append( pd.Series( { 'median rt': stats['msprMed'].median() } ) )
     result = result.append( pd.Series( { '90Pct rt': stats['msprMax'].quantile(.90) } ) )
     #result = result.append( pd.Series( { 'rt range': rtRange } ) )
@@ -282,8 +292,9 @@ def compileStats( dataDirPath ):
     global g_stats
     g_stats = loadStats( dataDirPath+'/'+statsFileName, workerLocs )
 
-    
-
+    if len(g_stats) <= 0:
+        logger.info( 'no locust stats loaded')
+        return ''
 
     # fill in any unknown values
     g_stats.fillna( {'locKey': '.unknown', 'workerIP': '0.0.0.0'}, inplace=True )
@@ -364,6 +375,8 @@ def reportStats( dataDirPath = 'data' ):
     with open( dataDirPath+'/ltStats.html', 'w', encoding='utf8') as htmlOutFile:
         htmlOutFile.write( html )
 
+    if len( g_stats ) <= 0:
+        return {}
     resultsSummary = reportCompiledStats( g_stats )
     logger.info( 'resultsSummary %s', resultsSummary )
     return resultsSummary
