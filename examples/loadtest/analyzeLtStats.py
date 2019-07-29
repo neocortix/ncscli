@@ -348,6 +348,11 @@ def compileStats( dataDirPath ):
 
     worstCases = g_stats[ (g_stats.msprMax > 15000) | (g_stats.mspr > 3000) | (g_stats.msprMed > 3000)  ]
 
+    # experimental json output code
+    #regionJson = perRegion.to_json( orient='table', index=False )
+    #print( 'per-json', file=sys.stderr )
+    #print( regionJson, file=sys.stderr )
+
     regionTable = perRegion.to_html( index=False, classes=['sortable'], justify='left', float_format=lambda x: '%.1f' % x )
     workerTable = perWorker.to_html( index=False, classes=['sortable'], justify='left', float_format=lambda x: '%.1f' % x )
     worstCasesTable = genHtmlTable( worstCases )
@@ -365,14 +370,14 @@ def compileStats( dataDirPath ):
 
     return html    
 
-def reportStats( dataDirPath = 'data' ):
+def reportStats( dataDirPath = 'data', outFileName='ltStats.html' ):
     global g_stats
     g_stats = pd.DataFrame()
     
 
     html = compileStats( dataDirPath )
         
-    with open( dataDirPath+'/ltStats.html', 'w', encoding='utf8') as htmlOutFile:
+    with open( dataDirPath+'/'+outFileName, 'w', encoding='utf8') as htmlOutFile:
         htmlOutFile.write( html )
 
     if len( g_stats ) <= 0:
