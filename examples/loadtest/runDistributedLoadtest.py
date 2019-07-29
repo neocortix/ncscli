@@ -42,6 +42,7 @@ class g_:
     signaled = False
 
 class SigTerm(BaseException):
+    #logger.warning( 'unsupported SigTerm exception created')
     pass
 
 def sigtermHandler( sig, frame ):
@@ -369,6 +370,75 @@ def conductLoadtest( masterUrl, nWorkersWanted, usersPerWorker,
         print( '\n%d out of %d = %.0f%% success rate' % (nGoodWorkers, nReqInstances, pctGood ) )
     '''
 
+def executeLoadtest( targetHostUrl, htmlOutFileName='ltStats.html' ):
+        masterStarted = False
+        masterFailed = False
+        masterSpecs = None
+        loadTestStats = None
+        if not sigtermSignaled():
+            startPort = args.startPort
+            maxPort=args.startPort+300
+            while (not masterStarted) and (not masterFailed):
+                if startPort >= maxPort:
+                    logger.warning( 'startPort (%d) exceeding maxPort (%d)',
+                        startPort, maxPort )
+                    break
+                preopened = preopenPorts( startPort, maxPort, nPorts=3 )
+                reservedPorts = preopened['ports']
+                sockets = preopened['sockets']
+                dataPorts = reservedPorts[0:2]
+                webPort = reservedPorts[2]
+
+                for sock in sockets:
+                    preclose( sock )
+                sockets = []
+
+                masterSpecs = startMaster( targetHostUrl, dataPorts, webPort )
+                if masterSpecs:
+                    proc = masterSpecs['proc']
+                    deadline = time.time() + 30
+                    while time.time() < deadline:
+                        proc.poll() # sets proc.returncode
+                        if proc.returncode != None:
+                            logger.warning( 'master gave returnCode %d', proc.returncode )
+                            if proc.returncode == 98:
+                                logger.info( 'locust tried to bind to a busy port')
+                                # continue outer loop with higher port numbers
+                                startPort += 3
+                            else:
+                                logger.error( 'locust gave an unexpected returnCode %d', proc.returncode )
+                                # will break out of the outer loop
+                                masterFailed = True
+                            break
+                        time.sleep(.5)
+                    if proc.returncode == None:
+                        masterStarted = True
+        workersStarted = False
+        if masterStarted and not sigtermSignaled():
+            logger.info( 'calling startWorkers' )
+            startWorkers( targetHostUrl, args.masterHost, dataPorts )
+            workersStarted = True
+        if masterStarted and not sigtermSignaled():
+            #time.sleep(5)
+            masterUrl = 'http://127.0.0.1:%d' % webPort
+            conductLoadtest( masterUrl, nWorkersWanted, args.usersPerWorker,
+                args.startTimeLimit, args.susTime,
+                stopWanted=True, nReqInstances=nWorkersWanted, rampUpRate=rampUpRate )
+        
+        if masterStarted and masterSpecs:
+            time.sleep(5)
+            stopMaster( masterSpecs )
+        if workersStarted:
+            killWorkerProcs()
+        if masterStarted:
+            try:
+                time.sleep( 5 )
+                loadTestStats = analyzeLtStats.reportStats(dataDirPath, htmlOutFileName)
+            except Exception as exc:
+                logger.warning( 'got exception from analyzeLtStats (%s) %s',
+                    type(exc), exc, exc_info=True )
+        return loadTestStats
+
 
 if __name__ == "__main__":
     # configure logger formatting
@@ -384,6 +454,7 @@ if __name__ == "__main__":
     ap.add_argument( 'victimHostUrl', help='url of the host to target as victim' )
     ap.add_argument( 'masterHost', help='hostname or ip addr of the Locust master' )
     ap.add_argument( '--authToken', required=True, help='the NCS authorization token to use' )
+    ap.add_argument( '--altTargetHostUrl', help='an alternative target host URL for comparison' )
     ap.add_argument( '--filter', help='json to filter instances for launch' )
     ap.add_argument( '--launch', type=boolArg, default=True, help='to launch and terminate instances' )
     ap.add_argument( '--nWorkers', type=int, default=1, help='the # of worker instances to launch (or zero for all available)' )
@@ -425,6 +496,19 @@ if __name__ == "__main__":
         logger.warning( 'could not access target host %s',args.victimHostUrl )
         logger.error( 'got exception %s', exc )
         sys.exit(1)
+
+    # check whether the altTargetHostUrl, if any, is available
+    if args.altTargetHostUrl:
+        try:
+            resp = requests.head( args.altTargetHostUrl )
+            if (resp.status_code < 200) or (resp.status_code >= 400):
+                logger.error( 'got response %d from alt target host %s',
+                    resp.status_code, args.altTargetHostUrl )
+                sys.exit(1)
+        except Exception as exc:
+            logger.warning( 'could not access alt target host %s',args.altTargetHostUrl )
+            logger.error( 'got exception %s', exc )
+            sys.exit(1)
 
     nWorkersWanted = args.nWorkers
     if launchWanted:
@@ -474,6 +558,7 @@ if __name__ == "__main__":
                 with open( targetUriFilePath, 'w' ) as outFile:
                     json.dump( args.targetUris, outFile, indent=1 )
                 #uploadTargetUris( targetUriFilePath )
+            '''
             masterStarted = False
             masterFailed = False
             if not sigtermSignaled():
@@ -538,11 +623,36 @@ if __name__ == "__main__":
                 except Exception as exc:
                     logger.warning( 'got exception from analyzeLtStats (%s) %s',
                         type(exc), exc, exc_info=True )
+            '''
+            loadTestStats = executeLoadtest( args.victimHostUrl )
+            logger.info ( 'loadTestStatsA: %s', loadTestStats )
+            if args.altTargetHostUrl:
+                # rename output files for the primary target
+                srcFilePath = os.path.join( dataDirPath, 'ltStats.html' )
+                if os.path.isfile( srcFilePath ):
+                    os.rename( srcFilePath, os.path.join( dataDirPath, 'ltStats_a.html' ) )
+                srcFilePath = os.path.join( dataDirPath, 'locustStats.csv' )
+                if os.path.isfile( srcFilePath ):
+                    os.rename( srcFilePath, os.path.join( dataDirPath, 'locustStats_a.csv' ) )
+                print() # a blank lne to separate the outputs from the 2 subtests
+
+                loadTestStatsB = executeLoadtest( args.altTargetHostUrl, htmlOutFileName='ltStats_b.html' )
+                logger.info ( 'loadTestStatsB: %s', loadTestStatsB )
+                srcFilePath = os.path.join( dataDirPath, 'locustStats.csv' )
+                if os.path.isfile( srcFilePath ):
+                    os.rename( srcFilePath, os.path.join( dataDirPath, 'locustStats_b.csv' ) )
+                comparison = {}
+                comparison[ args.victimHostUrl ] = loadTestStats
+                comparison[ args.altTargetHostUrl ] = loadTestStatsB
+                comparisonFilePath = os.path.join( dataDirPath, 'comparison.json' )
+                with open( comparisonFilePath, 'w' ) as comparisonOutFile:
+                    json.dump( comparison, comparisonOutFile, indent=2 )
+                
 
     except KeyboardInterrupt:
         logger.warning( '(ctrl-c) received, will shutdown gracefully' )
     except SigTerm:
-        logger.warning( 'SIGTERM received, will shutdown gracefully' )
+        logger.warning( 'unsupported SIGTERM exception raised, may shutdown gracefully' )
         if masterSpecs:
             logger.info( 'shutting down locust master')
             stopMaster( masterSpecs )
