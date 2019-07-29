@@ -371,10 +371,12 @@ def conductLoadtest( masterUrl, nWorkersWanted, usersPerWorker,
     '''
 
 def executeLoadtest( targetHostUrl, htmlOutFileName='ltStats.html' ):
-        masterStarted = False
-        masterFailed = False
-        masterSpecs = None
-        loadTestStats = None
+    masterStarted = False
+    masterFailed = False
+    masterSpecs = None
+    loadTestStats = None
+    workersStarted = False
+    try:
         if not sigtermSignaled():
             startPort = args.startPort
             maxPort=args.startPort+300
@@ -413,7 +415,6 @@ def executeLoadtest( targetHostUrl, htmlOutFileName='ltStats.html' ):
                         time.sleep(.5)
                     if proc.returncode == None:
                         masterStarted = True
-        workersStarted = False
         if masterStarted and not sigtermSignaled():
             logger.info( 'calling startWorkers' )
             startWorkers( targetHostUrl, args.masterHost, dataPorts )
@@ -436,8 +437,22 @@ def executeLoadtest( targetHostUrl, htmlOutFileName='ltStats.html' ):
                 loadTestStats = analyzeLtStats.reportStats(dataDirPath, htmlOutFileName)
             except Exception as exc:
                 logger.warning( 'got exception from analyzeLtStats (%s) %s',
-                    type(exc), exc, exc_info=True )
-        return loadTestStats
+                    type(exc), exc, exc_info=False )
+    except KeyboardInterrupt:
+        logger.warning( '(ctrl-c) received, will shutdown gracefully' )
+        if workersStarted:
+            killWorkerProcs()
+        if masterStarted and masterSpecs:
+            stopMaster( masterSpecs )
+        raise
+    except Exception as exc:
+        logger.warning( 'an exception occurred (%s); will try to shutdown gracefully', type(exc) )
+        if workersStarted:
+            killWorkerProcs()
+        if masterStarted and masterSpecs:
+            stopMaster( masterSpecs )
+        raise
+    return loadTestStats
 
 
 if __name__ == "__main__":
@@ -558,72 +573,7 @@ if __name__ == "__main__":
                 with open( targetUriFilePath, 'w' ) as outFile:
                     json.dump( args.targetUris, outFile, indent=1 )
                 #uploadTargetUris( targetUriFilePath )
-            '''
-            masterStarted = False
-            masterFailed = False
-            if not sigtermSignaled():
-                startPort = args.startPort
-                maxPort=args.startPort+300
-                while (not masterStarted) and (not masterFailed):
-                    if startPort >= maxPort:
-                        logger.warning( 'startPort (%d) exceeding maxPort (%d)',
-                            startPort, maxPort )
-                        break
-                    preopened = preopenPorts( startPort, maxPort, nPorts=3 )
-                    reservedPorts = preopened['ports']
-                    sockets = preopened['sockets']
-                    dataPorts = reservedPorts[0:2]
-                    webPort = reservedPorts[2]
-
-                    for sock in sockets:
-                        preclose( sock )
-                    sockets = []
-
-                    masterSpecs = startMaster( args.victimHostUrl, dataPorts, webPort )
-                    if masterSpecs:
-                        proc = masterSpecs['proc']
-                        deadline = time.time() + 30
-                        while time.time() < deadline:
-                            proc.poll() # sets proc.returncode
-                            if proc.returncode != None:
-                                logger.warning( 'master gave returnCode %d', proc.returncode )
-                                if proc.returncode == 98:
-                                    logger.info( 'locust tried to bind to a busy port')
-                                    # continue outer loop with higher port numbers
-                                    startPort += 3
-                                else:
-                                    logger.error( 'locust gave an unexpected returnCode %d', proc.returncode )
-                                    # will break out of the outer loop
-                                    masterFailed = True
-                                break
-                            time.sleep(.5)
-                        if proc.returncode == None:
-                            masterStarted = True
-            workersStarted = False
-            if masterStarted and not sigtermSignaled():
-                logger.info( 'calling startWorkers' )
-                startWorkers( args.victimHostUrl, args.masterHost, dataPorts )
-                workersStarted = True
-            if masterStarted and not sigtermSignaled():
-                #time.sleep(5)
-                masterUrl = 'http://127.0.0.1:%d' % webPort
-                conductLoadtest( masterUrl, nWorkersWanted, args.usersPerWorker,
-                    args.startTimeLimit, args.susTime,
-                    stopWanted=True, nReqInstances=nWorkersWanted, rampUpRate=rampUpRate )
-            
-            if masterStarted and masterSpecs:
-                time.sleep(5)
-                stopMaster( masterSpecs )
-            if workersStarted:
-                killWorkerProcs()
-            if masterStarted:
-                try:
-                    time.sleep( 5 )
-                    loadTestStats = analyzeLtStats.reportStats(dataDirPath)
-                except Exception as exc:
-                    logger.warning( 'got exception from analyzeLtStats (%s) %s',
-                        type(exc), exc, exc_info=True )
-            '''
+            # do all the steps of the actual loadtest (the first of 2 if doing a comparison)
             loadTestStats = executeLoadtest( args.victimHostUrl )
             logger.info ( 'loadTestStatsA: %s', loadTestStats )
             if args.altTargetHostUrl:
@@ -636,19 +586,20 @@ if __name__ == "__main__":
                     os.rename( srcFilePath, os.path.join( dataDirPath, 'locustStats_a.csv' ) )
                 print() # a blank lne to separate the outputs from the 2 subtests
 
+                # do all the steps of the second loadtest
                 loadTestStatsB = executeLoadtest( args.altTargetHostUrl, htmlOutFileName='ltStats_b.html' )
                 logger.info ( 'loadTestStatsB: %s', loadTestStatsB )
+                # rename an ooutput file from the second subtest
                 srcFilePath = os.path.join( dataDirPath, 'locustStats.csv' )
                 if os.path.isfile( srcFilePath ):
                     os.rename( srcFilePath, os.path.join( dataDirPath, 'locustStats_b.csv' ) )
+                # save a simple comparison output file as json
                 comparison = {}
                 comparison[ args.victimHostUrl ] = loadTestStats
                 comparison[ args.altTargetHostUrl ] = loadTestStatsB
                 comparisonFilePath = os.path.join( dataDirPath, 'comparison.json' )
                 with open( comparisonFilePath, 'w' ) as comparisonOutFile:
                     json.dump( comparison, comparisonOutFile, indent=2 )
-                
-
     except KeyboardInterrupt:
         logger.warning( '(ctrl-c) received, will shutdown gracefully' )
     except SigTerm:
@@ -656,6 +607,8 @@ if __name__ == "__main__":
         if masterSpecs:
             logger.info( 'shutting down locust master')
             stopMaster( masterSpecs )
+    except Exception as exc:
+        logger.error( 'an exception occurred; will try to shutdown gracefully', exc_info=True )
     if launchWanted:
         # get instances from json file, to see which ones to terminate
         launchedInstances = []
