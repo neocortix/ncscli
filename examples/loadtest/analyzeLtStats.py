@@ -65,9 +65,8 @@ def getHostLocationsMaxmind( ipAddrs, geoip2Client ):
     locationTable = pd.DataFrame( list(locations) )
     return locationTable.set_index( 'addr' )
 
-def getHostLocationsNcs():
+def getHostLocationsNcs( launchedJsonFilePath ):
     # read launched.json to get ncs location data
-    launchedJsonFilePath = 'launched.json'
     with open( launchedJsonFilePath, 'r' ) as inFile:
         instancesAllocated = json.load( inFile )
     #logger.debug( 'instancesAllocated %s', instancesAllocated ) 
@@ -249,10 +248,11 @@ def genHtmlTable( df ):
                       float_format=lambda x: '%.1f' % x
                       )
 
-def compileStats( dataDirPath ):
+def compileStats( dataDirPath, geoipId='xxx', geoipPwd='yyy' ):
     statsFileName = 'locustStats.csv'  # locustStats.csv locustStats_17devs.csv
+    launchedJsonFilePath = 'launched.json'
     global g_geoip2Client
-    g_geoip2Client = geoip2.webservice.Client( '134556', 'mzV4c9IXWRyn' )
+    g_geoip2Client = geoip2.webservice.Client( geoipId, geoipPwd )
 
     #geoInfo = getGeoip2Info( '34.216.219.139', g_geoip2Client )
     #print( geoInfo )
@@ -279,7 +279,7 @@ def compileStats( dataDirPath ):
             workerIPs = pd.Series( list(ipHostNames.keys()) )
             workerLocs = getHostLocationsMaxmind( workerIPs, g_geoip2Client )
         else:
-            workerLocs = getHostLocationsNcs()
+            workerLocs = getHostLocationsNcs( launchedJsonFilePath )
         workerLocs.fillna( {'city': 'cc', 'stateCode': 'ss'}, inplace=True )
         
         # create composite key for locations
@@ -385,6 +385,51 @@ def reportStats( dataDirPath = 'data', outFileName='ltStats.html' ):
     resultsSummary = reportCompiledStats( g_stats )
     logger.info( 'resultsSummary %s', resultsSummary )
     return resultsSummary
+
+def aggregateStats( stats ):
+    # aggregate stats into locKey-based rows and also a .global row
+    outDf = pd.DataFrame()
+    if 'locKey' in stats:
+        # aggregate across all, to produce .global row
+        these = deriveStats( stats )
+        these = pd.Series( {'locKey': '.global'} ).append( these )
+        outDf = outDf.append( [these] )
+        
+        # do per-locKey summary
+        locKeys = stats['locKey'].unique()
+        for locKey in locKeys:
+            selected = stats[ stats.locKey == locKey ]
+            if len( selected ):
+                these = deriveStats( selected )
+                these = pd.Series( {'locKey': locKey} ).append( these )
+                outDf = outDf.append( [these] )
+    perLocKey = outDf.reset_index( drop=True )
+    return perLocKey
+
+
+def compareLocustStats( launchedJsonFilePath, statsFilePathA, statsFilePathB ):
+    workerLocs = getHostLocationsNcs( launchedJsonFilePath )
+    workerLocs['locKey'] = workerLocs.countryCode + '.' + workerLocs.stateCode
+
+    statsA = loadStats( statsFilePathA, workerLocs )
+    statsA.fillna( {'locKey': '.unknown'}, inplace=True )
+    globalA = deriveStats( statsA )
+    aggregateA = aggregateStats( statsA )
+    aggregateA.set_index( 'locKey', inplace=True, drop=False, verify_integrity=True)
+
+    statsB = loadStats( statsFilePathB, workerLocs )
+    statsB.fillna( {'locKey': '.unknown'}, inplace=True )
+    globalB = deriveStats( statsB )
+    aggregateB = aggregateStats( statsB )
+    aggregateB.set_index( 'locKey', inplace=True, drop=False, verify_integrity=True)
+
+    if False:
+        outDf = pd.DataFrame()
+        outDf = outDf.append( [globalA] )
+        outDf = outDf.append( [globalB] )
+
+    outDf = pd.concat( [aggregateA, aggregateB], axis=1, join='outer', sort=True ) 
+    return outDf
 
 
 if __name__ == "__main__":
