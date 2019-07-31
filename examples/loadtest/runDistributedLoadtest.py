@@ -589,17 +589,30 @@ if __name__ == "__main__":
                 # do all the steps of the second loadtest
                 loadTestStatsB = executeLoadtest( args.altTargetHostUrl, htmlOutFileName='ltStats_b.html' )
                 logger.info ( 'loadTestStatsB: %s', loadTestStatsB )
-                # rename an ooutput file from the second subtest
+                # rename an output file from the second subtest
                 srcFilePath = os.path.join( dataDirPath, 'locustStats.csv' )
                 if os.path.isfile( srcFilePath ):
                     os.rename( srcFilePath, os.path.join( dataDirPath, 'locustStats_b.csv' ) )
-                # save a simple comparison output file as json
+
+                # optional code to compare stats
+                '''
                 comparison = {}
                 comparison[ args.victimHostUrl ] = loadTestStats
                 comparison[ args.altTargetHostUrl ] = loadTestStatsB
                 comparisonFilePath = os.path.join( dataDirPath, 'comparison.json' )
                 with open( comparisonFilePath, 'w' ) as comparisonOutFile:
                     json.dump( comparison, comparisonOutFile, indent=2 )
+                compDf = analyzeLtStats.compareLocustStats( launchedJsonFilePath,
+                    os.path.join( dataDirPath, 'locustStats_a.csv' ),
+                    os.path.join( dataDirPath, 'locustStats_b.csv' )
+                    )
+                html = compDf.to_html( 
+                    classes=['sortable'], justify='left', float_format=lambda x: '%.1f' % x
+                    )
+                with open( dataDirPath+'/compAreaTable.htm', 'w', encoding='utf8') as htmlOutFile:
+                    htmlOutFile.write( html )
+                '''
+
     except KeyboardInterrupt:
         logger.warning( '(ctrl-c) received, will shutdown gracefully' )
     except SigTerm:
