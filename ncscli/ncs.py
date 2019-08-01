@@ -172,7 +172,14 @@ def launchNcscInstances( authToken, numReq=1,
     logger.debug( 'reqData: %s', reqDataStr )
     url = 'https://cloud.neocortix.com/cloud-api/sc/jobs'
     #logger.info( 'posting with auth %s', authToken )
-    resp = requests.post( url, headers=headers, data=reqDataStr )
+    try:
+        resp = requests.post( url, headers=headers, data=reqDataStr )
+    except requests.ConnectionError:
+        #TODO improve exception handling to enable more retries when appropriate
+        logger.warning( 'got ConnectionError, retrying')
+        time.sleep( 10 )
+        resp = requests.post( url, headers=headers, data=reqDataStr )
+
     #logger.info( 'response code %s', resp.status_code )
     if (resp.status_code < 200) or (resp.status_code >= 300):
         logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
