@@ -585,6 +585,7 @@ if __name__ == "__main__":
                 if os.path.isfile( srcFilePath ):
                     os.rename( srcFilePath, os.path.join( dataDirPath, 'locustStats_a.csv' ) )
                 print() # a blank lne to separate the outputs from the 2 subtests
+                sys.stdout.flush()
 
                 # do all the steps of the second loadtest
                 loadTestStatsB = executeLoadtest( args.altTargetHostUrl, htmlOutFileName='ltStats_b.html' )
@@ -595,7 +596,7 @@ if __name__ == "__main__":
                     os.rename( srcFilePath, os.path.join( dataDirPath, 'locustStats_b.csv' ) )
 
                 # optional code to compare stats
-                '''
+
                 comparison = {}
                 comparison[ args.victimHostUrl ] = loadTestStats
                 comparison[ args.altTargetHostUrl ] = loadTestStatsB
@@ -606,12 +607,13 @@ if __name__ == "__main__":
                     os.path.join( dataDirPath, 'locustStats_a.csv' ),
                     os.path.join( dataDirPath, 'locustStats_b.csv' )
                     )
+                compDf.to_json( dataDirPath+'/compAreaTable.json', 'table', index=False )
                 html = compDf.to_html( 
                     classes=['sortable'], justify='left', float_format=lambda x: '%.1f' % x
                     )
                 with open( dataDirPath+'/compAreaTable.htm', 'w', encoding='utf8') as htmlOutFile:
                     htmlOutFile.write( html )
-                '''
+
 
     except KeyboardInterrupt:
         logger.warning( '(ctrl-c) received, will shutdown gracefully' )
