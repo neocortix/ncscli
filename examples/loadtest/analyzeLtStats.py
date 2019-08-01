@@ -67,7 +67,7 @@ def getHostLocationsMaxmind( ipAddrs, geoip2Client ):
 
 def getHostLocationsNcs( launchedJsonFilePath ):
     # read launched.json to get ncs location data
-    with open( launchedJsonFilePath, 'r' ) as inFile:
+    with open( launchedJsonFilePath, 'r', encoding='utf8' ) as inFile:
         instancesAllocated = json.load( inFile )
     #logger.debug( 'instancesAllocated %s', instancesAllocated ) 
     locations = []
