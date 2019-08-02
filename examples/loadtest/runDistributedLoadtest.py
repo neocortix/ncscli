@@ -498,7 +498,7 @@ if __name__ == "__main__":
     os.makedirs( dataDirPath, exist_ok=True )
 
     os.environ['ANSIBLE_CONFIG'] = os.path.join( scriptDirPath(), 'ansible.cfg' )
-    logger.info( 'ANSIBLE_CONFIG: %s', os.getenv('ANSIBLE_CONFIG') )
+    #logger.info( 'ANSIBLE_CONFIG: %s', os.getenv('ANSIBLE_CONFIG') )
 
     # check whether the victimHost is available
     try:
@@ -607,7 +607,7 @@ if __name__ == "__main__":
                     os.path.join( dataDirPath, 'locustStats_a.csv' ),
                     os.path.join( dataDirPath, 'locustStats_b.csv' )
                     )
-                compDf.to_json( dataDirPath+'/compAreaTable.json', 'table', index=False )
+                compDf.to_json( dataDirPath+'/compAreaTable.json', 'table', index=True )
                 html = compDf.to_html( 
                     classes=['sortable'], justify='left', float_format=lambda x: '%.1f' % x
                     )
