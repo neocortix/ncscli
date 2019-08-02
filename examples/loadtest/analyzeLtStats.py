@@ -415,20 +415,23 @@ def compareLocustStats( launchedJsonFilePath, statsFilePathA, statsFilePathB ):
     statsA.fillna( {'locKey': '.unknown'}, inplace=True )
     globalA = deriveStats( statsA )
     aggregateA = aggregateStats( statsA )
-    aggregateA.set_index( 'locKey', inplace=True, drop=False, verify_integrity=True)
+    aggregateA.set_index( 'locKey', inplace=True, drop=True, verify_integrity=True)
 
     statsB = loadStats( statsFilePathB, workerLocs )
     statsB.fillna( {'locKey': '.unknown'}, inplace=True )
     globalB = deriveStats( statsB )
     aggregateB = aggregateStats( statsB )
-    aggregateB.set_index( 'locKey', inplace=True, drop=False, verify_integrity=True)
+    aggregateB.set_index( 'locKey', inplace=True, drop=True, verify_integrity=True)
 
     if False:
         outDf = pd.DataFrame()
         outDf = outDf.append( [globalA] )
         outDf = outDf.append( [globalB] )
 
-    outDf = pd.concat( [aggregateA, aggregateB], axis=1, join='outer', sort=True ) 
+    outDf = pd.merge( aggregateA, aggregateB, how='outer', sort=True,
+        left_index=True, right_index=True,
+        suffixes=('_a', '_b')
+        ) 
     return outDf
 
 
