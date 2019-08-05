@@ -82,6 +82,8 @@ def getHostLocationsNcs( launchedJsonFilePath ):
             rec['city'] = locInfo['locality']
             rec['stateCode'] = locInfo['area']
             rec['countryCode'] = locInfo['country-code']
+            rec['latitude'] = locInfo['latitude']
+            rec['longitude'] = locInfo['longitude']
             locations.append( rec )
             #logger.info( 'locRec %s', rec )
     locationTable = pd.DataFrame( list(locations) )
@@ -432,6 +434,52 @@ def compareLocustStats( launchedJsonFilePath, statsFilePathA, statsFilePathB ):
         left_index=True, right_index=True,
         suffixes=('_a', '_b')
         ) 
+    return outDf
+
+def aggregateStatsByWorker( stats ):
+    # aggregate stats into worker-based rows
+    outDf = pd.DataFrame()
+    workerKeys = stats['workerIP'].unique()
+    
+    for key in workerKeys:
+        lStats = stats[ stats['workerIP'] == key ]
+        #lStats = stats[ stats['worker'] == key ]
+        if len( lStats ):
+            these = deriveStats( lStats )
+            if 'locKey' in lStats:
+                locKey = lStats.locKey.iloc[0]
+            else:
+                locKey = '.unknown'
+            these = pd.Series( {'workerId': key, 'locKey': locKey} ).append( these )
+            outDf = outDf.append( [these] )
+
+    perWorker = outDf.reset_index( drop=True )
+    perWorker = perWorker.drop( ['devices', 'rps'], 1 )
+    return perWorker
+
+def compareLocustStatsByWorker( launchedJsonFilePath, statsFilePathA, statsFilePathB ):
+    workerLocs = getHostLocationsNcs( launchedJsonFilePath )
+    # may not need any of the locKey code in this function
+    workerLocs['locKey'] = workerLocs.latitude.astype(str) + ',' + workerLocs.longitude.astype(str)
+
+    statsA = loadStats( statsFilePathA, workerLocs )
+    statsA.fillna( {'locKey': '.unknown'}, inplace=True )
+    aggregateA = aggregateStatsByWorker( statsA )
+    aggregateA.set_index( 'workerId', inplace=True, drop=True, verify_integrity=True)
+
+    statsB = loadStats( statsFilePathB, workerLocs )
+    statsB.fillna( {'locKey': '.unknown'}, inplace=True )
+    aggregateB = aggregateStatsByWorker( statsB )
+    aggregateB.set_index( 'workerId', inplace=True, drop=True, verify_integrity=True)
+
+    outDf = pd.merge( aggregateA, aggregateB, how='outer', sort=True,
+        left_index=True, right_index=True,
+        suffixes=('_a', '_b')
+        )
+    outDf['latitude'] = outDf.index.map( workerLocs.latitude )
+    outDf['longitude'] = outDf.index.map( workerLocs.longitude )
+    outDf = outDf.drop( ['locKey_a', 'locKey_b'], 1 )
+
     return outDf
 
 
