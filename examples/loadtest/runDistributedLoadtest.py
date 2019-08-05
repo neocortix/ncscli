@@ -603,6 +603,13 @@ if __name__ == "__main__":
                 comparisonFilePath = os.path.join( dataDirPath, 'comparison.json' )
                 with open( comparisonFilePath, 'w' ) as comparisonOutFile:
                     json.dump( comparison, comparisonOutFile, indent=2 )
+                # compose per-worker comparison table and save it
+                compDf = analyzeLtStats.compareLocustStatsByWorker( launchedJsonFilePath,
+                    os.path.join( dataDirPath, 'locustStats_a.csv' ),
+                    os.path.join( dataDirPath, 'locustStats_b.csv' )
+                    )
+                compDf.to_json( dataDirPath+'/compWorkerTable.json', 'table', index=True )
+                # compose per-area comparison table and save it
                 compDf = analyzeLtStats.compareLocustStats( launchedJsonFilePath,
                     os.path.join( dataDirPath, 'locustStats_a.csv' ),
                     os.path.join( dataDirPath, 'locustStats_b.csv' )
