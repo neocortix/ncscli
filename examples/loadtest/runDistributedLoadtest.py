@@ -438,6 +438,17 @@ def executeLoadtest( targetHostUrl, htmlOutFileName='ltStats.html' ):
             except Exception as exc:
                 logger.warning( 'got exception from analyzeLtStats (%s) %s',
                     type(exc), exc, exc_info=False )
+            plottingWanted = True
+            if plottingWanted:
+                try:
+                    temp = analyzeLtStats.temporallyIntegrateLocustStats(
+                        dataDirPath+'/locustStats.csv' )
+                    analyzeLtStats.plotIntegratedStats( temp,
+                        dataDirPath+'/integratedPerf.png' )
+                except Exception as exc:
+                    logger.warning( 'got exception from integrating plotting stats (%s) %s',
+                        type(exc), exc, exc_info=False )
+
     except KeyboardInterrupt:
         logger.warning( '(ctrl-c) received, will shutdown gracefully' )
         if workersStarted:
