@@ -482,6 +482,83 @@ def compareLocustStatsByWorker( launchedJsonFilePath, statsFilePathA, statsFileP
 
     return outDf
 
+def temporallyIntegrateLocustStats( inFilePath ):
+    import math
+    rawStats = pd.read_csv( inFilePath )
+    # parse calculable time values from strings
+    rawStats['startPdts'] = pd.to_datetime( rawStats.dateTime )
+    unixTimestamps = rawStats.startPdts.map( lambda x: x.to_pydatetime().timestamp())
+    rawStats['startRelTime'] = unixTimestamps - unixTimestamps.min()
+    rawStats['endRelTime'] = rawStats['startRelTime']+3
+   
+    # index the data by start timne, for efficient selection
+    istats = rawStats.set_index( 'startRelTime', drop=False )
+    istats = istats.sort_index()
+    
+    nrThresh = 0*10000 # threshold below which frames have too few requests
+    windowLen = 6
+    stepSize = 1
+    endTime = math.floor( istats.startRelTime.max() )
+    
+    # temporal integration loop
+    dicts=[]  # list of integrated data records
+    for xx in range( windowLen, endTime, stepSize ):
+        subset = istats.loc[ xx-windowLen : xx ]
+        nr = subset.nr.sum()
+        rpsMean = nr / windowLen if nr else float('nan')
+        if nr <= nrThresh:
+            msprMed = float('nan')
+        else:
+            msprMed = subset.msprMed.median()
+        if nr <= nrThresh:
+            msprMean = float('nan')
+        else:
+            msprMean = (subset.mspr * subset.nr).sum() / subset.nr.sum()
+        
+        nFails = subset.nFails.sum()
+        if nr <= nrThresh:
+            failRate = float('nan')
+        else:
+            failRate = nFails / nr if nr else 0
+
+        dicts.append( {'startRelTime': xx-windowLen, 'endRelTime': xx, 'nr': nr,
+            'rps': rpsMean, 'msprMed': msprMed, 'msprMean': msprMean,
+            'failRate': failRate } )
+    # convert to dataframe
+    outDf = pd.DataFrame( dicts )
+    return outDf
+
+def plotIntegratedStats( inDf, outFilePath ):
+    import matplotlib as mpl
+    import matplotlib.pyplot as plt
+    def makeTimelyXTicks( major, minor ):
+        # x-axis tick marks at multiples of 60 and 10
+        ax = plt.gca()
+        ax.xaxis.set_major_locator( mpl.ticker.MultipleLocator(major) )
+        ax.xaxis.set_minor_locator( mpl.ticker.MultipleLocator(minor) )
+
+    # pyplot-style plotting
+    fig, axes = plt.subplots( 3, sharex=True )
+    #fig.suptitle('performance over time')
+    axes[0].plot( inDf.startRelTime, inDf.rps, label='requests per second' )
+    axes[1].plot( inDf.startRelTime, inDf.msprMean, label='mean response time (ms)' )
+    axes[1].plot( inDf.startRelTime, inDf.msprMed, label='median response time (ms)' )
+    axes[2].plot( inDf.startRelTime, inDf.failRate, label='failure rate' )
+    for ax in range( 0, 3 ):
+        axes[ax].set_ylim( bottom=0 )
+    for ax in range( 0, 2 ):
+        axes[ax].legend( loc='lower center' )
+    axes[2].legend()
+    plt.gca().set_xlabel("elapsed seconds")
+    plt.gca().set(xlim=(0, inDf.startRelTime.max()) )
+    if inDf.startRelTime.max() > 60:
+        makeTimelyXTicks( 60, 10 )
+    else:
+        makeTimelyXTicks( 10, 1 )
+
+
+    plt.savefig( outFilePath )
+
 
 if __name__ == "__main__":
     initLogging()
