@@ -34,12 +34,13 @@ def plotRenderTimes( fetcherTable ):
     '''plots fetcher (and some core) job timings based on file dates'''
     fetcherCounts = fetcherTable.hostSpec.value_counts()
     fetcherNames = sorted( list( fetcherCounts.index ), reverse = True )
-    fetcherNames.append( 'core' )
+    #fetcherNames.append( 'core' )
     nClusters = len( fetcherNames )
     fig = plt.figure()
     ax = plt.gca()
     clusterHeight = 1
-    yMax = nClusters*clusterHeight
+    yMargin = .25
+    yMax = nClusters*clusterHeight + yMargin
     ax.set_ylim( 0, yMax )
     yTickLocs = np.arange( clusterHeight/2, nClusters*clusterHeight, clusterHeight)
     plt.yticks( yTickLocs, fetcherNames )
@@ -69,10 +70,12 @@ def plotRenderTimes( fetcherTable ):
     #jobColors = { 'collect': 'tab:blue', 'rsync': 'mediumpurple', 'render':  'lightseagreen' }
     #jobColors = { 'collect': 'lightseagreen', 'rsync': 'mediumpurple', 'render':  'tab:blue' }
     jobColors = { 'collect': 'lightseagreen', 'rsync': 'tab:purple', 'render':  'tab:blue' }
+    jiggers = { 'collect': .2, 'rsync': 0, 'render':  .1 }
   
     jobColor0 = mpl.colors.to_rgb( 'gray' )
    
-    jobBottom = clusterHeight * .1
+    #jobBottom = clusterHeight * .1 + yMargin
+    jobBottom = yMargin
     for cluster in fetcherNames:
         #print( cluster )
         jobs = fetcherTable[fetcherTable.hostSpec==cluster]
@@ -84,22 +87,23 @@ def plotRenderTimes( fetcherTable ):
             if durSeconds == 0:
                 durSeconds = 1
             color = jobColors.get( job.eventType, jobColor0 )
-            boxHeight = clusterHeight*.8
-            if job.eventType == 'rsync':
-                boxHeight -= clusterHeight * .2
+            jigger = jiggers.get( job.eventType, 0 )
+            boxHeight = clusterHeight*.7
+            #if job.eventType == 'rsync':
+            #    boxHeight -= clusterHeight * .2
             ax.add_patch(
                 patches.Rectangle(
-                    (startSeconds, jobBottom),   # (x,y)
+                    (startSeconds, jobBottom-jigger),   # (x,y)
                     durSeconds,          # width
                     boxHeight,          # height
                     facecolor=color, edgecolor='k', linewidth=0.5,
                     alpha=alpha
                     )
                 )
-            if job.eventType == 'render':
+            if job.eventType == 'rsync' and (job.sequenceNum != 0) :
                 label = str(job.sequenceNum)
                 y = jobBottom+.1
-                ax.annotate( label, xy=(startSeconds+.4, y), xytext=(startSeconds+.4, y) )
+                ax.annotate( label, xy=(startSeconds+.4, y) )
         jobBottom += clusterHeight
         
     
@@ -119,7 +123,7 @@ if __name__ == "__main__":
     args = ap.parse_args()
     logger.debug( 'args: %s', args )
     
-    inFilePath = 'data/perfLog.csv'  # perfLog_short
+    inFilePath = 'data/perfLog.csv'  # perfLog_1080p-2 perfLog_short perfLog_t3-small_540p
     timingTable = pd.read_csv( inFilePath )
     timingTable['dateTime'] = pd.to_datetime( timingTable.dateTimeStr )
     timingTable['durTd'] = pd.to_timedelta(timingTable.duration, unit='s')
