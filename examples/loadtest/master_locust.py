@@ -34,7 +34,7 @@ g_stopping = False
 def openStatsOutFile( dataFilePath ):
     global g_statsOutFile
     g_statsOutFile = open( dataFilePath, 'w' )
-    g_statsOutFile.write( 'dateTime,endDateTimeStr,worker,nr,rps,rpsMax,rpsMin,mspr,msprMax,msprMed,msprMin,nFails\n' )
+    g_statsOutFile.write( 'dateTime,endDateTimeStr,worker,nr,rps,rpsMax,rpsMin,mspr,msprMax,msprMed,msprMin,nFails,nUsers\n' )
     g_statsOutFile.flush()
 
 def median_from_dict(total, count):
@@ -76,6 +76,7 @@ def on_slave_report(client_id, data):
     if len( data['stats']):
         #if len(data['stats']) != 1:
         #    console_logger.info( '%d stats objects' % len(data['stats']) )
+        nUsers = data['user_count']
         stats = data['stats_total']
         rpss = data['stats_total']['num_reqs_per_sec']
         #rpss = data['stats'][0]['num_reqs_per_sec']
@@ -144,8 +145,11 @@ def on_slave_report(client_id, data):
             console_logger.info( 'disabled' )
         else:
             try:
-                outString = '%s,%s,%s,%d,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%d' % \
-                    (startDateTime.isoformat(), endDateTime.isoformat(), workerName, numReqs, rps, maxRps, minRps, meanRTime, maxRTime, medRTime, minRTime, numFails )
+                outString = '%s,%s,%s,%d,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%d,%d' % \
+                    (startDateTime.isoformat(), endDateTime.isoformat(),
+                        workerName, numReqs, rps, maxRps, minRps, 
+                        meanRTime, maxRTime, medRTime, minRTime, numFails, nUsers
+                        )
                 if g_statsOutFile:
                     print( outString, file=g_statsOutFile )
                     g_statsOutFile.flush()
