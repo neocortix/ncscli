@@ -1,30 +1,98 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <title>Neocortix Network Telemetry</title>
     <meta charset="utf-8"/>
-	<meta name="viewport" content="width=device-width">
-    <title>neocortix Last Mile Pingtest</title>
-	<style>
-	body {
-		font-family: "Helvetica Neue", Helvetica, Arial, Sans-Serif;
-	} 
-	pre {
-		font-family: Helvetica, Sans-Serif; font-size: 85%;
-	} 
-	</style>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.0/css/bootstrap.min.css">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.0/js/bootstrap.min.js"></script></head>
+    <script src="sorttable.js"></script>
+    <style>
+        .nav { font-size: 17px; }
+        .footer1 {
+            background-color: #f4f4f4;
+            border-top: 0.4px solid #ccc;
+            box-shadow: 0 50vh 0 50vh #f4f4f4;
+            padding-left: 0;
+            padding-right: 0;
+            margin-left: 0;
+            margin-right: 0;
+            max-width: 100%;
+        }
+        .footerInner {
+            padding-top: 1rem;
+            margin-bottom: 1rem;
+            color: #666;
+        }
+        .footerLinks>a {
+            color: #555 ;
+        }
+        .footerSep {
+            margin-left: 1rem;
+            border-left: 1px solid #ccc;
+            margin-right: 1rem;
+        }
+        @media (min-width: 576px) {
+            .container-fluid{
+                max-width: 576px;
+            }
+        }
+        @media (min-width: 768px) {
+            .container-fluid{
+                max-width: 768px;
+            }
+        }
+        @media (min-width: 992px) {
+            .container-fluid{
+                max-width: 992px;
+            }
+        }
+        @media (min-width: 1200px) {
+            .container-fluid{
+                max-width: 1200px;
+            }
+        }
+    </style>
 </head>
 <body>
-    <script src="sorttable.js"></script>
-
-    <a href="https://cloud.neocortix.com/dashboard">
-    <img src="CloudLogo_006.png"
-        style="height: 3em" id="logo"       
-        />
-    </a>
-    <h3>Last Mile Pingtest Demo</h3>
+    <nav class="navbar navbar-inverse navbar-static-top">
+            <div class="container-fluid">
+              <div class="navbar-header">
+                <a class="navbar-brand" style="padding: 6px; padding-left: 20px" href="https://cloud.neocortix.com/dashboard">
+                  <img src="CloudLogo_008_medium_blackBG_tight.png"
+                  style="height: 100%; padding:1px; width: auto;" id="logo"
+                  />
+                </a>
+              </div>
+              <ul class="nav navbar-nav">
+                <li class="dropdown"><a class="dropdown-toggle" data-toggle="dropdown" href="#">Products <span class="caret"></span></a>
+                  <ul class="dropdown-menu">
+                    <li><a href="https://cloud.neocortix.com/scalable-compute"><span class="glyphicon glyphicon-cloud"></span> Scalable Compute</a></li>
+                  </ul>
+                </li>
+              </ul>
+              <ul class="nav navbar-nav navbar-right">
+                <li class="dropdown"><a class="dropdown-toggle" data-toggle="dropdown" href="#">Account <span class="caret"></span></a>
+                  <ul class="dropdown-menu">
+                    <li><a href="https://cloud.neocortix.com/profile"><span class="glyphicon glyphicon-user"></span> Profile</a></li>
+                    <li><a href="https://cloud.neocortix.com/billing"><span class="glyphicon glyphicon-usd"></span> Billing</a></li>
+                    <li role="separator" class="divider"></li>
+                    <li><a href="https://cloud.neocortix.com/logout"><span class="glyphicon glyphicon-log-in"></span> Logout</a></li>
+                  </ul>
+                </li>
+              </ul>
+            </div>
+          </nav>
+            
+  <div class="container">
+          
+          
+    <h3>Neocortix Network Telemetry</h3>
 
     <div id="settings">
         Auth Token: <input id="authToken", size=37 type=password required placeholder="(required)" />
+        <a href="https://cloud.neocortix.com/profile/api"><span class="glyphicon glyphicon-wrench"></span> Get One</a>
     </div>
     <br>
     # of available devices: <span id="nAvail">x</span>
@@ -60,12 +128,13 @@
     <button id="statusBut" >Get Status</button>
 
     <div id="results">
+        <br>
+        <div id="mapDiv" hidden style="height: 250px;" ></div>
+        <br>
+        <div id="tableDiv" >
+        </div>
         <h4>state</h4>
         <pre id="state">(no query done)</pre>
-        <div id="mapDiv" hidden style="height: 250px;" ></div>
-        <div id="tableDiv" >
-            <script src="sorttable.js"></script>
-        </div>
         <h4>stderr log</h4>
         <pre id="stderr" style="overflow-y: auto; height: 20em; font-size: 65%; font-family:'Lucida Console', monospace;" >
         </pre>
@@ -74,6 +143,51 @@
         </pre>
 
     </div>
+</div>
+
+<br>
+
+<div id="footerDiv" class="container-fluid footer1" style="max-width: 100%">
+    <div class="footerInner footer1" >
+        <div class = "container">
+            <div class = "container-fluid">
+                <div class = "row" >
+                    <div class = "col-md-6">
+                        <div>
+                            Copyright © 2019 Neocortix, Inc. All Rights Reserved.
+                        </div>
+                    </div>
+                    <div >
+                        <div class="col-md-6" >
+                            <div class="footerLinks" >
+                                <a href="https://neocortix.com/cloud-terms-of-service" style="cursor: pointer;">
+                                    <span >Terms</span>
+                                </a>
+                                <span class="footerSep"></span>
+                                <a href="https://neocortix.com/cloud-acceptable-use-policy" style="cursor: pointer;">
+                                    <span>Uses</span>
+                                </a>
+                                <span class="footerSep"></span>
+                                <a href="https://neocortix.com/privacy-statement" style="cursor: pointer;">
+                                    <span>Privacy</span>
+                                </a>
+                                <span class="footerSep"></span>
+                                <a href="https://neocortix.com/payment-schedule" style="cursor: pointer;">
+                                    <span>Payments</span>
+                                </a>
+                                <span class="footerSep"></span>
+                                <a href="https://neocortix.com/cookie-policy" style="cursor: pointer;">
+                                    <span>Cookies</span>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <br>
+</div>
 
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
 
@@ -112,7 +226,7 @@ function onStatusBut() {
             if( data.hasOwnProperty("stats") ) {
                 var tagg = '<script src="sorttable.js"> </scrip' + 't>'
                 $('#tableDiv').html( tagg+data["stats"] );
-                //$('#tableDiv').addClass( "sortable" );
+                $('#tableDiv>table').addClass( "table table-striped table-condensed" );  // bootstrap
             }
             else {
                 $('#mapDiv').hide();

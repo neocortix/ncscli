@@ -430,6 +430,8 @@ def pingFromInstances( instanceJsonFilePath, dataDirPath, wwwDirPath, targetHost
             html = perRegion[colsToRender].to_html(index=False,
                 classes=['sortable'], justify='left', float_format=lambda x: '%.1f' % x
                 )
+            # remove the deprecated "border" attribute setting from the generated html
+            html = html.replace('border="1" ','')
             with open( wwwDirPath+'/areaTable.htm', 'w', encoding='utf8') as htmlOutFile:
                 htmlOutFile.write( html )
 

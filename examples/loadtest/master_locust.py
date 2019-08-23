@@ -29,11 +29,12 @@ def genStatsPage():
     return html
 
 g_statsOutFile = None
+g_stopping = False
 
 def openStatsOutFile( dataFilePath ):
     global g_statsOutFile
     g_statsOutFile = open( dataFilePath, 'w' )
-    g_statsOutFile.write( 'dateTime,endDateTimeStr,worker,nr,rps,rpsMax,rpsMin,mspr,msprMax,msprMed,msprMin,nFails\n' )
+    g_statsOutFile.write( 'dateTime,endDateTimeStr,worker,nr,rps,rpsMax,rpsMin,mspr,msprMax,msprMed,msprMin,nFails,nUsers\n' )
     g_statsOutFile.flush()
 
 def median_from_dict(total, count):
@@ -67,9 +68,15 @@ def on_slave_report(client_id, data):
     if client_id not in locust.runners.locust_runner.clients:
         return  # NO FURTHER PROCESSING of reports from zombies
 
+    if g_stopping:
+        if len( data['stats']):
+            console_logger.info( 'on_slave_report DROPPING because g_stopping len(stats): %d', len( data['stats']) )
+        return
+
     if len( data['stats']):
         #if len(data['stats']) != 1:
         #    console_logger.info( '%d stats objects' % len(data['stats']) )
+        nUsers = data['user_count']
         stats = data['stats_total']
         rpss = data['stats_total']['num_reqs_per_sec']
         #rpss = data['stats'][0]['num_reqs_per_sec']
@@ -100,6 +107,15 @@ def on_slave_report(client_id, data):
         startTimeStamp = data['stats_total']['start_time']
         # endTimeStamp = data['stats_total']['last_request_timestamp']  # not useful, it is truncated
         startDateTime = datetime.datetime.fromtimestamp( startTimeStamp )  # could be bad if closks out of sync (or wrong timezone)
+        masterDateTime = datetime.datetime.now()
+        timeDiscrep = (masterDateTime-startDateTime).total_seconds() - 3
+        if abs( timeDiscrep ) > 6.0:
+            console_logger.info( 'timeDiscrep: %.3f for instance %s', timeDiscrep, instanceId )
+            if abs( timeDiscrep ) > 15:
+                console_logger.info( 'DROPPING due to time discrepancy %s', instanceId )
+                return  # DROPPING data
+
+
         endDateTime = datetime.datetime.now()
 
         if instanceId and ipAddr:
@@ -129,8 +145,11 @@ def on_slave_report(client_id, data):
             console_logger.info( 'disabled' )
         else:
             try:
-                outString = '%s,%s,%s,%d,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%d' % \
-                    (startDateTime.isoformat(), endDateTime.isoformat(), workerName, numReqs, rps, maxRps, minRps, meanRTime, maxRTime, medRTime, minRTime, numFails )
+                outString = '%s,%s,%s,%d,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%d,%d' % \
+                    (startDateTime.isoformat(), endDateTime.isoformat(),
+                        workerName, numReqs, rps, maxRps, minRps, 
+                        meanRTime, maxRTime, medRTime, minRTime, numFails, nUsers
+                        )
                 if g_statsOutFile:
                     print( outString, file=g_statsOutFile )
                     g_statsOutFile.flush()
@@ -139,7 +158,23 @@ def on_slave_report(client_id, data):
             except:
                 print( 'outString error', rps, maxRps, minRps, meanRTime, maxRTime, medRTime, minRTime, file=sys.stderr )
 
+def on_hatch_complete( user_count=0 ):
+    '''event hook function to be called by Locust '''
+    console_logger.info( 'on_hatch_complete called with count %d', user_count )
 
+def on_master_start_hatching():
+    '''event hook function to be called by Locust '''
+    global g_stopping
+    console_logger.info( 'on_master_start_hatching called' )
+    g_stopping = False
+
+def on_master_stop_hatching():
+    '''event hook function to be called by Locust '''
+    global g_stopping
+    console_logger.info( 'on_master_stop_hatching called' )
+    g_stopping = True
+
+# main section (executes when this module is imported)
 #if '--master' in sys.argv:
 if True:
     print( 'opening statsOutFile' )
@@ -152,5 +187,6 @@ if True:
 
 
 events.slave_report += on_slave_report
-
-
+events.hatch_complete += on_hatch_complete
+events.master_start_hatching += on_master_start_hatching
+events.master_stop_hatching += on_master_stop_hatching

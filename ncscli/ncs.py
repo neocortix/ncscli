@@ -42,7 +42,7 @@ def ncscReqHeaders( authToken ):
         "X-Neocortix-Cloud-API-AuthToken": authToken
     }
 
-def queryNcsSc( urlTail, authToken, reqParams=None, maxRetries=1 ):
+def queryNcsSc( urlTail, authToken, reqParams=None, maxRetries=5 ):
     #if random.random() > .75:
     #    raise requests.exceptions.RequestException( 'simulated exception' )
     headers = ncscReqHeaders( authToken )
@@ -53,7 +53,15 @@ def queryNcsSc( urlTail, authToken, reqParams=None, maxRetries=1 ):
     if False:
         logger.info( 'querying url <%s> with data <%s> and headers <%s>', 
             url, reqParams, headers )
-    resp = requests.get( url, headers=headers, data=reqParams )
+    try:
+        resp = requests.get( url, headers=headers, data=reqParams )
+    except requests.ConnectionError as exc:
+        logger.warning( 'exception (%s) %s', type(exc), exc )
+        if maxRetries > 0:
+            time.sleep( 10 )
+            return queryNcsSc( urlTail, authToken, reqParams, maxRetries-1 )
+        else:
+            return { 'content': {}, 'statusCode': 599 }
     if (resp.status_code < 200) or (resp.status_code >= 300):
         logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
         logger.info( 'error url "%s"', url )
@@ -172,7 +180,14 @@ def launchNcscInstances( authToken, numReq=1,
     logger.debug( 'reqData: %s', reqDataStr )
     url = 'https://cloud.neocortix.com/cloud-api/sc/jobs'
     #logger.info( 'posting with auth %s', authToken )
-    resp = requests.post( url, headers=headers, data=reqDataStr )
+    try:
+        resp = requests.post( url, headers=headers, data=reqDataStr )
+    except requests.ConnectionError:
+        #TODO improve exception handling to enable more retries when appropriate
+        logger.warning( 'got ConnectionError, retrying')
+        time.sleep( 10 )
+        resp = requests.post( url, headers=headers, data=reqDataStr )
+
     #logger.info( 'response code %s', resp.status_code )
     if (resp.status_code < 200) or (resp.status_code >= 300):
         logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )

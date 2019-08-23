@@ -42,6 +42,7 @@ class g_:
     signaled = False
 
 class SigTerm(BaseException):
+    #logger.warning( 'unsupported SigTerm exception created')
     pass
 
 def sigtermHandler( sig, frame ):
@@ -230,7 +231,7 @@ def killWorkerProcs():
 
 def output_reader(proc):
     for line in iter(proc.stdout.readline, b''):
-        print('subprocess: {0}'.format(line.decode('utf-8')), end='', file=sys.stderr)
+        print('Locust: {0}'.format(line.decode('utf-8')), end='', file=sys.stderr)
 
 def startMaster( victimHostUrl, dataPorts, webPort ):
     logger.info( 'calling runLocust.py' )
@@ -369,6 +370,101 @@ def conductLoadtest( masterUrl, nWorkersWanted, usersPerWorker,
         print( '\n%d out of %d = %.0f%% success rate' % (nGoodWorkers, nReqInstances, pctGood ) )
     '''
 
+def executeLoadtest( targetHostUrl, htmlOutFileName='ltStats.html' ):
+    masterStarted = False
+    masterFailed = False
+    masterSpecs = None
+    loadTestStats = None
+    workersStarted = False
+    try:
+        if not sigtermSignaled():
+            startPort = args.startPort
+            maxPort=args.startPort+300
+            while (not masterStarted) and (not masterFailed):
+                if startPort >= maxPort:
+                    logger.warning( 'startPort (%d) exceeding maxPort (%d)',
+                        startPort, maxPort )
+                    break
+                preopened = preopenPorts( startPort, maxPort, nPorts=3 )
+                reservedPorts = preopened['ports']
+                sockets = preopened['sockets']
+                dataPorts = reservedPorts[0:2]
+                webPort = reservedPorts[2]
+
+                for sock in sockets:
+                    preclose( sock )
+                sockets = []
+
+                masterSpecs = startMaster( targetHostUrl, dataPorts, webPort )
+                if masterSpecs:
+                    proc = masterSpecs['proc']
+                    deadline = time.time() + 30
+                    while time.time() < deadline:
+                        proc.poll() # sets proc.returncode
+                        if proc.returncode != None:
+                            logger.warning( 'master gave returnCode %d', proc.returncode )
+                            if proc.returncode == 98:
+                                logger.info( 'locust tried to bind to a busy port')
+                                # continue outer loop with higher port numbers
+                                startPort += 3
+                            else:
+                                logger.error( 'locust gave an unexpected returnCode %d', proc.returncode )
+                                # will break out of the outer loop
+                                masterFailed = True
+                            break
+                        time.sleep(.5)
+                    if proc.returncode == None:
+                        masterStarted = True
+        if masterStarted and not sigtermSignaled():
+            logger.info( 'calling startWorkers' )
+            startWorkers( targetHostUrl, args.masterHost, dataPorts )
+            workersStarted = True
+        if masterStarted and not sigtermSignaled():
+            #time.sleep(5)
+            masterUrl = 'http://127.0.0.1:%d' % webPort
+            conductLoadtest( masterUrl, nWorkersWanted, args.usersPerWorker,
+                args.startTimeLimit, args.susTime,
+                stopWanted=True, nReqInstances=nWorkersWanted, rampUpRate=rampUpRate )
+        
+        if masterStarted and masterSpecs:
+            time.sleep(5)
+            stopMaster( masterSpecs )
+        if workersStarted:
+            killWorkerProcs()
+        if masterStarted:
+            try:
+                time.sleep( 5 )
+                loadTestStats = analyzeLtStats.reportStats(dataDirPath, htmlOutFileName)
+            except Exception as exc:
+                logger.warning( 'got exception from analyzeLtStats (%s) %s',
+                    type(exc), exc, exc_info=False )
+            plottingWanted = True
+            if plottingWanted:
+                try:
+                    temp = analyzeLtStats.temporallyIntegrateLocustStats(
+                        dataDirPath+'/locustStats.csv' )
+                    analyzeLtStats.plotIntegratedStats( temp,
+                        dataDirPath+'/integratedPerf.png' )
+                except Exception as exc:
+                    logger.warning( 'got exception from integrating plotting stats (%s) %s',
+                        type(exc), exc, exc_info=False )
+
+    except KeyboardInterrupt:
+        logger.warning( '(ctrl-c) received, will shutdown gracefully' )
+        if workersStarted:
+            killWorkerProcs()
+        if masterStarted and masterSpecs:
+            stopMaster( masterSpecs )
+        raise
+    except Exception as exc:
+        logger.warning( 'an exception occurred (%s); will try to shutdown gracefully', type(exc) )
+        if workersStarted:
+            killWorkerProcs()
+        if masterStarted and masterSpecs:
+            stopMaster( masterSpecs )
+        raise
+    return loadTestStats
+
 
 if __name__ == "__main__":
     # configure logger formatting
@@ -384,6 +480,7 @@ if __name__ == "__main__":
     ap.add_argument( 'victimHostUrl', help='url of the host to target as victim' )
     ap.add_argument( 'masterHost', help='hostname or ip addr of the Locust master' )
     ap.add_argument( '--authToken', required=True, help='the NCS authorization token to use' )
+    ap.add_argument( '--altTargetHostUrl', help='an alternative target host URL for comparison' )
     ap.add_argument( '--filter', help='json to filter instances for launch' )
     ap.add_argument( '--launch', type=boolArg, default=True, help='to launch and terminate instances' )
     ap.add_argument( '--nWorkers', type=int, default=1, help='the # of worker instances to launch (or zero for all available)' )
@@ -411,6 +508,9 @@ if __name__ == "__main__":
 
     os.makedirs( dataDirPath, exist_ok=True )
 
+    os.environ['ANSIBLE_CONFIG'] = os.path.join( scriptDirPath(), 'ansible.cfg' )
+    #logger.info( 'ANSIBLE_CONFIG: %s', os.getenv('ANSIBLE_CONFIG') )
+
     # check whether the victimHost is available
     try:
         resp = requests.head( args.victimHostUrl )
@@ -423,11 +523,25 @@ if __name__ == "__main__":
         logger.error( 'got exception %s', exc )
         sys.exit(1)
 
+    # check whether the altTargetHostUrl, if any, is available
+    if args.altTargetHostUrl:
+        try:
+            resp = requests.head( args.altTargetHostUrl )
+            if (resp.status_code < 200) or (resp.status_code >= 400):
+                logger.error( 'got response %d from alt target host %s',
+                    resp.status_code, args.altTargetHostUrl )
+                sys.exit(1)
+        except Exception as exc:
+            logger.warning( 'could not access alt target host %s',args.altTargetHostUrl )
+            logger.error( 'got exception %s', exc )
+            sys.exit(1)
+
     nWorkersWanted = args.nWorkers
     if launchWanted:
         # overwrite the launchedJson file as empty list, so we won't have problems with stale contents
         with open( launchedJsonFilePath, 'w' ) as outFile:
             json.dump( [], outFile )
+    loadTestStats = None
     try:
         masterSpecs = None
         if launchWanted:
@@ -470,78 +584,64 @@ if __name__ == "__main__":
                 with open( targetUriFilePath, 'w' ) as outFile:
                     json.dump( args.targetUris, outFile, indent=1 )
                 #uploadTargetUris( targetUriFilePath )
-            masterStarted = False
-            masterFailed = False
-            if not sigtermSignaled():
-                startPort = args.startPort
-                maxPort=args.startPort+300
-                while (not masterStarted) and (not masterFailed):
-                    if startPort >= maxPort:
-                        logger.warning( 'startPort (%d) exceeding maxPort (%d)',
-                            startPort, maxPort )
-                        break
-                    preopened = preopenPorts( startPort, maxPort, nPorts=3 )
-                    reservedPorts = preopened['ports']
-                    sockets = preopened['sockets']
-                    dataPorts = reservedPorts[0:2]
-                    webPort = reservedPorts[2]
+            # do all the steps of the actual loadtest (the first of 2 if doing a comparison)
+            loadTestStats = executeLoadtest( args.victimHostUrl )
+            logger.info ( 'loadTestStatsA: %s', loadTestStats )
+            if args.altTargetHostUrl:
+                # rename output files for the primary target
+                srcFilePath = os.path.join( dataDirPath, 'ltStats.html' )
+                if os.path.isfile( srcFilePath ):
+                    os.rename( srcFilePath, os.path.join( dataDirPath, 'ltStats_a.html' ) )
+                srcFilePath = os.path.join( dataDirPath, 'locustStats.csv' )
+                if os.path.isfile( srcFilePath ):
+                    os.rename( srcFilePath, os.path.join( dataDirPath, 'locustStats_a.csv' ) )
+                print() # a blank lne to separate the outputs from the 2 subtests
+                sys.stdout.flush()
 
-                    for sock in sockets:
-                        preclose( sock )
-                    sockets = []
+                # do all the steps of the second loadtest
+                loadTestStatsB = executeLoadtest( args.altTargetHostUrl, htmlOutFileName='ltStats_b.html' )
+                logger.info ( 'loadTestStatsB: %s', loadTestStatsB )
+                # rename an output file from the second subtest
+                srcFilePath = os.path.join( dataDirPath, 'locustStats.csv' )
+                if os.path.isfile( srcFilePath ):
+                    os.rename( srcFilePath, os.path.join( dataDirPath, 'locustStats_b.csv' ) )
 
-                    masterSpecs = startMaster( args.victimHostUrl, dataPorts, webPort )
-                    if masterSpecs:
-                        proc = masterSpecs['proc']
-                        deadline = time.time() + 30
-                        while time.time() < deadline:
-                            proc.poll() # sets proc.returncode
-                            if proc.returncode != None:
-                                logger.warning( 'master gave returnCode %d', proc.returncode )
-                                if proc.returncode == 98:
-                                    logger.info( 'locust tried to bind to a busy port')
-                                    # continue outer loop with higher port numbers
-                                    startPort += 3
-                                else:
-                                    logger.error( 'locust gave an unexpected returnCode %d', proc.returncode )
-                                    # will break out of the outer loop
-                                    masterFailed = True
-                                break
-                            time.sleep(.5)
-                        if proc.returncode == None:
-                            masterStarted = True
-            workersStarted = False
-            if masterStarted and not sigtermSignaled():
-                logger.info( 'calling startWorkers' )
-                startWorkers( args.victimHostUrl, args.masterHost, dataPorts )
-                workersStarted = True
-            if masterStarted and not sigtermSignaled():
-                #time.sleep(5)
-                masterUrl = 'http://127.0.0.1:%d' % webPort
-                conductLoadtest( masterUrl, nWorkersWanted, args.usersPerWorker,
-                    args.startTimeLimit, args.susTime,
-                    stopWanted=True, nReqInstances=nWorkersWanted, rampUpRate=rampUpRate )
-            
-            if masterStarted and masterSpecs:
-                time.sleep(5)
-                stopMaster( masterSpecs )
-            if workersStarted:
-                killWorkerProcs()
-            if masterStarted:
-                try:
-                    time.sleep( 5 )
-                    loadTestStats = analyzeLtStats.reportStats(dataDirPath)
-                except Exception as exc:
-                    logger.warning( 'got exception from analyzeLtStats (%s) %s',
-                        type(exc), exc, exc_info=False )
+                # optional code to compare stats
+
+                comparison = {}
+                comparison[ args.victimHostUrl ] = loadTestStats
+                comparison[ args.altTargetHostUrl ] = loadTestStatsB
+                comparisonFilePath = os.path.join( dataDirPath, 'comparison.json' )
+                with open( comparisonFilePath, 'w' ) as comparisonOutFile:
+                    json.dump( comparison, comparisonOutFile, indent=2 )
+                # compose per-worker comparison table and save it
+                compDf = analyzeLtStats.compareLocustStatsByWorker( launchedJsonFilePath,
+                    os.path.join( dataDirPath, 'locustStats_a.csv' ),
+                    os.path.join( dataDirPath, 'locustStats_b.csv' )
+                    )
+                compDf.to_json( dataDirPath+'/compWorkerTable.json', 'table', index=True )
+                # compose per-area comparison table and save it
+                compDf = analyzeLtStats.compareLocustStats( launchedJsonFilePath,
+                    os.path.join( dataDirPath, 'locustStats_a.csv' ),
+                    os.path.join( dataDirPath, 'locustStats_b.csv' )
+                    )
+                compDf.to_json( dataDirPath+'/compAreaTable.json', 'table', index=True )
+                html = compDf.to_html( 
+                    classes=['sortable'], justify='left', float_format=lambda x: '%.1f' % x
+                    )
+                with open( dataDirPath+'/compAreaTable.htm', 'w', encoding='utf8') as htmlOutFile:
+                    htmlOutFile.write( html )
+
 
     except KeyboardInterrupt:
         logger.warning( '(ctrl-c) received, will shutdown gracefully' )
     except SigTerm:
-        logger.warning( 'SIGTERM received, will shutdown gracefully' )
+        logger.warning( 'unsupported SIGTERM exception raised, may shutdown gracefully' )
         if masterSpecs:
             logger.info( 'shutting down locust master')
             stopMaster( masterSpecs )
+    except Exception as exc:
+        logger.error( 'an exception occurred; will try to shutdown gracefully', exc_info=True )
     if launchWanted:
         # get instances from json file, to see which ones to terminate
         launchedInstances = []
@@ -563,7 +663,10 @@ if __name__ == "__main__":
                 subprocess.check_call( cmd, shell=True )
             except Exception as exc:
                 logger.error( 'purgeKnownHosts threw exception (%s) %s',type(exc), exc )
-
-    logger.info( 'finished')
-    sys.exit(0)
+    if loadTestStats and loadTestStats.get('nReqsSatisfied', 0) > 0:
+        rc = 0
+    else:
+        rc=1
+    logger.info( 'finished with rc %d', rc)
+    sys.exit(rc)
 

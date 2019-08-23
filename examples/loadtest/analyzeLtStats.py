@@ -65,10 +65,9 @@ def getHostLocationsMaxmind( ipAddrs, geoip2Client ):
     locationTable = pd.DataFrame( list(locations) )
     return locationTable.set_index( 'addr' )
 
-def getHostLocationsNcs():
+def getHostLocationsNcs( launchedJsonFilePath ):
     # read launched.json to get ncs location data
-    launchedJsonFilePath = 'launched.json'
-    with open( launchedJsonFilePath, 'r' ) as inFile:
+    with open( launchedJsonFilePath, 'r', encoding='utf8' ) as inFile:
         instancesAllocated = json.load( inFile )
     #logger.debug( 'instancesAllocated %s', instancesAllocated ) 
     locations = []
@@ -83,6 +82,8 @@ def getHostLocationsNcs():
             rec['city'] = locInfo['locality']
             rec['stateCode'] = locInfo['area']
             rec['countryCode'] = locInfo['country-code']
+            rec['latitude'] = locInfo['latitude']
+            rec['longitude'] = locInfo['longitude']
             locations.append( rec )
             #logger.info( 'locRec %s', rec )
     locationTable = pd.DataFrame( list(locations) )
@@ -145,6 +146,9 @@ def reportCompiledStats( stats ):
     nFails = stats['nFails'].sum() if 'nFails' in stats else 0
     resultsSummary['nFails'] = int( nFails )
 
+    medianResponseTime = stats['msprMed'].median()
+    resultsSummary['medianResponseTimeMs'] = medianResponseTime
+
     print( 'Load Test started:', startDateTime.strftime('%Y/%m/%d %H:%M:%S%z') )
     print( 'Duration %.1f minutes'% durMinutes )
 
@@ -169,9 +173,12 @@ def reportCompiledStats( stats ):
     print( '# of requests failed:', nFails )
     print( 'failure rate: %.1f%%' % (failRate * 100) )
 
-    meanResponseTime = stats['mspr'].mean()
+    # meanResponseTime = stats['mspr'].mean()  # unweighted
+    meanResponseTime = (stats['mspr'] * stats['nr']).sum() / stats['nr'].sum()
+
     print( 'mean response time: %.1f ms' % meanResponseTime )
     resultsSummary['meanResponseTimeMs'] = meanResponseTime
+    print( 'median response time: %.1f ms' % resultsSummary['medianResponseTimeMs'] )
     print( 'response time range: %.1f-%.1f ms' % (stats['msprMin'].min(), stats['msprMax'].max() ) )
  
 
@@ -191,6 +198,8 @@ def reportCompiledStats( stats ):
 
 def deriveStats( stats ):
     result = pd.Series()
+    if len(stats) <= 0:
+        return result
     startDateTime = dateutil.parser.parse(stats.dateTime.min())
     endDateTime = dateutil.parser.parse(stats.endDateTimeStr.max())
     durSeconds = (endDateTime-startDateTime).total_seconds()
@@ -226,7 +235,9 @@ def deriveStats( stats ):
     result = result.append( pd.Series( { 'failPct': numFails * 100 / (numReqs+numFails) } ) )
     result = result.append( pd.Series( { 'rps': rps } ) )
     result = result.append( pd.Series( { 'rpsPerDev': (rps / nDevices) } ) )
-    result = result.append( pd.Series( { 'mean rt': stats['mspr'].mean() } ) )
+    #result = result.append( pd.Series( { 'mean rt': stats['mspr'].mean() } ) )
+    meanResponseTime = (stats['mspr'] * stats['nr']).sum() / stats['nr'].sum()
+    result = result.append( pd.Series( { 'mean rt': meanResponseTime } ) )
     result = result.append( pd.Series( { 'median rt': stats['msprMed'].median() } ) )
     result = result.append( pd.Series( { '90Pct rt': stats['msprMax'].quantile(.90) } ) )
     #result = result.append( pd.Series( { 'rt range': rtRange } ) )
@@ -239,10 +250,11 @@ def genHtmlTable( df ):
                       float_format=lambda x: '%.1f' % x
                       )
 
-def compileStats( dataDirPath ):
+def compileStats( dataDirPath, geoipId='xxx', geoipPwd='yyy' ):
     statsFileName = 'locustStats.csv'  # locustStats.csv locustStats_17devs.csv
+    launchedJsonFilePath = 'launched.json'
     global g_geoip2Client
-    g_geoip2Client = geoip2.webservice.Client( '134556', 'mzV4c9IXWRyn' )
+    g_geoip2Client = geoip2.webservice.Client( geoipId, geoipPwd )
 
     #geoInfo = getGeoip2Info( '34.216.219.139', g_geoip2Client )
     #print( geoInfo )
@@ -269,7 +281,7 @@ def compileStats( dataDirPath ):
             workerIPs = pd.Series( list(ipHostNames.keys()) )
             workerLocs = getHostLocationsMaxmind( workerIPs, g_geoip2Client )
         else:
-            workerLocs = getHostLocationsNcs()
+            workerLocs = getHostLocationsNcs( launchedJsonFilePath )
         workerLocs.fillna( {'city': 'cc', 'stateCode': 'ss'}, inplace=True )
         
         # create composite key for locations
@@ -282,8 +294,9 @@ def compileStats( dataDirPath ):
     global g_stats
     g_stats = loadStats( dataDirPath+'/'+statsFileName, workerLocs )
 
-    
-
+    if len(g_stats) <= 0:
+        logger.info( 'no locust stats loaded')
+        return ''
 
     # fill in any unknown values
     g_stats.fillna( {'locKey': '.unknown', 'workerIP': '0.0.0.0'}, inplace=True )
@@ -337,6 +350,11 @@ def compileStats( dataDirPath ):
 
     worstCases = g_stats[ (g_stats.msprMax > 15000) | (g_stats.mspr > 3000) | (g_stats.msprMed > 3000)  ]
 
+    # experimental json output code
+    #regionJson = perRegion.to_json( orient='table', index=False )
+    #print( 'per-json', file=sys.stderr )
+    #print( regionJson, file=sys.stderr )
+
     regionTable = perRegion.to_html( index=False, classes=['sortable'], justify='left', float_format=lambda x: '%.1f' % x )
     workerTable = perWorker.to_html( index=False, classes=['sortable'], justify='left', float_format=lambda x: '%.1f' % x )
     worstCasesTable = genHtmlTable( worstCases )
@@ -354,19 +372,192 @@ def compileStats( dataDirPath ):
 
     return html    
 
-def reportStats( dataDirPath = 'data' ):
+def reportStats( dataDirPath = 'data', outFileName='ltStats.html' ):
     global g_stats
     g_stats = pd.DataFrame()
     
 
     html = compileStats( dataDirPath )
         
-    with open( dataDirPath+'/ltStats.html', 'w', encoding='utf8') as htmlOutFile:
+    with open( dataDirPath+'/'+outFileName, 'w', encoding='utf8') as htmlOutFile:
         htmlOutFile.write( html )
 
+    if len( g_stats ) <= 0:
+        return {}
     resultsSummary = reportCompiledStats( g_stats )
     logger.info( 'resultsSummary %s', resultsSummary )
     return resultsSummary
+
+def aggregateStats( stats ):
+    # aggregate stats into locKey-based rows and also a .global row
+    outDf = pd.DataFrame()
+    if 'locKey' in stats:
+        # aggregate across all, to produce .global row
+        these = deriveStats( stats )
+        these = pd.Series( {'locKey': '.global'} ).append( these )
+        outDf = outDf.append( [these] )
+        
+        # do per-locKey summary
+        locKeys = stats['locKey'].unique()
+        for locKey in locKeys:
+            selected = stats[ stats.locKey == locKey ]
+            if len( selected ):
+                these = deriveStats( selected )
+                these = pd.Series( {'locKey': locKey} ).append( these )
+                outDf = outDf.append( [these] )
+    perLocKey = outDf.reset_index( drop=True )
+    return perLocKey
+
+
+def compareLocustStats( launchedJsonFilePath, statsFilePathA, statsFilePathB ):
+    workerLocs = getHostLocationsNcs( launchedJsonFilePath )
+    workerLocs['locKey'] = workerLocs.countryCode + '.' + workerLocs.stateCode
+
+    statsA = loadStats( statsFilePathA, workerLocs )
+    statsA.fillna( {'locKey': '.unknown'}, inplace=True )
+    globalA = deriveStats( statsA )
+    aggregateA = aggregateStats( statsA )
+    aggregateA.set_index( 'locKey', inplace=True, drop=True, verify_integrity=True)
+
+    statsB = loadStats( statsFilePathB, workerLocs )
+    statsB.fillna( {'locKey': '.unknown'}, inplace=True )
+    globalB = deriveStats( statsB )
+    aggregateB = aggregateStats( statsB )
+    aggregateB.set_index( 'locKey', inplace=True, drop=True, verify_integrity=True)
+
+    if False:
+        outDf = pd.DataFrame()
+        outDf = outDf.append( [globalA] )
+        outDf = outDf.append( [globalB] )
+
+    outDf = pd.merge( aggregateA, aggregateB, how='outer', sort=True,
+        left_index=True, right_index=True,
+        suffixes=('_a', '_b')
+        ) 
+    return outDf
+
+def aggregateStatsByWorker( stats ):
+    # aggregate stats into worker-based rows
+    outDf = pd.DataFrame()
+    workerKeys = stats['workerIP'].unique()
+    
+    for key in workerKeys:
+        lStats = stats[ stats['workerIP'] == key ]
+        #lStats = stats[ stats['worker'] == key ]
+        if len( lStats ):
+            these = deriveStats( lStats )
+            if 'locKey' in lStats:
+                locKey = lStats.locKey.iloc[0]
+            else:
+                locKey = '.unknown'
+            these = pd.Series( {'workerId': key, 'locKey': locKey} ).append( these )
+            outDf = outDf.append( [these] )
+
+    perWorker = outDf.reset_index( drop=True )
+    perWorker = perWorker.drop( ['devices', 'rps'], 1 )
+    return perWorker
+
+def compareLocustStatsByWorker( launchedJsonFilePath, statsFilePathA, statsFilePathB ):
+    workerLocs = getHostLocationsNcs( launchedJsonFilePath )
+    # may not need any of the locKey code in this function
+    workerLocs['locKey'] = workerLocs.latitude.astype(str) + ',' + workerLocs.longitude.astype(str)
+
+    statsA = loadStats( statsFilePathA, workerLocs )
+    statsA.fillna( {'locKey': '.unknown'}, inplace=True )
+    aggregateA = aggregateStatsByWorker( statsA )
+    aggregateA.set_index( 'workerId', inplace=True, drop=True, verify_integrity=True)
+
+    statsB = loadStats( statsFilePathB, workerLocs )
+    statsB.fillna( {'locKey': '.unknown'}, inplace=True )
+    aggregateB = aggregateStatsByWorker( statsB )
+    aggregateB.set_index( 'workerId', inplace=True, drop=True, verify_integrity=True)
+
+    outDf = pd.merge( aggregateA, aggregateB, how='outer', sort=True,
+        left_index=True, right_index=True,
+        suffixes=('_a', '_b')
+        )
+    outDf['latitude'] = outDf.index.map( workerLocs.latitude )
+    outDf['longitude'] = outDf.index.map( workerLocs.longitude )
+    outDf = outDf.drop( ['locKey_a', 'locKey_b'], 1 )
+
+    return outDf
+
+def temporallyIntegrateLocustStats( inFilePath ):
+    import math
+    rawStats = pd.read_csv( inFilePath )
+    # parse calculable time values from strings
+    rawStats['startPdts'] = pd.to_datetime( rawStats.dateTime )
+    unixTimestamps = rawStats.startPdts.map( lambda x: x.to_pydatetime().timestamp())
+    rawStats['startRelTime'] = unixTimestamps - unixTimestamps.min()
+    rawStats['endRelTime'] = rawStats['startRelTime']+3
+   
+    # index the data by start timne, for efficient selection
+    istats = rawStats.set_index( 'startRelTime', drop=False )
+    istats = istats.sort_index()
+    
+    nrThresh = 0*10000 # threshold below which frames have too few requests
+    windowLen = 6
+    stepSize = 1
+    endTime = math.floor( istats.startRelTime.max() )
+    
+    # temporal integration loop
+    dicts=[]  # list of integrated data records
+    for xx in range( windowLen, endTime, stepSize ):
+        subset = istats.loc[ xx-windowLen : xx ]
+        nr = subset.nr.sum()
+        rpsMean = nr / windowLen if nr else float('nan')
+        if nr <= nrThresh:
+            msprMed = float('nan')
+        else:
+            msprMed = subset.msprMed.median()
+        if nr <= nrThresh:
+            msprMean = float('nan')
+        else:
+            msprMean = (subset.mspr * subset.nr).sum() / subset.nr.sum()
+        
+        nFails = subset.nFails.sum()
+        if nr <= nrThresh:
+            failRate = float('nan')
+        else:
+            failRate = nFails / nr if nr else 0
+
+        dicts.append( {'startRelTime': xx-windowLen, 'endRelTime': xx, 'nr': nr,
+            'rps': rpsMean, 'msprMed': msprMed, 'msprMean': msprMean,
+            'failRate': failRate } )
+    # convert to dataframe
+    outDf = pd.DataFrame( dicts )
+    return outDf
+
+def plotIntegratedStats( inDf, outFilePath ):
+    import matplotlib as mpl
+    import matplotlib.pyplot as plt
+    def makeTimelyXTicks( major, minor ):
+        # x-axis tick marks at multiples of 60 and 10
+        ax = plt.gca()
+        ax.xaxis.set_major_locator( mpl.ticker.MultipleLocator(major) )
+        ax.xaxis.set_minor_locator( mpl.ticker.MultipleLocator(minor) )
+
+    # pyplot-style plotting
+    fig, axes = plt.subplots( 3, sharex=True )
+    #fig.suptitle('performance over time')
+    axes[0].plot( inDf.startRelTime, inDf.rps, label='requests per second' )
+    axes[1].plot( inDf.startRelTime, inDf.msprMean, label='mean response time (ms)' )
+    axes[1].plot( inDf.startRelTime, inDf.msprMed, label='median response time (ms)' )
+    axes[2].plot( inDf.startRelTime, inDf.failRate, label='failure rate' )
+    for ax in range( 0, 3 ):
+        axes[ax].set_ylim( bottom=0 )
+    for ax in range( 0, 2 ):
+        axes[ax].legend( loc='lower center' )
+    axes[2].legend()
+    plt.gca().set_xlabel("elapsed seconds")
+    plt.gca().set(xlim=(0, inDf.startRelTime.max()) )
+    if inDf.startRelTime.max() > 60:
+        makeTimelyXTicks( 60, 10 )
+    else:
+        makeTimelyXTicks( 10, 1 )
+
+
+    plt.savefig( outFilePath )
 
 
 if __name__ == "__main__":
