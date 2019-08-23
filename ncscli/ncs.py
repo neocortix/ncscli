@@ -577,6 +577,9 @@ def doCmdTerminate( args ):
             return
         logger.info( 'response content %s', response['content'].keys() )
         instancesJson, respCode = (response['content'], response['statusCode'] )
+        if (respCode < 200) or (respCode >= 300):
+            logger.error( 'could not terminate instances')
+            return
 
         runningInstances = instancesJson['my']  # 'running'
         #logger.info( 'runningInstances %s', runningInstances )
