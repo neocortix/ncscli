@@ -35,19 +35,14 @@ if __name__ == "__main__":
                 port = details['ssh']['port']
                 user = details['ssh']['user']
                 ecdsaKey = details['ssh']['host-keys']['ecdsa']
-                ipAddr = socket.gethostbyname( host )
-                outLine = "[%s]:%s,[%s]:%s %s" % (
+                try:
+                    ipAddr = socket.gethostbyname( host )
+                except Exception as exc:
+                    logger.warning( 'exception (%s) for host %s'. type(exc), host )
+                else:
+                    outLine = "[%s]:%s,[%s]:%s %s" % (
                         host, port, ipAddr, port, ecdsaKey
-                )
-                '''
-                outLine = "node = %s@%s:%s" % (
-                        user, host, port
-                )
-                '''
-                #print( outLine)
-                outLines.append( outLine )
-                #print( "node = root@%s:%s" % (
-                #        host, port
-                #    ))
+                        )
+                    outLines.append( outLine )
     for outLine in sorted( outLines):
         print( outLine )
