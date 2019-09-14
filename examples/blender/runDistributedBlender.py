@@ -50,6 +50,7 @@ class SigTerm(BaseException):
 def sigtermHandler( sig, frame ):
     g_.signaled = True
     logger.warning( 'SIGTERM received; will try to shut down gracefully' )
+    #tellInstances.terminate()
     #raise SigTerm()
 
 def sigtermSignaled():
@@ -216,17 +217,18 @@ if __name__ == "__main__":
     logger.setLevel(logging.INFO)
     tellInstances.logger.setLevel(logging.INFO)
     logger.debug('the logger is configured')
-    logger.info('__file__ %s', __file__)
 
     ap = argparse.ArgumentParser( description=__doc__,
         fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( 'blendFilePath', help='the .blend file to render' )
     ap.add_argument( '--authToken', required=True, help='the NCS authorization token to use' )
     ap.add_argument( '--filter', help='json to filter instances for launch' )
+    ap.add_argument( '--instTimeLimit', type=int, default=900, help='amount of time (in seconds) installer is allowed to take on instances' )
     ap.add_argument( '--launch', type=boolArg, default=True, help='to launch and terminate instances' )
     ap.add_argument( '--nWorkers', type=int, default=1, help='the # of worker instances to launch (or zero for all available)' )
     ap.add_argument( '--sshAgent', type=boolArg, default=False, help='whether or not to use ssh agent' )
     ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use (default is random)' )
+    # dtr-specific args
     ap.add_argument( '--image_x', type=int, help='the width (in pixels) of the output',
         default=480 )
     ap.add_argument( '--image_y', type=int, help='the height (in pixels) of the output',
@@ -235,19 +237,25 @@ if __name__ == "__main__":
         default=30 )
     ap.add_argument( '--filetype', choices=['PNG', 'OPEN_EXR'], help='the type of output file',
         default='PNG' )
+    ap.add_argument( '--frame', type=int, help='the frame number to render',
+        default=1 )
+    ap.add_argument( '--seed', type=int, help='the blender cycles noise seed',
+        default=0 )
     args = ap.parse_args()
 
     signal.signal( signal.SIGTERM, sigtermHandler )
+    myPid = os.getpid()
+    logger.info('procID: %s', myPid)
+
 
     #logger.info( '--filter arg <%s>', args.filter )
 
-    dataDirPath = './data'
+    dataDirPath = '.'  # './data'
     launchedJsonFilePath = dataDirPath+'/launched.json'
     dtrSettingsFilePath = dataDirPath + '/user_settings.conf'
     dtrDirPath = os.path.expanduser('~/dtr')
 
     launchWanted = args.launch
-    timeLimit = 1200  # was 900 1200
 
     eventTimings = []
     #starterTiming = eventTiming.eventTiming('startup')
@@ -268,7 +276,7 @@ if __name__ == "__main__":
     # truncate the resultsLogFile
     with open( resultsLogFilePath, 'wb' ) as xFile:
         pass # xFile.truncate()
-    loadTestStats = None
+    dtrFinished = False
     try:
         masterSpecs = None
         if launchWanted:
@@ -283,10 +291,9 @@ if __name__ == "__main__":
                 sshClientKeyName = args.sshClientKeyName
             else:
                 keyContents = loadSshPubKey()
-                #sshClientKeyName = 'loadtest_%s@%s' % (getpass.getuser(), socket.gethostname())
                 randomPart = str( uuid.uuid4() )[0:13]
                 keyContents += ' #' + randomPart
-                sshClientKeyName = 'loadtest_%s' % (randomPart)
+                sshClientKeyName = 'blender_%s' % (randomPart)
                 respCode = ncs.uploadSshClientKey( args.authToken, sshClientKeyName, keyContents )
                 if respCode < 200 or respCode >= 300:
                     logger.warning( 'ncs.uploadSshClientKey returned %s', respCode )
@@ -322,20 +329,26 @@ if __name__ == "__main__":
             stepStatuses = tellInstances.tellInstances( startedInstances, installerCmd,
                 resultsLogFilePath=resultsLogFilePath,
                 download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
-                timeLimit=timeLimit, upload=None
+                timeLimit=args.instTimeLimit, upload=None
                 )
-        if not sigtermSignaled():
+            # restore our handler because tellInstances may have overridden it
+            signal.signal( signal.SIGTERM, sigtermHandler )
+            if not stepStatuses:
+                logger.warning( 'no statuses returned from installer')
             (goodOnes, badOnes) = triage( stepStatuses )
             stepTiming.finish()
             eventTimings.append(stepTiming)
             logger.info( 'stepStatuses %s', stepStatuses )
+        if goodOnes and not sigtermSignaled():
             goodInstances = [inst for inst in goodInstances if inst['instanceId'] in goodOnes ]
 
             dtrParams = {
                 'image_x': args.image_x,
                 'image_y': args.image_y,
                 'blocks_user': args.blocks_user,
-                'filetype': args.filetype,                
+                'filetype': args.filetype,
+                'frame': args.frame,
+                'seed': args.seed,
             }
             with open( dtrSettingsFilePath, 'w' ) as settingsFile:
                 generateDtrConf( dtrParams, goodInstances, settingsFile )
@@ -352,14 +365,26 @@ if __name__ == "__main__":
                     proc.poll() # sets proc.returncode
                     if proc.returncode != None:
                         logger.warning( 'master gave returnCode %d', proc.returncode )
-                        if proc.returncode:
+                        if proc.returncode == 0:
+                            dtrFinished = True
+                        else:
                             logger.error( 'dtr gave an unexpected returnCode %d', proc.returncode )
                             # will break out of the outer loop
                             masterFailed = True
                         break
+                    if sigtermSignaled():
+                        logger.info( 'signaling dtr')
+                        proc.send_signal( signal.SIGTERM )
+                        try:
+                            logger.info( 'waiting dtr')
+                            proc.wait(timeout=300)
+                            if proc.returncode:
+                                logger.warning( 'dtr return code %d', proc.returncode )
+                        except subprocess.TimeoutExpired:
+                            logger.warning( 'dtr did not terminate in time' )
+                        break
                     time.sleep(.5)
                 logger.info('at end of polling loop, return code: %s', proc.returncode )
-
 
 
     except KeyboardInterrupt:
@@ -388,8 +413,10 @@ if __name__ == "__main__":
             except Exception as exc:
                 logger.error( 'purgeKnownHosts threw exception (%s) %s',type(exc), exc )
             
-    if loadTestStats and loadTestStats.get('nReqsSatisfied', 0) > 0:
+    if dtrFinished:
         rc = 0
+    elif sigtermSignaled():
+        rc = 128 + 15  # linux convention when exiting due to signal 15 (sigterm)
     else:
         rc=1
     logger.info( 'finished with rc %d', rc)
