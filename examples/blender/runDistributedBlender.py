@@ -50,7 +50,7 @@ class SigTerm(BaseException):
 def sigtermHandler( sig, frame ):
     g_.signaled = True
     logger.warning( 'SIGTERM received; will try to shut down gracefully' )
-    #tellInstances.terminate()
+    tellInstances.terminate()
     #raise SigTerm()
 
 def sigtermSignaled():
@@ -224,10 +224,13 @@ if __name__ == "__main__":
     ap.add_argument( '--authToken', required=True, help='the NCS authorization token to use' )
     ap.add_argument( '--filter', help='json to filter instances for launch' )
     ap.add_argument( '--instTimeLimit', type=int, default=900, help='amount of time (in seconds) installer is allowed to take on instances' )
+    ap.add_argument( '--jobId', help='to identify this job' )
     ap.add_argument( '--launch', type=boolArg, default=True, help='to launch and terminate instances' )
     ap.add_argument( '--nWorkers', type=int, default=1, help='the # of worker instances to launch (or zero for all available)' )
     ap.add_argument( '--sshAgent', type=boolArg, default=False, help='whether or not to use ssh agent' )
     ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use (default is random)' )
+    ap.add_argument( '--timeLimit', type=int, help='time limit (in seconds) for the whole job',
+        default=24*60*60 )
     # dtr-specific args
     ap.add_argument( '--image_x', type=int, help='the width (in pixels) of the output',
         default=480 )
@@ -250,22 +253,20 @@ if __name__ == "__main__":
 
     #logger.info( '--filter arg <%s>', args.filter )
 
-    dataDirPath = '.'  # './data'
+    dataDirPath = './data'  # './data'
     launchedJsonFilePath = dataDirPath+'/launched.json'
     dtrSettingsFilePath = dataDirPath + '/user_settings.conf'
     dtrDirPath = os.path.expanduser('~/dtr')
 
     launchWanted = args.launch
 
+    startTime = time.time()
     eventTimings = []
     #starterTiming = eventTiming.eventTiming('startup')
     #starterTiming.finish()
     #eventTimings.append(starterTiming)
 
     os.makedirs( dataDirPath, exist_ok=True )
-
-    #os.environ['ANSIBLE_CONFIG'] = os.path.join( scriptDirPath(), 'ansible.cfg' )
-    #logger.info( 'ANSIBLE_CONFIG: %s', os.getenv('ANSIBLE_CONFIG') )
 
     nWorkersWanted = args.nWorkers
     if launchWanted:
@@ -276,7 +277,7 @@ if __name__ == "__main__":
     # truncate the resultsLogFile
     with open( resultsLogFilePath, 'wb' ) as xFile:
         pass # xFile.truncate()
-    dtrFinished = False
+    dtrStatus = None
     try:
         masterSpecs = None
         if launchWanted:
@@ -329,7 +330,7 @@ if __name__ == "__main__":
             stepStatuses = tellInstances.tellInstances( startedInstances, installerCmd,
                 resultsLogFilePath=resultsLogFilePath,
                 download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
-                timeLimit=args.instTimeLimit, upload=None
+                timeLimit=min(args.instTimeLimit, args.timeLimit), upload=None
                 )
             # restore our handler because tellInstances may have overridden it
             signal.signal( signal.SIGTERM, sigtermHandler )
@@ -360,17 +361,13 @@ if __name__ == "__main__":
             masterSpecs = startDtr( dtrDirPath, workingDir=dataDirPath, flush=True )
             if masterSpecs:
                 proc = masterSpecs['proc']
-                deadline = time.time() + 60 * 60
+                deadline = startTime + args.timeLimit
                 while time.time() < deadline:
                     proc.poll() # sets proc.returncode
                     if proc.returncode != None:
-                        logger.warning( 'master gave returnCode %d', proc.returncode )
-                        if proc.returncode == 0:
-                            dtrFinished = True
-                        else:
+                        dtrStatus = proc.returncode
+                        if proc.returncode != 0:
                             logger.error( 'dtr gave an unexpected returnCode %d', proc.returncode )
-                            # will break out of the outer loop
-                            masterFailed = True
                         break
                     if sigtermSignaled():
                         logger.info( 'signaling dtr')
@@ -384,7 +381,17 @@ if __name__ == "__main__":
                             logger.warning( 'dtr did not terminate in time' )
                         break
                     time.sleep(.5)
-                logger.info('at end of polling loop, return code: %s', proc.returncode )
+                if proc.returncode == None:
+                    logger.info('at end of polling loop, no return code' )
+                    dtrStatus = 124  # linux convention for timeout
+                    proc.send_signal( signal.SIGTERM )
+                    try:
+                        logger.info( 'waiting dtr')
+                        proc.wait(timeout=300)
+                        if proc.returncode:
+                            logger.warning( 'dtr return code %d', proc.returncode )
+                    except subprocess.TimeoutExpired:
+                        logger.warning( 'dtr did not terminate in time' )
 
 
     except KeyboardInterrupt:
@@ -413,8 +420,8 @@ if __name__ == "__main__":
             except Exception as exc:
                 logger.error( 'purgeKnownHosts threw exception (%s) %s',type(exc), exc )
             
-    if dtrFinished:
-        rc = 0
+    if dtrStatus != None:
+        rc = dtrStatus
     elif sigtermSignaled():
         rc = 128 + 15  # linux convention when exiting due to signal 15 (sigterm)
     else:
