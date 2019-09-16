@@ -9,6 +9,7 @@ import datetime
 import json
 import logging
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -69,6 +70,28 @@ def logResult( key, value, instanceId ):
             'dateTime': datetime.datetime.now(datetime.timezone.utc).isoformat() }
         print( json.dumps( toLog, sort_keys=True ), file=resultsLogFile )
         resultsLogFile.flush()
+
+def sigtermHandler():
+    ''' stops the currently running event loop, if any'''
+    logger.warning( 'SIGTERM signal received; will try to stop gracefully' )
+    terminate()
+
+def terminate():
+    ''' stops the currently running event loop, if any'''
+    loop = asyncio.get_event_loop()
+    if loop.is_running():
+        logger.info( 'canceling tasks' )
+        for task in asyncio.Task.all_tasks():
+            if task is not asyncio.tasks.Task.current_task():
+                task.cancel()
+        '''
+        # not sure if this code ever made sense
+        logger.info( 'stopping the eventloop' )
+        try:
+            loop.stop()
+        except Exception as exc:
+            logger.info( 'ignoring exception %s', exc )
+        '''
 
 async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.', dlFileName=None ):
     #logger.info( 'inst %s', inst)
@@ -222,7 +245,11 @@ async def run_multiple_clients( instances, cmd, timeLimit=None, sshAgent=None,
             nExceptions += 1
             logger.warning('connection refused for %s', abbrevIid )
             inst['commandState'] = 'unreachable'
-        elif isinstance(result, Exception):
+        elif isinstance(result, asyncio.CancelledError):  # another type of Exception (sort of)
+            nExceptions += 1
+            logger.warning('task cancelled for %s', abbrevIid )
+            inst['commandState'] = 'cancelled'
+        elif isinstance(result, Exception):  # miscellaneous exception
             nExceptions += 1
             logger.warning('exception (%s) "%s" for %s', type(result), result, abbrevIid )
             inst['commandState'] = 'exception'
@@ -312,12 +339,17 @@ def tellInstances( instancesSpec, command, resultsLogFilePath, download, downloa
     # the main loop
     eventLoop = asyncio.get_event_loop()
     eventLoop.set_debug(True)
-    statuses = eventLoop.run_until_complete(run_multiple_clients( 
-        startedInstances, program, scpSrcFilePath=upload,
-        dlFileName=download, dlDirPath=downloadDestDir,
-        sshAgent=sshAgent,
-        timeLimit=timeLimit
-        ))
+    #eventLoop.add_signal_handler(signal.SIGTERM, sigtermHandler)
+    try:
+        statuses = eventLoop.run_until_complete(run_multiple_clients(
+            startedInstances, program, scpSrcFilePath=upload,
+            dlFileName=download, dlDirPath=downloadDestDir,
+            sshAgent=sshAgent,
+            timeLimit=timeLimit
+            ))
+    except Exception as exc:
+        logger.warning( 'run_until_complete gave exception (%s) %s', type(exc), exc )
+        statuses = []
     #json.dump( statuses, sys.stdout, default=repr, indent=2 )
 
     mainTiming.finish()
