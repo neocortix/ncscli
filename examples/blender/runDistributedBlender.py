@@ -232,19 +232,20 @@ if __name__ == "__main__":
     ap.add_argument( '--timeLimit', type=int, help='time limit (in seconds) for the whole job',
         default=24*60*60 )
     # dtr-specific args
-    ap.add_argument( '--image_x', type=int, help='the width (in pixels) of the output',
-        default=480 )
-    ap.add_argument( '--image_y', type=int, help='the height (in pixels) of the output',
-        default=270 )
-    ap.add_argument( '--blocks_user', type=int, help='the number of blocks to partiotion the image into',
-        default=30 )
-    ap.add_argument( '--filetype', choices=['PNG', 'OPEN_EXR'], help='the type of output file',
+    ap.add_argument( '--width', type=int, help='the width (in pixels) of the output',
+        default=960 )
+    ap.add_argument( '--height', type=int, help='the height (in pixels) of the output',
+        default=540 )
+    ap.add_argument( '--blocks_user', type=int, help='the number of blocks to partition the image (or zero for "auto"',
+        default=0 )
+    ap.add_argument( '--fileType', choices=['PNG', 'OPEN_EXR'], help='the type of output file',
         default='PNG' )
     ap.add_argument( '--frame', type=int, help='the frame number to render',
         default=1 )
     ap.add_argument( '--seed', type=int, help='the blender cycles noise seed',
         default=0 )
     args = ap.parse_args()
+    #logger.debug('args: %s', args)
 
     signal.signal( signal.SIGTERM, sigtermHandler )
     myPid = os.getpid()
@@ -277,6 +278,7 @@ if __name__ == "__main__":
     # truncate the resultsLogFile
     with open( resultsLogFilePath, 'wb' ) as xFile:
         pass # xFile.truncate()
+
     dtrStatus = None
     try:
         masterSpecs = None
@@ -323,7 +325,7 @@ if __name__ == "__main__":
 
         wellInstalled = []
         if not sigtermSignaled():
-            installerCmd = 'sudo apt-get update && sudo apt-get install -q -y blender'
+            installerCmd = 'sudo apt-get update && sudo apt-get -qq -y install blender'
             # tell them to ping
             stepTiming = eventTiming.eventTiming('tellInstances install')
             logger.info( 'calling tellInstances to install on %d instances', len(startedInstances))
@@ -343,11 +345,19 @@ if __name__ == "__main__":
         if goodOnes and not sigtermSignaled():
             goodInstances = [inst for inst in goodInstances if inst['instanceId'] in goodOnes ]
 
+            blocks_user = args.blocks_user
+            if not blocks_user:
+                if nWorkersWanted == 1:
+                    blocks_user = 1
+                else:
+                    blocks_user = args.height / 9  # arbitrary, based on limited experience
+                    blocks_user = max( blocks_user, len(goodInstances)*1 )
+
             dtrParams = {
-                'image_x': args.image_x,
-                'image_y': args.image_y,
-                'blocks_user': args.blocks_user,
-                'filetype': args.filetype,
+                'image_x': args.width,
+                'image_y': args.height,
+                'blocks_user': blocks_user,
+                'filetype': args.fileType,
                 'frame': args.frame,
                 'seed': args.seed,
             }
@@ -356,7 +366,9 @@ if __name__ == "__main__":
 
             # copy some files into a working dir, because dtr has no args for them
             shutil.copyfile( dtrDirPath+'/bench.blend', dataDirPath+'/bench.blend' )
-            shutil.copyfile( args.blendFilePath, dataDirPath+'/render.blend' )
+            if os.path.abspath( args.blendFilePath ) \
+                != os.path.abspath( dataDirPath+'/render.blend' ):
+                shutil.copyfile( args.blendFilePath, dataDirPath+'/render.blend' )
 
             masterSpecs = startDtr( dtrDirPath, workingDir=dataDirPath, flush=True )
             if masterSpecs:
@@ -407,10 +419,10 @@ if __name__ == "__main__":
             except Exception as exc:
                 logger.warning( 'could not load json (%s) %s', type(exc), exc )
         if len( launchedInstances ):
-            jobId = launchedInstances[0].get('job')
-            if jobId:
-                logger.info( 'calling terminateJobInstances for job "%s"', jobId )
-                ncs.terminateJobInstances( args.authToken, jobId )
+            launcherJob = launchedInstances[0].get('job')
+            if launcherJob:
+                logger.info( 'calling terminateJobInstances for job "%s"', launcherJob )
+                ncs.terminateJobInstances( args.authToken, launcherJob )
             else:
                 terminateThese( args.authToken, launchedInstances )
             # purgeKnownHosts works well only when known_hosts is not hashed
