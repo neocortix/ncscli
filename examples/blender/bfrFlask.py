@@ -1,4 +1,4 @@
-import configparser
+import base64
 import datetime
 import enum
 import json
@@ -33,6 +33,7 @@ jsonify = flask.json.jsonify  # handy alias
 
 g_workingDirPath = os.getcwd() + '/bfrData'
 #g_dataDirPath = os.getcwd() + '/data'
+g_minDpr = 37
 
 @app.route('/')
 @app.route('/api/')
@@ -96,6 +97,13 @@ def anyFound( a, b ):
         if x in b:
             return True
     return False
+
+def applyDprIfNone( filtersJson, minDpr ):
+    '''add a dpr specification to the filtersJson, if it doesn't have one already)'''
+    filters = json.loads( filtersJson )
+    if 'dpr' not in filters:
+        filters['dpr'] = '>=%d' % minDpr
+    return json.dumps( filters )
 
 def findRunningScript( targets ):
     #logger.info( 'looking for script %s', targets )
@@ -172,6 +180,7 @@ def getInstancesAvailable( authToken, args ):
     if not authToken:
         return jsonify('no authToken provided'), 401
     filtersJson = args.get('filter', None)
+    filtersJson = applyDprIfNone( filtersJson, g_minDpr )
     #if not filtersJson:
     #    return jsonify('missing filter arg'), 422
     callTime = time.time()
@@ -225,11 +234,38 @@ def launchJob( args ):
 
     stdOutFilePath = stdFilePath('stdout', jobId)
     stdErrFilePath = stdFilePath('stderr', jobId)
+    blenderFilePath = dataDirPath( jobId ) + '/render.blend'
 
-    # enquote each arg
-    args = ["'" + arg + "'" for arg in args ]
+    if True:
+        # newer
+        if 'dataUri' not in args:
+            logger.warning( 'no blender file given')
+            return jsonify('no blender file given'), 400
+        # quick and dirty data-uri splitter; change this if needing other types of URLs
+        dataUri = args['dataUri']
+        logger.info( 'dataUri: %s...', dataUri[0:100] )
+        if ';base64,' not in dataUri:
+            return jsonify('given data is not in data-uri (base64) format'), 400
+        encoded = dataUri.split(',')[1]
+        decoded = base64.b64decode( encoded )
+        #logger.info ('decoded: %s', decoded )
+        
+        with open( blenderFilePath, 'wb' ) as outFile:
+            outFile.write( decoded )
+        
+        argsStr = blenderFilePath
+        for key,val in args.items():
+            if key != 'dataUri':
+                if key == 'filter':
+                    val = applyDprIfNone( val, g_minDpr )
+                argsStr += ' --' + key + " '" + str(val) + "'"
+        logger.info( 'argsStr: %s', argsStr )
+    else:
+        # older
+        # enquote each arg
+        args = ["'" + arg + "'" for arg in args ]
 
-    argsStr = ' '.join(args)
+        argsStr = ' '.join(args)
     argsStr += ' --jobId ' + jobId
     cmd = 'cd  %s && LANG=en_US.UTF-8 PYTHONPATH=%s %s/runDistributedBlender.py %s' \
         % (wdPath, pyLibPath, pyLibPath, argsStr)
