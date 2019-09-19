@@ -38,7 +38,7 @@ if __name__ == "__main__":
                 try:
                     ipAddr = socket.gethostbyname( host )
                 except Exception as exc:
-                    logger.warning( 'exception (%s) for host %s'. type(exc), host )
+                    logger.warning( 'exception (%s) for host %s', type(exc), host )
                 else:
                     outLine = "[%s]:%s,[%s]:%s %s" % (
                         host, port, ipAddr, port, ecdsaKey
