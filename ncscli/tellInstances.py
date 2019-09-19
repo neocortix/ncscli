@@ -93,7 +93,8 @@ def terminate():
             logger.info( 'ignoring exception %s', exc )
         '''
 
-async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.', dlFileName=None ):
+async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.', 
+        dlFileName=None, knownHostsOnly=False ):
     #logger.info( 'inst %s', inst)
     sshSpecs = inst['ssh']
     #logger.info( 'iid %s, ssh: %s', inst['instanceId'], inst['ssh'])
@@ -106,7 +107,10 @@ async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.
     password = sshSpecs.get('password', None )
 
     try:
-        known_hosts = None
+        if knownHostsOnly:
+            known_hosts = os.path.expanduser( '~/.ssh/known_hosts' )
+        else:
+            known_hosts = None
         if False:  # 'returnedPubKey' in inst:
             keyStr = inst['returnedPubKey']
             logger.info( 'importing %s', keyStr)
@@ -202,12 +206,15 @@ async def run_client_simple(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDir
 
 async def run_multiple_clients( instances, cmd, timeLimit=None, sshAgent=None,
     scpSrcFilePath=None,
-    dlDirPath='.', dlFileName=None
+    dlDirPath='.', dlFileName=None,
+    knownHostsOnly=False
     ):
     # run cmd on all the given instances
     #logger.info( 'instances %s', instances )
 
-    tasks = (asyncio.wait_for(run_client(inst, cmd, sshAgent=sshAgent, scpSrcFilePath=scpSrcFilePath, dlDirPath=dlDirPath, dlFileName=dlFileName),
+    tasks = (asyncio.wait_for(run_client(inst, cmd, sshAgent=sshAgent,
+                scpSrcFilePath=scpSrcFilePath, dlDirPath=dlDirPath, dlFileName=dlFileName,
+                knownHostsOnly=knownHostsOnly),
         timeout=timeLimit)
         for inst in instances )
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -264,7 +271,7 @@ async def run_multiple_clients( instances, cmd, timeLimit=None, sshAgent=None,
     return statuses
 
 def tellInstances( instancesSpec, command, resultsLogFilePath, download, downloadDestDir,
-    jsonOut, sshAgent, timeLimit, upload ):
+    jsonOut, sshAgent, timeLimit, upload, knownHostsOnly=False ):
     '''tellInstances to upload, execute, and/or download, things'''
     args = locals().copy()
 
@@ -345,7 +352,7 @@ def tellInstances( instancesSpec, command, resultsLogFilePath, download, downloa
             startedInstances, program, scpSrcFilePath=upload,
             dlFileName=download, dlDirPath=downloadDestDir,
             sshAgent=sshAgent,
-            timeLimit=timeLimit
+            timeLimit=timeLimit, knownHostsOnly=knownHostsOnly
             ))
     except Exception as exc:
         logger.warning( 'run_until_complete gave exception (%s) %s', type(exc), exc )
@@ -395,11 +402,12 @@ if __name__ == "__main__":
     ap.add_argument('--sshAgent', type=boolArg, default=False, help='whether or not to use ssh agent')
     ap.add_argument('--timeLimit', type=float, help='maximum time (in seconds) to take (default=none (unlimited)')
     ap.add_argument('--upload', help='optional fileName to upload to all targets')
+    ap.add_argument('--knownHostsOnly', type=boolArg, default=False, help='whether to use only known_hosts, or just any hosts')
     args = ap.parse_args()
     logger.info( "args: %s", str(args) )
     
     tellInstances( args.launchedJsonFilePath, args.command, args.resultsLog,
         args.download, args.downloadDestDir, args.jsonOut, args.sshAgent,
-        args.timeLimit, args.upload
+        args.timeLimit, args.upload, args.knownHostsOnly
         )
     logger.info( 'finished' )
