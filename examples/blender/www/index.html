@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Neocortix 3D Rendering</title>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.0/css/bootstrap.min.css">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.0/js/bootstrap.min.js"></script>
+
+    <link href="footer.css" rel="stylesheet" type="text/css">
+    <style>
+        .nav { font-size: 17px; }
+        .margined {
+            margin: 2px;
+        }
+        @media (min-width: 576px) {
+            .container-fluid{
+                max-width: 576px;
+            }
+        }
+        @media (min-width: 768px) {
+            .container-fluid{
+                max-width: 768px;
+            }
+        }
+        @media (min-width: 992px) {
+            .container-fluid{
+                max-width: 992px;
+            }
+        }
+        @media (min-width: 1200px) {
+            .container-fluid{
+                max-width: 1200px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+  <nav class="navbar navbar-inverse navbar-static-top">
+        <div class="container-fluid">
+            <div class="navbar-header">
+                <a class="navbar-brand" style="padding: 6px; padding-left: 20px" href="https://cloud.neocortix.com/dashboard">
+                    <img src="CloudLogo_008_medium_blackBG_tight.png"
+                    style="height: 100%; padding:1px; width: auto;" id="logo"
+                    />
+                </a>
+            </div>
+            <ul class="nav navbar-nav">
+                <li class="dropdown"><a class="dropdown-toggle" data-toggle="dropdown" href="#">Products <span class="caret"></span></a>
+                    <ul class="dropdown-menu">
+                    <li><a href="https://cloud.neocortix.com/scalable-compute"><span class="glyphicon glyphicon-cloud"></span> Scalable Compute</a></li>
+                    </ul>
+                </li>
+            </ul>
+            <ul class="nav navbar-nav navbar-right">
+                <li class="dropdown"><a class="dropdown-toggle" data-toggle="dropdown" href="#">Account <span class="caret"></span></a>
+                    <ul class="dropdown-menu">
+                    <li><a href="https://cloud.neocortix.com/profile"><span class="glyphicon glyphicon-user"></span> Profile</a></li>
+                    <li><a href="https://cloud.neocortix.com/billing"><span class="glyphicon glyphicon-usd"></span> Billing</a></li>
+                    <li role="separator" class="divider"></li>
+                    <li><a href="https://cloud.neocortix.com/logout"><span class="glyphicon glyphicon-log-in"></span> Logout</a></li>
+                    </ul>
+                </li>
+            </ul>
+        </div>
+  </nav>
+                    
+  <div class="container">
+    
+    <h3>3D Rendering</h3>
+
+    Auth Token: <input id="authToken", size=37 type=password required placeholder="(required)" />
+    <a href="https://cloud.neocortix.com/profile/api"><span class="glyphicon glyphicon-wrench"></span> Get One</a>
+    <br>
+    # of available devices: <span id="nAvail">x</span>
+    <br>
+    <br>
+    # of workers: <input id="nWorkers", class="margined" size=6 value = 1 />
+    <br>
+    Width: <input id="width", class="margined" size=4 value=960 />
+    Height: <input id="height", class="margined" size=4 value=540 >
+    <br>
+    Frame # <input id="frame", class="margined" size=4 value=1 >
+    <br><br>
+    Blender .blend file to render:
+    <br>
+    <input id="blendFile", type="file" ></input>
+
+    <br>
+    <a href="#parameters" data-toggle="collapse"><span class="glyphicon glyphicon-cog"></span> Settings</a>
+    <div id="parameters" class ="collapse" >
+        <label for="fileType" >
+            Output File Type:
+        </label>
+        <select id="fileType" size=2 >
+            <option selected="selected" value="PNG" >png (portable network graphics)</option>
+            <option value="OPEN_EXR" >exr (OpenEXR)</option>
+        </select>
+        <br>
+        Seed value: <input id="seed", size=6 value=0 >
+        blocks_user: <input id="blocks_user", size=6 value=0 >
+        <br>
+     
+  
+        <label for="regions" >
+            Choose one or more regions (or select none, to allow all regions):
+        </label>
+        <br>
+        <select id="regions" multiple size=7 >
+            <option value="usa" >United States of America</option>
+            <option value="asia" >Asia</option>
+            <option value="europe" >Europe</option>
+            <option value="middle-east" >Middle East</option>
+            <option value="north-america" >North America</option>
+            <option value="oceania" >Oceania</option>
+            <option value="russia-ukraine-belarus" >Russia & Ukraine & Belarus</option>
+        </select>
+  
+    </div>
+
+    <br><br>
+    <button id="launchBut" style="font-size: 120%;" >Launch</button>
+    <button id="stopBut" disabled style="font-size: 120%;" >Stop</button>
+    <hr/>
+    Job ID: <input id="jobId", size=37 /> 
+    <button id="statusBut" >Get Status</button>
+
+    <div id="results">
+        <div id="plotDiv">
+            <img id="plotImg" style="width: 100%; padding: 4px;" hidden src="favicon.ico" >
+        </div>
+        <h4>state</h4>
+        <pre id="state">(no query done)</pre>
+        <h4>stdout</h4>
+        <pre id="stdout"></pre>
+        <h4>stderr log</h4>
+        <pre id="stderr" style="overflow-y: auto; height: 20em; font-size: 65%; font-family:'Lucida Console', monospace;" 
+        ></pre>
+
+    </div>
+</div>
+
+<br>
+
+<div id="footerDiv" class="container-fluid footer1" style="max-width: 100%">
+    <div class="footerInner footer1" >
+        <div class = "container">
+            <div class = "container-fluid">
+                <div class = "row" >
+                    <div class = "col-md-6">
+                        <div>
+                            Copyright © 2019 Neocortix, Inc. All Rights Reserved.
+                        </div>
+                    </div>
+                    <div >
+                        <div class="col-md-6" >
+                            <div class="footerLinks" >
+                                <a href="https://neocortix.com/cloud-terms-of-service" style="cursor: pointer;">
+                                    <span >Terms</span>
+                                </a>
+                                <span class="footerSep"></span>
+                                <a href="https://neocortix.com/cloud-acceptable-use-policy" style="cursor: pointer;">
+                                    <span>Uses</span>
+                                </a>
+                                <span class="footerSep"></span>
+                                <a href="https://neocortix.com/privacy-statement" style="cursor: pointer;">
+                                    <span>Privacy</span>
+                                </a>
+                                <span class="footerSep"></span>
+                                <a href="https://neocortix.com/payment-schedule" style="cursor: pointer;">
+                                    <span>Payments</span>
+                                </a>
+                                <span class="footerSep"></span>
+                                <a href="https://neocortix.com/cookie-policy" style="cursor: pointer;">
+                                    <span>Cookies</span>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <br>
+</div>
+
+
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+
+<script>
+var g_checkerTask = null;
+var g_availTask = null;
+
+function onStatusBut() {
+    var jobId = $('#jobId').val();
+    if (jobId.length <= 0) {
+        return;
+    }
+    saveSettings();
+
+    var urlPrefix='./api/jobs/';
+    var queryParams = jobId
+    //var urlSuffix='&callback=?&json.wrf=on_data';
+    var url=urlPrefix + queryParams;
+    var jx = $.getJSON(url);
+    jx.done(function( data, textStatus, jqxhr ) {
+        //console.log( "onStatusBut .done()" );
+        //console.log( "jx data", data );
+        //console.log( "jx text", textStatus );
+        //console.log( "jqxhr", jqxhr );
+        //console.log( "jx responseJSON", jqxhr.responseJSON );
+        if( typeof data === 'object' && data !== null && data.hasOwnProperty("state") ) {
+            $('#state').text( data["state"])
+            $('#stdout').text( data["stdout"])
+            $('#stderr').text( data["stderr"])
+            //console.log( $( '#stderr' )[0].scrollHeight  );
+            $( "#stderr" ).scrollTop( $( '#stderr' )[0].scrollHeight );
+            if( data["state"] == 'stopped' ) {
+                // use seed value to help determine the image file name
+                var seed = $('#seed').val();
+                if (seed.length > 0) {
+                    seed = seed.trim();
+                }
+                if (seed.length <= 0) {
+                    seed = 0;
+                }
+                seed = seed.toString()
+                // use filetype to help determine the image file name
+                var fileType = $('#fileType').val();
+                if (fileType.length <= 0) {
+                    fileType = "PNG";
+                }
+                var extension = '.exr';
+                if (fileType != 'OPEN_EXR') {
+                    extension = '.png'
+                }
+                var imgUrl = urlPrefix + jobId + '/composite_seed_' + seed + extension;
+                $('#plotImg').attr( "src", imgUrl );
+                $('#plotImg').show();
+            }
+            else {
+                $('#plotImg').hide();
+            }
+        }
+        else {
+            $('#state').empty()
+            $('#stdout').empty()
+            $('#stderr').text( data)
+            $('#plotImg').hide();
+        }
+    })
+    jx.fail(function( jqxhr, textStatus, error ) {
+        console.log( "onStatusBut .fail()" );
+        //console.log( "jx error", error );
+        //console.log( "jx text", textStatus );
+        //console.log( "jqxhr", jqxhr );
+        //console.log( "jx responseJSON", jqxhr.responseJSON );
+        $('#state').text( 'could not get status from rendering master')
+        })
+}
+
+function onLaunchBut() {
+    var nWorkers = $('#nWorkers').val();
+    if (nWorkers.length <= 0) {
+        return;
+    }
+    var authToken = $('#authToken').val();
+    if (authToken.length <= 0) {
+        return;
+    }
+    var frame = $('#frame').val();
+    if (frame.length <= 0) {
+        return;
+    }
+    var width = $('#width').val();
+    if (width.length <= 0) {
+        return;
+    }
+    var height = $('#height').val();
+    if (height.length <= 0) {
+        return;
+    }
+    var seed = $('#seed').val();
+    if (seed.length > 0) {
+        seed = seed.trim();
+    }
+    if (seed.length <= 0) {
+        seed = 0;
+    }
+    var fileType = $('#fileType').val();
+    if (fileType.length <= 0) {
+        fileType = "PNG";
+    }
+    var blendFile = $('#blendFile')[0].files[0];
+    if (! blendFile ) {
+        alert( 'please choose a Blender .blend file');
+        return;
+    }
+    var blocks_user = $('#blocks_user').val();
+    if (blocks_user.length > 0) {
+        blocks_user = blocks_user.trim();
+    }
+    else {
+        blocks_user = 0;
+    }
+    var regions = $('#regions').val();
+    regionExpr = {"regions": regions }
+    var filterArg = JSON.stringify( regionExpr )
+    //console.log( 'filterArg', filterArg )
+
+
+
+    var url='./api/jobs/';
+    var args = {
+        authToken: authToken, nWorkers: nWorkers,
+        width: width, height: height,
+        frame: frame, seed: seed,
+        fileType: fileType,
+        blocks_user: blocks_user,
+        filter: filterArg
+    }
+
+    // read the blend file locally
+    var deferred = jQuery.Deferred();
+    var reader = new FileReader();
+    reader.onloadend = function (e) {
+        deferred.resolve(e.target.result);
+    }
+    reader.onerror = function (e) {
+        deferred.reject(e.target.error);
+    }
+    console.log( blendFile )
+    
+    reader.readAsDataURL(blendFile);
+    prom = deferred.promise();
+
+
+    prom.done(function (encoded) {
+        //console.log( "encoded data", encoded )
+
+        args.dataUri = encoded;
+        argsStr = JSON.stringify( args );
+
+        var jx = $.post(url, argsStr);  // argsStr
+        jx.done(function( data, textStatus, jqxhr ) {
+            var jobId = data.id
+            $('#jobId').val( jobId )
+            $('#stopBut').prop( 'disabled', false )
+            // emulate the "get status" button
+            setTimeout( onStatusBut, 1000 );
+            //setTimeout( onStatusBut, 2000 );
+            g_checkerTask = setInterval( checkJob, 2000 )
+        })
+        jx.fail(function( jqxhr, textStatus, error ) {
+            console.log( "onLaunchBut .fail()" );
+            console.log( "jx error", error );
+            console.log( "jx text", textStatus );
+            console.log( "jqxhr", jqxhr );
+            console.log( "jqxhr.status", jqxhr.status );
+            console.log( "jx responseJSON", jqxhr.responseText );
+            $('#state').text( 'launch failure: ' + error )
+            $('#stderr').text( jqxhr.responseText )
+            })
+    });
+}
+
+function onRegionsChanged() {
+    console.log( "onRegionsChanged()" );
+    checkAvail()
+}
+
+function onStopBut() {
+    console.log( "onStopBut()" );
+    var jobId = $('#jobId').val();
+    if (jobId.length <= 0) {
+        return;
+    }
+    if( $('#state').text() != 'running' ) {
+        console.log( "onStopBut() but not running" );
+        return;
+    }
+
+    var urlPrefix='./api/jobs/';
+    var myUrl=urlPrefix + jobId;
+    //args = {}  // will want to put 'state': 'stopped' here
+    //argsStr = JSON.stringify( args )
+    //console.log( 'putting with argsStr', argsStr )
+    var jx = $.ajax( { url: myUrl, type: 'PUT' });
+    jx.done(function( data, textStatus, jqxhr ) {
+        console.log( "onStopBut .done()" );
+    })
+    jx.fail(function( jqxhr, textStatus, error ) {
+        console.log( "onStopBut .fail()" );
+    })
+
+}
+
+function checkAvail() {
+    // this version only does something if authToken field is not empty
+    var authToken = $('#authToken').val();
+    if (authToken.length <= 0) {
+        return;
+    }
+    if( document.hidden ) {
+        return;
+    }
+    var url='./api/instances/available';
+
+    var regions = $('#regions').val();
+    var regionExpr = {"regions": regions }
+    var filterArg = JSON.stringify( regionExpr )
+
+    var queryParams = { "filter": filterArg }
+    //var jx = $.getJSON(url, queryParams );
+    var jx = $.ajax({
+        dataType: "json",
+        url: url,
+        data: queryParams,
+        headers: {"X-Neocortix-Cloud-API-AuthToken": authToken }
+    });
+    jx.done(function( data, textStatus, jqxhr ) {
+        console.log( "checkAvail jx data", data );
+        $('#nAvail').text( data );
+    })
+}
+
+function checkJob() {
+    // this version stops when the status is no longer 'running'
+    onStatusBut()
+    if( $('#state').text() != 'running' ) {
+        $('#stopBut').prop( 'disabled', true )
+        clearInterval( g_checkerTask )
+        g_checkerTask = null;
+    }
+}
+
+function saveSettings() {
+    localStorage.setItem("authToken", $('#authToken').val() );
+    if( $('#blendFile')[0].files[0] )
+        localStorage.setItem("blendFile", $('#blendFile')[0].files[0].name );  // not reloadable
+
+    localStorage.setItem("fileType", $('#fileType').val() );
+    localStorage.setItem("frame", $('#frame').val() );
+    localStorage.setItem("height", $('#height').val() );
+    localStorage.setItem("jobId", $('#jobId').val() );
+    localStorage.setItem("nWorkers", $('#nWorkers').val() );
+    localStorage.setItem("regions", $('#regions').val() );
+    localStorage.setItem("seed", $('#seed').val() );
+    localStorage.setItem("width", $('#width').val() );
+}
+
+function loadSettings() {
+    $('#authToken').val( localStorage.getItem("authToken") );
+    $('#fileType').val( localStorage.getItem("fileType") );
+    if( localStorage.getItem("nWorkers") ) {
+        $('#nWorkers').val( localStorage.getItem("nWorkers") );
+    }
+    if( localStorage.getItem("frame") ) {
+        $('#frame').val( localStorage.getItem("frame") );
+    }
+    if( localStorage.getItem("regions") ) {
+        $('#regions').val( localStorage.getItem("regions").split(",") );
+    }
+    if( localStorage.getItem("width") ) {
+        $('#width').val( localStorage.getItem("width") );
+    }
+    $('#jobId').val( localStorage.getItem("jobId") );
+    if( localStorage.getItem("height") ) {
+        $('#height').val( localStorage.getItem("height") );
+    }
+    $('#seed').val( localStorage.getItem("seed") );
+}
+
+function isUrlValid( arg ){
+    try {
+        new URL(arg);
+        return true;
+    } catch (x) {
+        return false;
+    }
+}
+
+
+function splitTextarea( elemId ){
+    var lines = [];
+    $.each($(elemId).val().split(/\n/), function(i, line){
+        if(line.trim()){
+            lines.push(line.trim());
+        } else {
+            //skip emty line
+        }
+    });
+    return lines
+}
+
+function on_ready() {
+    // Check for FileReader API (HTML5) support.
+    if (!window.FileReader) {
+        alert('This browser does not support the FileReader API.');
+    }
+    $('#launchBut').click(onLaunchBut);
+    $('#statusBut').click(onStatusBut);
+    $('#stopBut').click(onStopBut);
+    $('#regions').change(onRegionsChanged);
+    loadSettings();
+    checkAvail();
+    g_availTask = setInterval( checkAvail, 15 * 1000 )
+}
+
+$(document).ready(on_ready);
+
+</script>
+</body>

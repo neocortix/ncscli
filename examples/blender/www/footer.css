@@ -1,0 +1,23 @@
+.footer1 {
+    background-color: #f4f4f4;
+    border-top: 0.4px solid #ccc;
+    box-shadow: 0 50vh 0 50vh #f4f4f4;
+    padding-left: 0;
+    padding-right: 0;
+    margin-left: 0;
+    margin-right: 0;
+    max-width: 100%;
+}
+.footerInner {
+    padding-top: 1rem;
+    margin-bottom: 1rem;
+    color: #666;
+}
+.footerLinks>a {
+    color: #555 ;
+}
+.footerSep {
+    margin-left: 1rem;
+    border-left: 1px solid #ccc;
+    margin-right: 1rem;
+}
