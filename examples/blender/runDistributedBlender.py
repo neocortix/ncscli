@@ -254,7 +254,7 @@ if __name__ == "__main__":
 
     #logger.info( '--filter arg <%s>', args.filter )
 
-    dataDirPath = './data'  # './data'
+    dataDirPath = os.path.abspath('./data' )
     launchedJsonFilePath = dataDirPath+'/launched.json'
     dtrSettingsFilePath = dataDirPath + '/user_settings.conf'
     dtrDirPath = os.path.expanduser('~/dtr')
@@ -325,14 +325,15 @@ if __name__ == "__main__":
 
         wellInstalled = []
         if not sigtermSignaled():
-            installerCmd = 'sudo apt-get update && sudo apt-get -qq -y install blender'
+            installerCmd = 'sudo apt-get -qq update && sudo apt-get -qq -y install blender > /dev/null'
             # tell them to ping
             stepTiming = eventTiming.eventTiming('tellInstances install')
             logger.info( 'calling tellInstances to install on %d instances', len(startedInstances))
             stepStatuses = tellInstances.tellInstances( startedInstances, installerCmd,
                 resultsLogFilePath=resultsLogFilePath,
                 download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
-                timeLimit=min(args.instTimeLimit, args.timeLimit), upload=None
+                timeLimit=min(args.instTimeLimit, args.timeLimit), upload=None,
+                knownHostsOnly=True
                 )
             # restore our handler because tellInstances may have overridden it
             signal.signal( signal.SIGTERM, sigtermHandler )
@@ -351,7 +352,7 @@ if __name__ == "__main__":
                     blocks_user = 1
                 else:
                     blocks_user = args.height / 9  # arbitrary, based on limited experience
-                    blocks_user = max( blocks_user, len(goodInstances)*1 )
+                    blocks_user = int( max( blocks_user, len(goodInstances)*1 ) )
 
             dtrParams = {
                 'image_x': args.width,
@@ -431,7 +432,20 @@ if __name__ == "__main__":
                 subprocess.check_call( cmd, shell=True )
             except Exception as exc:
                 logger.error( 'purgeKnownHosts threw exception (%s) %s',type(exc), exc )
-            
+
+    # clean up .blend files that were copied
+    try:
+        # delete render.blend, except in certain conditions; this may be seen as risky
+        if dataDirPath != dtrDirPath:
+            os.remove( dataDirPath+'/render.blend' )
+    except Exception as exc:
+        logger.warning( 'exception while deleting render.blend (%s) %s', type(exc), exc, exc_info=False )
+    try:
+        if dataDirPath != dtrDirPath:
+            os.remove( dataDirPath+'/bench.blend' )
+    except Exception as exc:
+        logger.warning( 'exception while deleting bench.blend (%s) %s', type(exc), exc, exc_info=False )
+
     if dtrStatus != None:
         rc = dtrStatus
     elif sigtermSignaled():
