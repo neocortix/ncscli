@@ -32,6 +32,7 @@ except ImportError:
     os.environ["PATH"] += os.pathsep + ncscliPath
     import ncs
 import eventTiming
+import jsonToKnownHosts
 import purgeKnownHosts
 import tellInstances
 
@@ -147,25 +148,6 @@ def generateDtrConf( dtrParams, inRecs, settingsFile ):
     for outLine in sorted( outLines):
         print( outLine, file=settingsFile )
 
-def jsonToKnownHosts( instances, outFile ):
-    outLines = []
-    for inRec in instances:
-        details = inRec
-        if 'commandState' in details and details['commandState'] != 'good':
-            continue
-        if details['state'] == 'started':
-            if 'ssh' in details:
-                host = details['ssh']['host']
-                port = details['ssh']['port']
-                ecdsaKey = details['ssh']['host-keys']['ecdsa']
-                ipAddr = socket.gethostbyname( host )
-                outLine = "[%s]:%s,[%s]:%s %s" % (
-                        host, port, ipAddr, port, ecdsaKey
-                )
-                outLines.append( outLine )
-    for outLine in sorted( outLines):
-        print( outLine, file=outFile )
-
 def output_reader(proc):
     for line in iter(proc.stdout.readline, b''):
         print('<dtr>: {0}'.format(line.decode('utf-8')), end='', file=sys.stderr)
@@ -257,6 +239,7 @@ if __name__ == "__main__":
     dataDirPath = os.path.abspath('./data' )
     launchedJsonFilePath = dataDirPath+'/launched.json'
     dtrSettingsFilePath = dataDirPath + '/user_settings.conf'
+    settingsJsonFilePath = dataDirPath + '/settings.json'
     dtrDirPath = os.path.expanduser('~/dtr')
 
     launchWanted = args.launch
@@ -320,7 +303,7 @@ if __name__ == "__main__":
 
         if launchWanted:  #launchWanted:
             with open( os.path.expanduser('~/.ssh/known_hosts'), 'a' ) as khFile:
-                jsonToKnownHosts( goodInstances, khFile )
+                jsonToKnownHosts.jsonToKnownHosts( goodInstances, khFile )
         
 
         wellInstalled = []
@@ -364,6 +347,13 @@ if __name__ == "__main__":
             }
             with open( dtrSettingsFilePath, 'w' ) as settingsFile:
                 generateDtrConf( dtrParams, goodInstances, settingsFile )
+            
+            extensions = {'PNG': 'png', 'OPEN_EXR': 'exr'}
+            settingsToSave = dtrParams.copy()
+            settingsToSave['outFileName'] = 'composite_seed_%d.%s' % \
+                (args.seed, extensions[args.fileType])
+            with open( settingsJsonFilePath, 'w' ) as settingsFile:
+                json.dump( settingsToSave, settingsFile )
 
             # copy some files into a working dir, because dtr has no args for them
             shutil.copyfile( dtrDirPath+'/bench.blend', dataDirPath+'/bench.blend' )
