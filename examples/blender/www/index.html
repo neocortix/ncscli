@@ -218,26 +218,14 @@ function onStatusBut() {
             //console.log( $( '#stderr' )[0].scrollHeight  );
             $( "#stderr" ).scrollTop( $( '#stderr' )[0].scrollHeight );
             if( data["state"] == 'stopped' ) {
-                // use seed value to help determine the image file name
-                var seed = $('#seed').val();
-                if (seed.length > 0) {
-                    seed = seed.trim();
+                var imgUrl = urlPrefix + jobId + '/composite_seed_0.png'; // fallback
+                if( data["outputImgUrl"] ) {
+                    imgUrl = './' + data["outputImgUrl"];
+                    console.log( "outputImgUrl", imgUrl )
                 }
-                if (seed.length <= 0) {
-                    seed = 0;
-                }
-                seed = seed.toString()
-                // use filetype to help determine the image file name
-                var fileType = $('#fileType').val();
-                if (fileType.length <= 0) {
-                    fileType = "PNG";
-                }
-                var extension = '.exr';
-                if (fileType != 'OPEN_EXR') {
-                    extension = '.png'
-                }
-                var imgUrl = urlPrefix + jobId + '/composite_seed_' + seed + extension;
                 $('#plotImg').attr( "src", imgUrl );
+                var absUrlStr = new URL(imgUrl, window.location.href).href
+                $('#plotImg').attr( "alt", absUrlStr );
                 $('#plotImg').show();
             }
             else {
