@@ -221,6 +221,20 @@ def getJobInfo( jobId ):
         stdOutText = inFile.read()
     info['stdout'] = stdOutText
 
+    settingsFilePath = dataDirPath( jobId ) + '/settings.json'
+    if os.path.isfile( settingsFilePath ):
+        with open( settingsFilePath, encoding='utf8' ) as settingsFile:
+            settings = json.load( settingsFile )
+            outFileName = settings.get( 'outFileName' )
+            logger.info( 'outFileName %s', outFileName )
+            if outFileName:
+                #url = flask.url_for( 'jobFileHandler' )
+                url = flask.url_for( 'jobFileHandler', jobId=jobId, fileName=outFileName )
+                logger.info( 'outFileName url: %s', url )
+                if url:
+                    info['outputImgUrl'] = url
+
+
     return jsonify(info), 200
 
 def launchJob( args ):
