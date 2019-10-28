@@ -1,6 +1,21 @@
 '''running inside blender, reconfigures compositor to take input from an exr image file'''
 print( 'reconfiguring compositor graph' )
+# standard library modules
+import argparse
+import sys
+# third-party modules
 import bpy
+
+ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
+ap.add_argument( '--prerendered', default='prerendered.exr', help='name of prerendered intermediate file to read' )
+
+argv = sys.argv
+if "--" not in argv:
+    argv = []  # as if no args are passed
+else:
+    argv = argv[argv.index("--") + 1:]  # get all args after "--"
+args = ap.parse_args(argv)
+print('prerendered arg:', args.prerendered)
 
 scene=bpy.context.scene
 scene.render.resolution_percentage=100
@@ -10,7 +25,7 @@ scene.render.resolution_percentage=100
 tree = scene.node_tree
 #tree = bpy.data.scenes[0].node_tree
 
-fileName = 'prerendered.exr'
+fileName = args.prerendered
 filePath = '//' + fileName
 #filePath = 'G:\\Share\\Neo\\blendage\\examples\\bmw27\\prerendered.png'
 # 'G:\\Share\\Neo\\blendage\\compositeTest\\cube.png'
