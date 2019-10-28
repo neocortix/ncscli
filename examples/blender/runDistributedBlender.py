@@ -9,6 +9,7 @@ import contextlib
 import getpass
 import json
 import logging
+import math
 import os
 import socket
 import shutil
@@ -279,7 +280,7 @@ if __name__ == "__main__":
                 keyContents = loadSshPubKey()
                 randomPart = str( uuid.uuid4() )[0:13]
                 keyContents += ' #' + randomPart
-                sshClientKeyName = 'blender_%s' % (randomPart)
+                sshClientKeyName = 'bfr_%s' % (randomPart)
                 respCode = ncs.uploadSshClientKey( args.authToken, sshClientKeyName, keyContents )
                 if respCode < 200 or respCode >= 300:
                     logger.warning( 'ncs.uploadSshClientKey returned %s', respCode )
@@ -334,21 +335,26 @@ if __name__ == "__main__":
                 if nWorkersWanted == 1:
                     blocks_user = 1
                 else:
-                    blocks_user = args.height / 9  # arbitrary, based on limited experience
+                    # nBlocks computation is arbitrary, based on limited experience
+                    diag = math.sqrt( args.width * args.height )
+                    blocks_user = diag / 12
+                    #blocks_user = args.height / 9  # arbitrary, based on limited experience
                     blocks_user = int( max( blocks_user, len(goodInstances)*1 ) )
 
             dtrParams = {
                 'image_x': args.width,
                 'image_y': args.height,
                 'blocks_user': blocks_user,
-                'filetype': args.fileType,
+                'filetype': 'OPEN_EXR',  # args.fileType,
                 'frame': args.frame,
                 'seed': args.seed,
             }
+            extensions = {'PNG': 'png', 'OPEN_EXR': 'exr'}
+            prerenderedFileName = 'composite_seed_%d.%s' % \
+                (args.seed, extensions[dtrParams['filetype']])
             with open( dtrSettingsFilePath, 'w' ) as settingsFile:
                 generateDtrConf( dtrParams, goodInstances, settingsFile )
             
-            extensions = {'PNG': 'png', 'OPEN_EXR': 'exr'}
             settingsToSave = dtrParams.copy()
             settingsToSave['outFileName'] = 'composite_seed_%d.%s' % \
                 (args.seed, extensions[args.fileType])
@@ -423,18 +429,32 @@ if __name__ == "__main__":
             except Exception as exc:
                 logger.error( 'purgeKnownHosts threw exception (%s) %s',type(exc), exc )
 
+    # run blender compositor if dtr succeeded
+    if dtrStatus == 0:
+        cmd = [
+            'blender', '-b', '-noaudio', dataDirPath+'/render.blend',
+            '-P', 'composite_bpy.py',
+            '-o',  dataDirPath+'/rendered_frame_####_seed_%d.%s'%(args.seed,extensions[args.fileType]),
+            '-f', str(args.frame), '--', '--prerendered', prerenderedFileName
+        ]
+        try:
+            subprocess.check_call( cmd )
+        except Exception as exc:
+            logger.warning( 'blender composite_bpy call threw exception (%s) %s',type(exc), exc )
     # clean up .blend files that were copied
-    try:
-        # delete render.blend, except in certain conditions; this may be seen as risky
-        if dataDirPath != dtrDirPath:
-            os.remove( dataDirPath+'/render.blend' )
-    except Exception as exc:
-        logger.warning( 'exception while deleting render.blend (%s) %s', type(exc), exc, exc_info=False )
-    try:
-        if dataDirPath != dtrDirPath:
-            os.remove( dataDirPath+'/bench.blend' )
-    except Exception as exc:
-        logger.warning( 'exception while deleting bench.blend (%s) %s', type(exc), exc, exc_info=False )
+    if os.path.isfile( dataDirPath+'/render.blend' ):
+        try:
+            # delete render.blend, except in certain conditions; this may be seen as risky
+            if dataDirPath != dtrDirPath:
+                os.remove( dataDirPath+'/render.blend' )
+        except Exception as exc:
+            logger.warning( 'exception while deleting render.blend (%s) %s', type(exc), exc, exc_info=False )
+    if os.path.isfile( dataDirPath+'/bench.blend' ):
+        try:
+            if dataDirPath != dtrDirPath:
+                os.remove( dataDirPath+'/bench.blend' )
+        except Exception as exc:
+            logger.warning( 'exception while deleting bench.blend (%s) %s', type(exc), exc, exc_info=False )
 
     if dtrStatus != None:
         rc = dtrStatus
