@@ -228,11 +228,13 @@ def getJobInfo( jobId ):
             outFileName = settings.get( 'outFileName' )
             logger.info( 'outFileName %s', outFileName )
             if outFileName:
-                #url = flask.url_for( 'jobFileHandler' )
-                url = flask.url_for( 'jobFileHandler', jobId=jobId, fileName=outFileName )
-                logger.info( 'outFileName url: %s', url )
-                if url:
-                    info['outputImgUrl'] = url
+                outFilePath = dataDirPath( jobId ) + '/' + outFileName
+                found = os.path.isfile( outFilePath )
+                if found:
+                    url = flask.url_for( 'jobFileHandler', jobId=jobId, fileName=outFileName )
+                    logger.info( 'outFileName url: %s', url )
+                    if url:
+                        info['outputImgUrl'] = url
 
 
     return jsonify(info), 200
