@@ -301,9 +301,10 @@ function onLaunchBut() {
     else {
         blocks_user = 0;
     }
+    var minDpr = 37;  //37 is normal, approx gs6
     var regions = $('#regions').val();
-    regionExpr = {"regions": regions }
-    var filterArg = JSON.stringify( regionExpr )
+    filterObj = {"regions": regions, "dpr": ">="+String(minDpr) };
+    var filterArg = JSON.stringify( filterObj )
     //console.log( 'filterArg', filterArg )
 
 
@@ -410,8 +411,10 @@ function checkAvail() {
     var url='./api/instances/available';
 
     var regions = $('#regions').val();
-    var regionExpr = {"regions": regions }
-    var filterArg = JSON.stringify( regionExpr )
+    //var regionExpr = {"regions": regions }
+    var minDpr = 37;  //37 is normal, approx gs6
+    filterObj = {"regions": regions, "dpr": ">="+String(minDpr) };
+    var filterArg = JSON.stringify( filterObj )
 
     var queryParams = { "filter": filterArg }
     //var jx = $.getJSON(url, queryParams );
