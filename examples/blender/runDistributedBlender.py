@@ -149,6 +149,23 @@ def generateDtrConf( dtrParams, inRecs, settingsFile ):
     for outLine in sorted( outLines):
         print( outLine, file=settingsFile )
 
+def magickConvert( srcFilePath, destFilePath ):
+    colorSpace = 'sRGB'  # fancier version could maybe override this
+    # using magick convert (rather than just 'convert') means we are expecting image v 7.x
+    # could use -depth 8 to produce smaller files (default is 16)
+    cmd = [
+        'magick', 'convert', srcFilePath,
+        '-colorspace', colorSpace,
+        destFilePath
+    ]
+    logger.info( 'conversion cmd %s', cmd )
+    try:
+        subprocess.check_call( cmd,
+            stdout=sys.stderr, stderr=subprocess.STDOUT
+            )
+    except Exception as exc:
+        logger.warning( 'magick convert call threw exception (%s) %s',type(exc), exc )
+
 def output_reader(proc):
     for line in iter(proc.stdout.readline, b''):
         print('<dtr>: {0}'.format(line.decode('utf-8')), end='', file=sys.stderr)
@@ -214,6 +231,7 @@ if __name__ == "__main__":
     ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use (default is random)' )
     ap.add_argument( '--timeLimit', type=int, help='time limit (in seconds) for the whole job',
         default=24*60*60 )
+    ap.add_argument( '--useCompositor', type=boolArg, default=False, help='whether or not to use blender compositor' )
     # dtr-specific args
     ap.add_argument( '--width', type=int, help='the width (in pixels) of the output',
         default=960 )
@@ -267,6 +285,7 @@ if __name__ == "__main__":
     try:
         masterSpecs = None
         if launchWanted:
+            logger.info( 'launching using filters: %s', args.filter )
             nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
             if nWorkersWanted > (nAvail + 5):
                 logger.error( 'not enough devices available (%d requested)', nWorkersWanted )
@@ -345,19 +364,23 @@ if __name__ == "__main__":
                 'image_x': args.width,
                 'image_y': args.height,
                 'blocks_user': blocks_user,
-                'filetype': 'OPEN_EXR',  # args.fileType,
+                'filetype': args.fileType,
                 'frame': args.frame,
                 'seed': args.seed,
             }
+            if args.useCompositor:
+                dtrParams['filetype'] = 'OPEN_EXR'
             extensions = {'PNG': 'png', 'OPEN_EXR': 'exr'}
             prerenderedFileName = 'composite_seed_%d.%s' % \
                 (args.seed, extensions[dtrParams['filetype']])
+            outFilePattern = 'rendered_frame_######_seed_%d.%s'%(args.seed,extensions[args.fileType])
+            outFileName = outFilePattern.replace( '######', '%06d' % args.frame )
+
             with open( dtrSettingsFilePath, 'w' ) as settingsFile:
                 generateDtrConf( dtrParams, goodInstances, settingsFile )
-            
+
             settingsToSave = dtrParams.copy()
-            settingsToSave['outFileName'] = 'composite_seed_%d.%s' % \
-                (args.seed, extensions[args.fileType])
+            settingsToSave['outFileName'] = outFileName
             with open( settingsJsonFilePath, 'w' ) as settingsFile:
                 json.dump( settingsToSave, settingsFile )
 
@@ -431,16 +454,28 @@ if __name__ == "__main__":
 
     # run blender compositor if dtr succeeded
     if dtrStatus == 0:
-        cmd = [
-            'blender', '-b', '-noaudio', dataDirPath+'/render.blend',
-            '-P', 'composite_bpy.py',
-            '-o',  dataDirPath+'/rendered_frame_####_seed_%d.%s'%(args.seed,extensions[args.fileType]),
-            '-f', str(args.frame), '--', '--prerendered', prerenderedFileName
-        ]
-        try:
-            subprocess.check_call( cmd )
-        except Exception as exc:
-            logger.warning( 'blender composite_bpy call threw exception (%s) %s',type(exc), exc )
+        retCode = None
+        if args.useCompositor:
+            cmd = [
+                'blender', '-b', '-noaudio', dataDirPath+'/render.blend',
+                '-P', scriptDirPath()+'/composite_bpy.py',
+                '-o',  dataDirPath+'/'+outFilePattern,
+                '-f', str(args.frame), '--', '--prerendered', prerenderedFileName
+            ]
+            logger.info( 'compositing cmd %s', cmd )
+            try:
+                retCode = subprocess.call( cmd,
+                    stdout=sys.stderr, stderr=subprocess.STDOUT
+                    )
+            except Exception as exc:
+                logger.warning( 'blender composite_bpy call threw exception (%s) %s',type(exc), exc )
+            # retCode 90 indicates that there was no compositor graph
+            if retCode == 90:
+                magickConvert( dataDirPath+'/'+prerenderedFileName, dataDirPath+'/'+outFileName )
+            #TODO: do something about other non-zero return codes
+        if (args.useCompositor==False):
+            # rename dtr/imagemagick output to the more desirable fileName
+            os.rename( dataDirPath+'/'+prerenderedFileName, dataDirPath+'/'+outFileName )
     # clean up .blend files that were copied
     if os.path.isfile( dataDirPath+'/render.blend' ):
         try:
