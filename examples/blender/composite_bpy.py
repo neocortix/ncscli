@@ -1,10 +1,15 @@
 '''running inside blender, reconfigures compositor to take input from an exr image file'''
-print( 'reconfiguring compositor graph' )
 # standard library modules
 import argparse
 import sys
 # third-party modules
 import bpy
+
+def quit( retCode, msg ):
+    print( msg, file=sys.stderr )
+    sys.exit( retCode )
+
+print( 'reconfiguring compositor graph', file=sys.stderr )
 
 ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
 ap.add_argument( '--prerendered', default='prerendered.exr', help='name of prerendered intermediate file to read' )
@@ -15,15 +20,15 @@ if "--" not in argv:
 else:
     argv = argv[argv.index("--") + 1:]  # get all args after "--"
 args = ap.parse_args(argv)
-print('prerendered arg:', args.prerendered)
+#print('prerendered arg:', args.prerendered, file=sys.stderr)
 
 scene=bpy.context.scene
 scene.render.resolution_percentage=100
 
-#print( 'reconfiguring compositor graph' )
-
 tree = scene.node_tree
 #tree = bpy.data.scenes[0].node_tree
+if not tree:
+    quit( 90, 'the compositor tree is empty (or None)' )
 
 fileName = args.prerendered
 filePath = '//' + fileName
@@ -33,27 +38,32 @@ filePath = '//' + fileName
 try:
     img = bpy.ops.image.open(filepath=filePath)
 except RuntimeError:
-    print( 'could not open prerendered image')
-imgNode = tree.nodes.new(type = 'CompositorNodeImage')
+    quit( 91, 'could not open prerendered image' )
+
 try:
-    imgNode.image = bpy.data.images[fileName]
-except KeyError:
-    print( 'prerendered image not available')
-imgNode.name = 'prerendered'
+    imgNode = tree.nodes.new(type = 'CompositorNodeImage')
+    try:
+        imgNode.image = bpy.data.images[fileName]
+    except KeyError:
+        quit( 92, 'prerendered image not available' )
+    imgNode.name = 'prerendered'
 
-# get the render layer node, originally use as input to compositor
-rlNode = tree.nodes['Render Layers']
+    # get the render layer node, originally use as input to compositor
+    rlNode = tree.nodes['Render Layers']
 
-# swap in the image node, everywhere the "Render Layers" node was used
-for link in tree.links:
-    if link.from_node == rlNode:
-        toSocket = link.to_socket
-        tree.links.remove( link )  # hope this wont mess up the iteration
-        sockName = toSocket.name
-        #print( 'would link', sockName )
-        fromSocket = imgNode.outputs[sockName]
-        tree.links.new( fromSocket, toSocket )
+    # swap in the image node, everywhere the "Render Layers" node was used
+    for link in tree.links:
+        if link.from_node == rlNode:
+            toSocket = link.to_socket
+            sockName = link.from_socket.name  # was toSocket.name
+            tree.links.remove( link )  # hope this wont mess up the iteration
+            fromSocket = imgNode.outputs[sockName]
+            #print( 'would link', sockName )
+            tree.links.new( fromSocket, toSocket )
 
-# remove the now-orphaned render layer node
-tree.nodes.remove( rlNode )
-print( 'reconfiguring compositor graph done' )
+    # remove the now-orphaned render layer node
+    tree.nodes.remove( rlNode )
+    print( 'reconfiguring compositor graph done', file=sys.stderr )
+except Exception as exc:
+    print( 'Exception reconfiguring compositor graph', type(exc), exc, file=sys.stderr )
+    quit( 93, 'Exception reconfiguring compositor graph' )
