@@ -47,6 +47,8 @@ try:
     except KeyError:
         quit( 92, 'prerendered image not available' )
     imgNode.name = 'prerendered'
+    scene.render.resolution_x = imgNode.image.size[0]
+    scene.render.resolution_y = imgNode.image.size[1]
 
     # get the render layer node, originally use as input to compositor
     rlNode = tree.nodes['Render Layers']
