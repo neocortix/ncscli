@@ -231,7 +231,7 @@ if __name__ == "__main__":
     ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use (default is random)' )
     ap.add_argument( '--timeLimit', type=int, help='time limit (in seconds) for the whole job',
         default=24*60*60 )
-    ap.add_argument( '--useCompositor', type=boolArg, default=False, help='whether or not to use blender compositor' )
+    ap.add_argument( '--useCompositor', type=boolArg, default=True, help='whether or not to use blender compositor' )
     # dtr-specific args
     ap.add_argument( '--width', type=int, help='the width (in pixels) of the output',
         default=960 )
