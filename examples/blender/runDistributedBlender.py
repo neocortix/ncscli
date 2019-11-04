@@ -153,12 +153,13 @@ def magickConvert( srcFilePath, destFilePath ):
     colorSpace = 'sRGB'  # fancier version could maybe override this
     # using magick convert (rather than just 'convert') means we are expecting image v 7.x
     # could use -depth 8 to produce smaller files (default is 16)
+    # would use 'magick convert' instead of just 'convert' to force use of version >= 7.0
     cmd = [
-        'magick', 'convert', srcFilePath,
+        'convert', srcFilePath,
         '-colorspace', colorSpace,
         destFilePath
     ]
-    logger.info( 'conversion cmd %s', cmd )
+    logger.info( 'conversion cmd %s', ' '.join(cmd)  )
     try:
         subprocess.check_call( cmd,
             stdout=sys.stderr, stderr=subprocess.STDOUT
