@@ -159,7 +159,7 @@ def magickConvert( srcFilePath, destFilePath ):
         '-colorspace', colorSpace,
         destFilePath
     ]
-    logger.info( 'conversion cmd %s', ' '.join(cmd)  )
+    #logger.debug( 'conversion cmd %s', ' '.join(cmd)  )
     try:
         subprocess.check_call( cmd,
             stdout=sys.stderr, stderr=subprocess.STDOUT
