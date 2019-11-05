@@ -102,6 +102,12 @@
         Seed value: <input id="seed", size=6 value=0 >
         blocks_user: <input id="blocks_user", size=6 value=0 >
         <br>
+        <div class="checkbox">
+            <label for="useCompositor" >
+                <input id="useCompositor" type="checkbox" checked >Use Compositor
+            </label>
+        </div>
+        <br>
      
   
         <label for="regions" >
@@ -301,6 +307,7 @@ function onLaunchBut() {
     else {
         blocks_user = 0;
     }
+    var useCompositor = $('#useCompositor').prop( 'checked' );
     var minDpr = 37;  //37 is normal, approx gs6
     var regions = $('#regions').val();
     filterObj = {"regions": regions, "dpr": ">="+String(minDpr) };
@@ -316,6 +323,7 @@ function onLaunchBut() {
         frame: frame, seed: seed,
         fileType: fileType,
         blocks_user: blocks_user,
+        useCompositor: useCompositor,
         filter: filterArg
     }
 
@@ -456,6 +464,7 @@ function saveSettings() {
     if( $('#seed').val().length ) {
         localStorage.setItem("seed", $('#seed').val() );
     }
+    localStorage.setItem("useCompositor", $('#useCompositor').prop('checked') );
     localStorage.setItem("width", $('#width').val() );
 }
 
@@ -479,6 +488,12 @@ function loadSettings() {
         $('#height').val( localStorage.getItem("height") );
     }
     $('#seed').val( localStorage.getItem("seed") );
+    if( localStorage.getItem("useCompositor") == "false" ) {
+        $('#useCompositor').prop('checked', false);
+    }
+    else {
+        $('#useCompositor').prop('checked', true);
+    }
 }
 
 function isUrlValid( arg ){
