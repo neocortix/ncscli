@@ -49,15 +49,18 @@ if __name__ == "__main__":
     ap.add_argument( '--statsFilePath', default='G:/Share/Neo/loadtest/data/2019-08-13T14/locustStats.csv', help='the path to locustStats csv file' )
     ap.add_argument( '--launchedFilePath', default='G:/Share/Neo/loadtest/data/2019-08-13T14/launched.json', help='the path to launched json file' )
     ap.add_argument( '--mapFilePath', default='WorldCountryBoundaries.csv', help='the path to launched json file' )
+    ap.add_argument( '--outDirPath', default='data', help='the path to to dir for output' )
     args = ap.parse_args()
     
     statsFilePath = args.statsFilePath
     launchedFilePath = args.launchedFilePath
+    outDirPath = args.outDirPath
+
+    os.makedirs( outDirPath, exist_ok=True )
     
     figSize1 = (10,6)
     #figSize1 = None
     fontFactor = .5
-
 
 
     logger.info("Reading World Map data")
@@ -233,6 +236,7 @@ if __name__ == "__main__":
     # temporal integration loop
     dicts=[]  # list of integrated data records
     for xx in range( windowLen, endTime, stepSize ):
+        startRelTime = xx-windowLen
         subset = istats.loc[ xx-windowLen : xx ]
         nr = subset.nr.sum()
         rpsMean = nr / windowLen if nr else float('nan')
@@ -251,17 +255,30 @@ if __name__ == "__main__":
         else:
             failRate = nFails / nr if nr else 0
 
+        nw = len(subset.worker.unique() )
+        upwMean = subset.nUsers.mean()
+        nUsersMean = upwMean * nw
+
         dicts.append( {'startRelTime': xx-windowLen, 'endRelTime': xx, 'nr': nr,
             'rps': rpsMean, 'msprMed': msprMed, 'msprMean': msprMean,
-            'failRate': failRate } )
+            'nWorkers': nw, 'nUsersMean': nUsersMean,
+            'failRate': failRate, 'upwMean': upwMean } )
     # convert to dataframe
     outDf = pd.DataFrame( dicts )
+    outDf.to_csv( outDirPath+'/integratedStats.csv' )
     
     logger.info("Plotting")
    
-    
-    
-    
+    plt.figure()
+    plt.plot( outDf.startRelTime, outDf.nWorkers )
+    plt.title("# workers present" )
+    plt.savefig( outDirPath+'/nWorkers.png' )
+
+    plt.figure()
+    plt.plot( outDf.startRelTime, outDf.nUsersMean )
+    plt.title("# simulated users" )
+    plt.savefig( outDirPath+'/simulatedUsers.png' )
+
     
     if False:
         # pandas-style plotting
@@ -276,17 +293,17 @@ if __name__ == "__main__":
         plt.plot( outDf.startRelTime, outDf.msprMed )
         makeTimelyXTicks()
     
-    plt.figure(2,figsize=figSize1)
+    plt.figure(figsize=figSize1)  # was figure 2
     plt.plot( outDf.startRelTime, outDf.rps, linewidth=5, color=(0.0, 0.6, 1.0) )
     makeTimelyXTicks()
-    plt.xlim([0,270])
+    plt.xlim([0, outDf.startRelTime.max()+10])
     plt.title("Delivered Load During Test\n", fontsize=42*fontFactor)
     plt.xlabel("Time during Test (s)", fontsize=32*fontFactor)  
     plt.ylabel("Requests per second", fontsize=32*fontFactor)  
     plt.show()    
-    plt.savefig( 'stats_2.png' )
+    plt.savefig( outDirPath+'/rps.png' )
 
-    plt.figure(10,figsize=figSize1)
+    plt.figure(figsize=figSize1)  # was figure 10
     plt.plot(getColumn(startRelTimesAndMSPRsUnitedStates,0),getColumn(startRelTimesAndMSPRsUnitedStates,1), linestyle='', color=(0.0, 0.6, 1.0),marker='o',markersize=2)
     plt.plot(getColumn(startRelTimesAndMSPRsRussia,0),getColumn(startRelTimesAndMSPRsRussia,1), linestyle='', color=(1.0, 0.0, 0.0),marker='o',markersize=2)
     plt.plot(getColumn(startRelTimesAndMSPRsOther,0),getColumn(startRelTimesAndMSPRsOther,1), linestyle='', color=(0.0, 1.0, 0.0),marker='o',markersize=2)
@@ -298,11 +315,11 @@ if __name__ == "__main__":
     plt.show()    
     # plt.clf()
     # plt.close()        
-    plt.savefig( 'stats_10.png' )
+    plt.savefig( outDirPath+'/msprScatter1.png' )
 
 
     if True:
-        plt.figure(4,figsize=figSize1)
+        plt.figure(figsize=figSize1)  # was figure 4
         plt.hist(getColumn(startRelTimesAndMSPRsUnitedStates,1),bins=4000, density=False, facecolor=(0,0.2,1), alpha=0.75)
         plt.hist(getColumn(startRelTimesAndMSPRsRussia,1),bins=4000, density=False, facecolor=(1.0,0.0,0), alpha=0.75)
         plt.hist(getColumn(startRelTimesAndMSPRsOther,1),bins=4000, density=False, facecolor=(0,1.0,0), alpha=0.75)
@@ -316,10 +333,10 @@ if __name__ == "__main__":
         plt.show() 
         # plt.clf()
         # plt.close()    
-        plt.savefig( 'stats_4.png' )
+        plt.savefig( outDirPath+'/durationHistogram.png' )
 
     
-    plt.figure(5,figsize=figSize1)
+    plt.figure(figsize=figSize1)  # was figure 5
     plt.hist(getColumn(startRelTimesAndMSPRsUnitedStatesLoaded,1),bins=4000, density=False, facecolor=(0,0.2,1), alpha=0.75)
     plt.hist(getColumn(startRelTimesAndMSPRsRussiaLoaded,1),bins=4000, density=False, facecolor=(1.0,0.0,0), alpha=0.75)
     plt.hist(getColumn(startRelTimesAndMSPRsOtherLoaded,1),bins=4000, density=False, facecolor=(0,1.0,0), alpha=0.75)
@@ -333,12 +350,12 @@ if __name__ == "__main__":
     plt.show() 
     # plt.clf()
     # plt.close()  
-    plt.savefig( 'stats_5.png' )
+    plt.savefig( outDirPath+'/durationHistogramLoaded.png' )
 
     if True :
    
         # plot filled boundaries
-        fig = plt.figure(3,figsize=figSize1)
+        fig = plt.figure(figsize=figSize1)  # was figure 3
         ax = fig.gca()
         # Turn off tick labels
         ax.set_yticklabels([])
@@ -357,11 +374,11 @@ if __name__ == "__main__":
                     # print("%s" % CountryData[i][1][j])
                     # plt.plot(np.transpose(CountryData[i][1][j])[0],np.transpose(CountryData[i][1][j])[1])        
                     ax.add_artist(plt.Polygon(CountryData[i][1][j],edgecolor='None', facecolor=(colorValue,colorValue,colorValue),aa=True))           
-        plt.plot(getColumn(instanceIdsAndCountries,3),getColumn(instanceIdsAndCountries,2),linestyle='', color=(0.0, 0.5, 1.0),marker='o',markersize=15)
+        plt.plot(getColumn(instanceIdsAndCountries,3),getColumn(instanceIdsAndCountries,2),linestyle='', color=(0.0, 0.5, 1.0),marker='o',markersize=15*fontFactor)
         plt.xlim([-180,180])
         plt.ylim([-60,90])
         plt.show()    
-        plt.savefig( 'stats_3.png' )
+        plt.savefig( outDirPath+'/countryData.png' )
 
     
     logger.info("finished")
