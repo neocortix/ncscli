@@ -45,6 +45,9 @@ def ncscReqHeaders( authToken ):
 def queryNcsSc( urlTail, authToken, reqParams=None, maxRetries=5 ):
     #if random.random() > .75:
     #    raise requests.exceptions.RequestException( 'simulated exception' )
+    # set long timeouts for requests.get() as a tuple (connection timeout, read timeout) in seconds
+    timeouts = (30, 120)
+    #timeouts = (1, 2)
     headers = ncscReqHeaders( authToken )
     url = 'https://cloud.neocortix.com/cloud-api/sc/' + urlTail
     # jsonize the reqParams, but only if it's not a string (to avoid jsonizing if already json)
@@ -54,7 +57,7 @@ def queryNcsSc( urlTail, authToken, reqParams=None, maxRetries=5 ):
         logger.info( 'querying url <%s> with data <%s> and headers <%s>', 
             url, reqParams, headers )
     try:
-        resp = requests.get( url, headers=headers, data=reqParams )
+        resp = requests.get( url, headers=headers, data=reqParams, timeout=timeouts )
     except requests.ConnectionError as exc:
         logger.warning( 'exception (%s) %s', type(exc), exc )
         if maxRetries > 0:
