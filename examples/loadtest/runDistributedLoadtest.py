@@ -448,6 +448,22 @@ def executeLoadtest( targetHostUrl, htmlOutFileName='ltStats.html' ):
                 except Exception as exc:
                     logger.warning( 'got exception from integrating plotting stats (%s) %s',
                         type(exc), exc, exc_info=False )
+                # extended plotting using the boss's code
+                try:
+                    cmd = [
+                        scriptDirPath()+'/plotLocustAnalysis.py',
+                        '--launchedFilePath', launchedJsonFilePath,
+                        '--mapFilePath', scriptDirPath()+'/WorldCountryBoundaries.csv',
+                        '--outDirPath', dataDirPath,
+                        '--statsFilePath', dataDirPath+'/locustStats.csv'
+                    ]
+                    plottingRc = subprocess.call( cmd, stdout=sys.stderr, stderr=subprocess.STDOUT )
+                    if plottingRc:
+                        logger.warning( 'plotLocustAnalysis returned RC %d', plottingRc )
+                except Exception as exc:
+                    logger.warning( 'got exception from extended plotting (%s) %s',
+                        type(exc), exc, exc_info=False )
+                
 
     except KeyboardInterrupt:
         logger.warning( '(ctrl-c) received, will shutdown gracefully' )
@@ -493,6 +509,9 @@ if __name__ == "__main__":
     ap.add_argument( '--susTime', type=int, default=10, help='time to sustain the test after startup (in seconds)' )
     ap.add_argument( '--testId', help='to identify this test' )
     args = ap.parse_args()
+    argsToSave = vars(args).copy()
+    del argsToSave['authToken']
+
 
     signal.signal( signal.SIGTERM, sigtermHandler )
 
@@ -500,6 +519,11 @@ if __name__ == "__main__":
 
     dataDirPath = 'data'
     launchedJsonFilePath = 'launched.json'
+
+    argsFilePath = os.path.join( dataDirPath, 'runDistributedLoadtest_args.json' )
+    with open( argsFilePath, 'w' ) as argsFile:
+        json.dump( argsToSave, argsFile, indent=2 )
+
     launchWanted = args.launch
 
     rampUpRate = args.rampUpRate
