@@ -6,6 +6,7 @@ anaimates using distributed blender rendering
 # standard library modules
 import argparse
 import contextlib
+from concurrent import futures
 import getpass
 import json
 import logging
@@ -67,7 +68,54 @@ def scriptDirPath():
     '''returns the absolute path to the directory containing this script'''
     return os.path.dirname(os.path.realpath(__file__))
 
+def renderFrame( frameNum ):
+    frameDirPath = os.path.join( dataDirPath, 'frame_%06d' % frameNum )
+    frameFileName = frameFilePattern.replace( '######', '%06d' % frameNum )
 
+    os.makedirs( frameDirPath+'/data', exist_ok=True )
+
+    cmd = [
+        scriptDirPath()+'/runDistributedBlender.py',
+        os.path.realpath( args.blendFilePath ),
+        '--authToken', args.authToken,
+        '--nWorkers', args.nWorkers,
+        '--filter', args.filter,
+        '--width', args.width,
+        '--height', args.height,
+        '--seed', args.seed,
+        '--timeLimit', args.timeLimit,
+        '--useCompositor', args.useCompositor,
+        '--frame', frameNum
+    ]
+    cmd = [ str( arg ) for arg in cmd ]
+    logger.info( 'frame %d, %s', frameNum, frameDirPath )
+    logger.info( 'cmd %s', cmd )
+
+    if True:
+        try:
+            retCode = subprocess.call( cmd, cwd=frameDirPath,
+                stdout=sys.stdout, stderr=sys.stderr
+                )
+        except Exception as exc:
+            logger.warning( 'runDistributedBlender call threw exception (%s) %s',type(exc), exc )
+            return exc
+        else:
+            logger.info( 'RC from runDistributed: %d', retCode )
+    if retCode:
+        return retCode
+    frameFilePath = os.path.join( frameDirPath, 'data', frameFileName)
+    if not os.path.isfile( frameFilePath ):
+        return FileNotFoundError( errno.ENOENT, 'could not render frame', frameFileName )
+    outFilePath = os.path.join(dataDirPath, frameFileName )
+    logger.info( 'moving %s to %s', frameFilePath, dataDirPath )
+    try:
+        if os.path.isfile( outFilePath ):
+            os.remove( outFilePath )
+        shutil.move( os.path.join( frameDirPath, 'data', frameFileName), dataDirPath )
+    except Exception as exc:
+        logger.warning( 'trouble moving %s (%s) %s', frameFileName, type(exc), exc )
+        return exc
+    return 0
 
 if __name__ == "__main__":
     # configure logger formatting
@@ -118,43 +166,43 @@ if __name__ == "__main__":
     myPid = os.getpid()
     logger.info('procID: %s', myPid)
 
-
+    startTime = time.time()
     extensions = {'PNG': 'png', 'OPEN_EXR': 'exr'}
     frameFilePattern = 'rendered_frame_######_seed_%d.%s'%(args.seed,extensions[args.fileType])
 
     dataDirPath = './aniData'
-    for frameNum in range( args.startFrame, args.endFrame+1, args.frameStep ):
-        frameDirPath = os.path.join( dataDirPath, 'frame_%06d' % frameNum )
-        frameFileName = frameFilePattern.replace( '######', '%06d' % frameNum )
+    if False:
+        for frameNum in range( args.startFrame, args.endFrame+1, args.frameStep ):
+            renderFrame( frameNum )
+    else:
+        nWorkers = 12
+        frameNums = list(range( args.startFrame, args.endFrame+1, args.frameStep ))
+        # main loop
+        with futures.ThreadPoolExecutor( max_workers=nWorkers ) as executor:
+            parIter = executor.map( renderFrame, frameNums )
+            parResultList = list( parIter )
 
-        os.makedirs( frameDirPath+'/data', exist_ok=True )
+        failedFrameNums = []
+        for tup in enumerate( parResultList ):
+            fn = frameNums[ tup[0] ]
+            if tup[1]:
+                logger.warning( 'frame # %d got result %s', fn, tup[1] )
+                failedFrameNums.append( fn )
+        frameNums = failedFrameNums.copy()
 
-        cmd = [
-            scriptDirPath()+'/runDistributedBlender.py',
-            os.path.realpath( args.blendFilePath ),
-            '--authToken', args.authToken,
-            '--nWorkers', args.nWorkers,
-            '--filter', args.filter,
-            '--width', args.width,
-            '--height', args.height,
-            '--seed', args.seed,
-            '--useCompositor', args.useCompositor,
-            '--frame', frameNum
-        ]
-        cmd = [ str( arg ) for arg in cmd ]
-        logger.info( 'frame %d, %s', frameNum, frameDirPath )
-        logger.info( 'cmd %s', cmd )
+        # same as the main loop
+        with futures.ThreadPoolExecutor( max_workers=nWorkers ) as executor:
+            parIter = executor.map( renderFrame, frameNums )
+            parResultList = list( parIter )
 
-        if False:
-            try:
-                retCode = subprocess.call( cmd, cwd=frameDirPath,
-                    stdout=sys.stdout, stderr=sys.stderr
-                    )
-            except Exception as exc:
-                logger.warning( 'runDistributedBlender call threw exception (%s) %s',type(exc), exc )
-            else:
-                logger.info( 'RC from runDistributed: %d', retCode )
-        logger.info( 'moving %s to %s', os.path.join( frameDirPath, 'data', frameFileName), dataDirPath )
-        shutil.move( os.path.join( frameDirPath, 'data', frameFileName), dataDirPath )
-        
+        failedFrameNums = []
+        for tup in enumerate( parResultList ):
+            fn = frameNums[ tup[0] ]
+            if tup[1]:
+                logger.warning( 'retried frame # %d got result %s', fn, tup[1] )
+                failedFrameNums.append( fn )
+ 
+    elapsed = time.time() - startTime
+    logger.info( 'finished; elapsed time %.1f seconds (%.1f minutes)', elapsed, elapsed/60 )
+
 
