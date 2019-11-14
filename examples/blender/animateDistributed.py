@@ -7,6 +7,8 @@ anaimates using distributed blender rendering
 import argparse
 import contextlib
 from concurrent import futures
+import errno
+import datetime
 import getpass
 import json
 import logging
@@ -38,6 +40,8 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+global resultsLogFile
+
 # possible place for globals is this class's attributes
 class g_:
     signaled = False
@@ -54,6 +58,13 @@ def sigtermHandler( sig, frame ):
 def sigtermSignaled():
     return g_.signaled
 
+
+def logResult( key, value, instanceId ):
+    if resultsLogFile:
+        toLog = {key: value, 'instanceId': instanceId,
+            'dateTime': datetime.datetime.now(datetime.timezone.utc).isoformat() }
+        print( json.dumps( toLog, sort_keys=True ), file=resultsLogFile )
+        resultsLogFile.flush()
 
 def boolArg( v ):
     '''use with ArgumentParser add_argument for (case-insensitive) boolean arg'''
@@ -72,6 +83,7 @@ def renderFrame( frameNum ):
     frameDirPath = os.path.join( dataDirPath, 'frame_%06d' % frameNum )
     frameFileName = frameFilePattern.replace( '######', '%06d' % frameNum )
 
+    logResult( 'frameStart', frameNum, frameNum )
     os.makedirs( frameDirPath+'/data', exist_ok=True )
 
     cmd = [
@@ -98,13 +110,16 @@ def renderFrame( frameNum ):
                 )
         except Exception as exc:
             logger.warning( 'runDistributedBlender call threw exception (%s) %s',type(exc), exc )
+            logResult( 'exception', str(exc), frameNum )
             return exc
         else:
             logger.info( 'RC from runDistributed: %d', retCode )
     if retCode:
+        logResult( 'retCode', retCode, frameNum )
         return retCode
     frameFilePath = os.path.join( frameDirPath, 'data', frameFileName)
     if not os.path.isfile( frameFilePath ):
+        logResult( 'retCode', errno.ENOENT, frameNum )
         return FileNotFoundError( errno.ENOENT, 'could not render frame', frameFileName )
     outFilePath = os.path.join(dataDirPath, frameFileName )
     logger.info( 'moving %s to %s', frameFilePath, dataDirPath )
@@ -114,7 +129,9 @@ def renderFrame( frameNum ):
         shutil.move( os.path.join( frameDirPath, 'data', frameFileName), dataDirPath )
     except Exception as exc:
         logger.warning( 'trouble moving %s (%s) %s', frameFileName, type(exc), exc )
+        logResult( 'exception', str(exc), frameNum )
         return exc
+    logResult( 'frameEnd', frameNum, frameNum )
     return 0
 
 if __name__ == "__main__":
@@ -166,6 +183,13 @@ if __name__ == "__main__":
     myPid = os.getpid()
     logger.info('procID: %s', myPid)
 
+    resultsLogFilePath = os.path.splitext( os.path.basename( __file__ ) )[0] + '_results.log'
+    if resultsLogFilePath:
+        resultsLogFile = open( resultsLogFilePath, "w", encoding="utf8" )
+    else:
+        resultsLogFile = None
+    logResult( 'operation', 'starting', '<master>')
+
     startTime = time.time()
     extensions = {'PNG': 'png', 'OPEN_EXR': 'exr'}
     frameFilePattern = 'rendered_frame_######_seed_%d.%s'%(args.seed,extensions[args.fileType])
@@ -177,30 +201,22 @@ if __name__ == "__main__":
     else:
         nWorkers = 12
         frameNums = list(range( args.startFrame, args.endFrame+1, args.frameStep ))
-        # main loop
-        with futures.ThreadPoolExecutor( max_workers=nWorkers ) as executor:
-            parIter = executor.map( renderFrame, frameNums )
-            parResultList = list( parIter )
+        # main loop to follow up and re-do frames that fail
+        while len( frameNums ) > 0:
+            logResult( 'parallelRender', len(frameNums), '<master>' )
+            with futures.ProcessPoolExecutor( max_workers=nWorkers ) as executor:
+                parIter = executor.map( renderFrame, frameNums )
+                parResultList = list( parIter )
 
-        failedFrameNums = []
-        for tup in enumerate( parResultList ):
-            fn = frameNums[ tup[0] ]
-            if tup[1]:
-                logger.warning( 'frame # %d got result %s', fn, tup[1] )
-                failedFrameNums.append( fn )
-        frameNums = failedFrameNums.copy()
-
-        # same as the main loop
-        with futures.ThreadPoolExecutor( max_workers=nWorkers ) as executor:
-            parIter = executor.map( renderFrame, frameNums )
-            parResultList = list( parIter )
-
-        failedFrameNums = []
-        for tup in enumerate( parResultList ):
-            fn = frameNums[ tup[0] ]
-            if tup[1]:
-                logger.warning( 'retried frame # %d got result %s', fn, tup[1] )
-                failedFrameNums.append( fn )
+            logResult( 'progress', 'map() returned', '<master>' )
+            failedFrameNums = []
+            for (index, result) in enumerate( parResultList ):
+                fn = frameNums[ index ]
+                if result:  # tup[1]:
+                    logger.warning( 'frame # %d got result %s', fn, result )
+                    failedFrameNums.append( fn )
+            frameNums = failedFrameNums
+            logResult( 'progress', 'end of loop', '<master>' )
  
     elapsed = time.time() - startTime
     logger.info( 'finished; elapsed time %.1f seconds (%.1f minutes)', elapsed, elapsed/60 )
