@@ -5,6 +5,7 @@ anaimates using distributed blender rendering
 
 # standard library modules
 import argparse
+import collections
 import contextlib
 from concurrent import futures
 import errno
@@ -35,7 +36,8 @@ except ImportError:
     sys.path.append( ncscliPath )
     os.environ["PATH"] += os.pathsep + ncscliPath
     import ncs
-
+import jsonToKnownHosts
+import runDistributedBlender
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +81,69 @@ def scriptDirPath():
     '''returns the absolute path to the directory containing this script'''
     return os.path.dirname(os.path.realpath(__file__))
 
+g_releasedInstances = collections.deque()
+g_releasedInstancesLock = threading.Lock()
+
+def allocateInstances( nWorkersWanted, launchedJsonFilePath ):
+    # see if there are enough released ones to reuse
+    toReuse = []
+    with g_releasedInstancesLock:
+        if len( g_releasedInstances ) >= nWorkersWanted:
+            for _ in range( 0, nWorkersWanted ):
+                toReuse.append( g_releasedInstances.popleft() )
+    if toReuse:
+        logger.info( 'REUSING instances')
+        with open( launchedJsonFilePath,'w' ) as outFile:
+            json.dump( toReuse, outFile )
+        return toReuse
+
+    nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
+    if nWorkersWanted > (nAvail + 0):
+        logger.error( 'not enough devices available (%d requested)', nWorkersWanted )
+        raise ValueError( 'not enough devices available')
+    if args.sshClientKeyName:
+        sshClientKeyName = args.sshClientKeyName
+    else:
+        keyContents = runDistributedBlender.loadSshPubKey()
+        randomPart = str( uuid.uuid4() )[0:13]
+        keyContents += ' #' + randomPart
+        sshClientKeyName = 'bfr_%s' % (randomPart)
+        respCode = ncs.uploadSshClientKey( args.authToken, sshClientKeyName, keyContents )
+        if respCode < 200 or respCode >= 300:
+            logger.warning( 'ncs.uploadSshClientKey returned %s', respCode )
+            sys.exit( 'could not upload SSH client key')
+
+    rc = runDistributedBlender.launchInstances( args.authToken, nWorkersWanted,
+        sshClientKeyName, launchedJsonFilePath, filtersJson=args.filter )
+    if rc:
+        logger.debug( 'launchInstances returned %d', rc )
+    # delete sshClientKey only if we just uploaded it
+    if sshClientKeyName != args.sshClientKeyName:
+        logger.info( 'deleting sshClientKey %s', sshClientKeyName)
+        ncs.deleteSshClientKey( args.authToken, sshClientKeyName )
+ 
+    # get instances from the launched json file
+    launchedInstances = []
+    with open( launchedJsonFilePath, 'r') as jsonInFile:
+        try:
+            launchedInstances = json.load(jsonInFile)  # an array
+        except Exception as exc:
+            logger.warning( 'could not load json (%s) %s', type(exc), exc )
+    if len( launchedInstances ) < nWorkersWanted:
+        logger.warning( 'could not launch as many instances as wanted (%d vs %d)',
+            len( launchedInstances ), nWorkersWanted )
+
+    if True:  #launchWanted:
+        with open( os.path.expanduser('~/.ssh/known_hosts'), 'a' ) as khFile:
+            jsonToKnownHosts.jsonToKnownHosts( launchedInstances, khFile )
+    return launchedInstances
+
+def releaseInstances( instances ):
+    #runDistributedBlender.terminateThese( args.authToken, instances )
+    with g_releasedInstancesLock:
+        g_releasedInstances.extend( instances )
+
+
 def renderFrame( frameNum ):
     frameDirPath = os.path.join( dataDirPath, 'frame_%06d' % frameNum )
     frameFileName = frameFilePattern.replace( '######', '%06d' % frameNum )
@@ -86,10 +151,14 @@ def renderFrame( frameNum ):
     logResult( 'frameStart', frameNum, frameNum )
     os.makedirs( frameDirPath+'/data', exist_ok=True )
 
+    instances = allocateInstances( args.nWorkers, frameDirPath+'/data/launched.json')
+
     cmd = [
         scriptDirPath()+'/runDistributedBlender.py',
         os.path.realpath( args.blendFilePath ),
+        '--launch', False,
         '--authToken', args.authToken,
+        '--blocks_user', args.blocks_user,
         '--nWorkers', args.nWorkers,
         '--filter', args.filter,
         '--width', args.width,
@@ -116,6 +185,7 @@ def renderFrame( frameNum ):
             logger.info( 'RC from runDistributed: %d', retCode )
     if retCode:
         logResult( 'retCode', retCode, frameNum )
+        releaseInstances( instances )
         return retCode
     frameFilePath = os.path.join( frameDirPath, 'data', frameFileName)
     if not os.path.isfile( frameFilePath ):
@@ -131,8 +201,11 @@ def renderFrame( frameNum ):
         logger.warning( 'trouble moving %s (%s) %s', frameFileName, type(exc), exc )
         logResult( 'exception', str(exc), frameNum )
         return exc
+    releaseInstances( instances )
+
     logResult( 'frameEnd', frameNum, frameNum )
     return 0
+
 
 if __name__ == "__main__":
     # configure logger formatting
@@ -140,7 +213,8 @@ if __name__ == "__main__":
     logDateFmt = '%Y/%m/%d %H:%M:%S'
     formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
     logging.basicConfig(format=logFmt, datefmt=logDateFmt)
-    ncs.logger.setLevel(logging.INFO)
+    ncs.logger.setLevel(logging.WARNING)
+    runDistributedBlender.logger.setLevel(logging.INFO)
     logger.setLevel(logging.INFO)
     #tellInstances.logger.setLevel(logging.INFO)
     logger.debug('the logger is configured')
@@ -204,11 +278,12 @@ if __name__ == "__main__":
         # main loop to follow up and re-do frames that fail
         while len( frameNums ) > 0:
             logResult( 'parallelRender', len(frameNums), '<master>' )
-            with futures.ProcessPoolExecutor( max_workers=nWorkers ) as executor:
+            with futures.ThreadPoolExecutor( max_workers=nWorkers ) as executor:
                 parIter = executor.map( renderFrame, frameNums )
                 parResultList = list( parIter )
 
             logResult( 'progress', 'map() returned', '<master>' )
+            #break  # remove this
             failedFrameNums = []
             for (index, result) in enumerate( parResultList ):
                 fn = frameNums[ index ]
@@ -217,7 +292,8 @@ if __name__ == "__main__":
                     failedFrameNums.append( fn )
             frameNums = failedFrameNums
             logResult( 'progress', 'end of loop', '<master>' )
- 
+    logger.info( 'terminating %d instances', len( g_releasedInstances) )
+    runDistributedBlender.terminateThese( args.authToken, g_releasedInstances )
     elapsed = time.time() - startTime
     logger.info( 'finished; elapsed time %.1f seconds (%.1f minutes)', elapsed, elapsed/60 )
 
