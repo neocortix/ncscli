@@ -5,6 +5,7 @@ anaimates using distributed blender rendering
 
 # standard library modules
 import argparse
+import collections
 import contextlib
 from concurrent import futures
 import datetime
@@ -55,11 +56,58 @@ def boolArg( v ):
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
+def demuxResults( inFilePath ):
+    '''deinterleave jlog items into separate lists for each instance'''
+    byInstance = {}
+    badOnes = set()
+    topLevelKeys = collections.Counter()
+    # demux by instance
+    with open( inFilePath, 'rb' ) as inFile:
+        for line in inFile:
+            decoded = json.loads( line )
+            for key in decoded:
+                topLevelKeys[ key ] += 1
+            iid = decoded.get( 'instanceId', '<unknown>')
+            have = byInstance.get( iid, [] )
+            have.append( decoded )
+            byInstance[iid] = have
+            if 'returncode' in decoded:
+                rc = decoded['returncode']
+                if rc:
+                    logger.info( 'returncode %d for %s', rc, iid )
+                    badOnes.add( iid )
+            if 'exception' in decoded:
+                logger.info( 'exception %s for %s', decoded['exception'], iid )
+                badOnes.add( iid )
+            if 'timeout' in decoded:
+                #logger.info( 'timeout %s for %s', decoded['timeout'], iid )
+                badOnes.add( iid )
+    return byInstance, badOnes
+
+def readJLog( inFilePath ):
+    '''read JLog file, return list of decoded objects'''
+    recs = []
+    topLevelKeys = collections.Counter()  # for debugging
+    # demux by instance
+    with open( inFilePath, 'rb' ) as inFile:
+        for line in inFile:
+            decoded = json.loads( line )
+            if isinstance( decoded, dict ):
+                for key in decoded:
+                    topLevelKeys[ key ] += 1
+            recs.append( decoded )
+    logger.info( 'topLevelKeys: %s', topLevelKeys )
+    return recs
+
 def scriptDirPath():
     '''returns the absolute path to the directory containing this script'''
     return os.path.dirname(os.path.realpath(__file__))
 
+g_instanceBads = collections.Counter()
+g_badBadCount = 0
+
 def checkFrame( frameNum ):
+    global g_badBadCount
     info = { 'frameNum': frameNum, 'state': 'unstarted' }
     frameDirPath = os.path.join( dataDirPath, 'frame_%06d' % frameNum )
     frameFileName = frameFilePattern.replace( '######', '%06d' % frameNum )
@@ -81,6 +129,18 @@ def checkFrame( frameNum ):
         info['state'] = 'installing'
         installedDateTime = datetime.datetime.fromtimestamp( os.path.getmtime( installerFilePath ) )
         info[ 'installedDateTime' ] = installedDateTime
+        (byInstance, badOnes) = demuxResults( installerFilePath )
+        if badOnes:
+            if len(badOnes) >= 3:
+                logger.error( 'BAD BAD BAD' )
+                g_badBadCount += 1
+            logger.warning( '%d badOnes for frame %d', len(badOnes), frameNum )
+            for badIid in badOnes:
+                g_instanceBads[ badIid ] += 1
+        for iid, events in byInstance.items():
+            for event in events:
+                if 'timeout' in event:
+                    logger.warning( 'TIMEOUT for instance %s', event['instanceId'])
 
     if os.path.isfile( frameFilePath ):
         info['state'] = 'finished'
@@ -145,14 +205,34 @@ if __name__ == "__main__":
     frameInfos = []
     for frameNum in range( args.startFrame, args.endFrame+1, args.frameStep ):
         frameInfo = checkFrame( frameNum )
-        if frameInfo['state'] != 'finished':
-            logger.info( '%s', frameInfo )
+        #if frameInfo['state'] != 'finished':
+        #    logger.info( '%s', frameInfo )
         frameInfos.append( frameInfo )
     framesTable = pd.DataFrame( frameInfos )
     framesTable.to_csv( dataDirPath+'/frameSummaries.csv', index=False)
 
+    # analyze the "outer" jlog file
+    animatorFilePath = os.path.join(dataDirPath, 'animateDistributed_results.jlog' )
+    events = readJLog( animatorFilePath )
+    recTable = pd.DataFrame( events )
+    print( recTable.info() )
+    recTable.to_csv( dataDirPath+'/parsedLog.csv', index=False)
+
+    nTerminations = 0
+    nTerminated = 0
+    for event in events:
+        if 'terminating bad instances' in event:
+            nTerminations += 1
+            nTerminated += len( event['terminating bad instances'] )
+    print( nTerminated, 'instances terminated in', nTerminations, 'terminations' )
+
+    print( 'g_instanceBads: count', len(g_instanceBads), 'max', g_instanceBads.most_common(1) )
+    print( 'g_badBadCount', g_badBadCount )
+
     if not len(framesTable):
         sys.exit( 'no frames in framesTable')
+    if not 'finishedDateTime' in framesTable:
+        sys.exit( 'no frames finished')
     #logger.info( '%s', framesTable.info() )
     framesTable['launchedDateTime'] = pd.to_datetime( framesTable.launchedDateTime )
     framesTable['finishedDateTime'] = pd.to_datetime( framesTable.finishedDateTime )
@@ -170,7 +250,6 @@ if __name__ == "__main__":
     #print( 'time per frame', timePerFrame, type(timePerFrame) )
     print( 'time per frame %d seconds (%.2f minutes)' % \
         (timePerFrame.total_seconds(), timePerFrame.total_seconds()/60 ) )
-
 
 
     #elapsed = time.time() - startTime
