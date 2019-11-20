@@ -138,70 +138,119 @@ def allocateInstances( nWorkersWanted, launchedJsonFilePath ):
             jsonToKnownHosts.jsonToKnownHosts( launchedInstances, khFile )
     return launchedInstances
 
-def releaseInstances( instances ):
+def recycleInstances( instances ):
+    iids = [inst['instanceId'] for inst in instances]
+    logResult( 'recycleInstances', iids, '<master>' )
     #runDistributedBlender.terminateThese( args.authToken, instances )
     with g_releasedInstancesLock:
         g_releasedInstances.extend( instances )
 
+def demuxResults( inFilePath ):
+    '''deinterleave jlog items into separate lists for each instance'''
+    byInstance = {}
+    badOnes = set()
+    topLevelKeys = collections.Counter()
+    # demux by instance
+    with open( inFilePath, 'rb' ) as inFile:
+        for line in inFile:
+            decoded = json.loads( line )
+            for key in decoded:
+                topLevelKeys[ key ] += 1
+            iid = decoded.get( 'instanceId', '<unknown>')
+            have = byInstance.get( iid, [] )
+            have.append( decoded )
+            byInstance[iid] = have
+            if 'returncode' in decoded:
+                rc = decoded['returncode']
+                if rc:
+                    logger.info( 'returncode %d for %s', rc, iid )
+                    badOnes.add( iid )
+            if 'exception' in decoded:
+                logger.info( 'exception %s for %s', decoded['exception'], iid )
+                badOnes.add( iid )
+            if 'timeout' in decoded:
+                logger.info( 'timeout %s for %s', decoded['timeout'], iid )
+                badOnes.add( iid )
+    return byInstance, badOnes
 
 def renderFrame( frameNum ):
     frameDirPath = os.path.join( dataDirPath, 'frame_%06d' % frameNum )
     frameFileName = frameFilePattern.replace( '######', '%06d' % frameNum )
+    installerFilePath = os.path.join(frameDirPath, 'data', 'runDistributedBlender.py.jlog' )
 
     logResult( 'frameStart', frameNum, frameNum )
     os.makedirs( frameDirPath+'/data', exist_ok=True )
 
     instances = allocateInstances( args.nWorkers, frameDirPath+'/data/launched.json')
+    try:
+        cmd = [
+            scriptDirPath()+'/runDistributedBlender.py',
+            os.path.realpath( args.blendFilePath ),
+            '--launch', False,
+            '--authToken', args.authToken,
+            '--blocks_user', args.blocks_user,
+            '--nWorkers', args.nWorkers,
+            '--filter', args.filter,
+            '--width', args.width,
+            '--height', args.height,
+            '--seed', args.seed,
+            '--timeLimit', args.timeLimit,
+            '--useCompositor', args.useCompositor,
+            '--frame', frameNum
+        ]
+        cmd = [ str( arg ) for arg in cmd ]
+        logger.info( 'frame %d, %s', frameNum, frameDirPath )
+        logger.info( 'cmd %s', cmd )
 
-    cmd = [
-        scriptDirPath()+'/runDistributedBlender.py',
-        os.path.realpath( args.blendFilePath ),
-        '--launch', False,
-        '--authToken', args.authToken,
-        '--blocks_user', args.blocks_user,
-        '--nWorkers', args.nWorkers,
-        '--filter', args.filter,
-        '--width', args.width,
-        '--height', args.height,
-        '--seed', args.seed,
-        '--timeLimit', args.timeLimit,
-        '--useCompositor', args.useCompositor,
-        '--frame', frameNum
-    ]
-    cmd = [ str( arg ) for arg in cmd ]
-    logger.info( 'frame %d, %s', frameNum, frameDirPath )
-    logger.info( 'cmd %s', cmd )
-
-    if True:
+        if True:
+            try:
+                retCode = subprocess.call( cmd, cwd=frameDirPath,
+                    stdout=sys.stdout, stderr=sys.stderr
+                    )
+            except Exception as exc:
+                logger.warning( 'runDistributedBlender call threw exception (%s) %s',type(exc), exc )
+                logResult( 'exception', str(exc), frameNum )
+                return exc
+            else:
+                logger.info( 'RC from runDistributed: %d', retCode )
+        if retCode:
+            logResult( 'retCode', retCode, frameNum )
+            #recycleInstances( instances )
+            return retCode
+        frameFilePath = os.path.join( frameDirPath, 'data', frameFileName)
+        if not os.path.isfile( frameFilePath ):
+            logResult( 'retCode', errno.ENOENT, frameNum )
+            return FileNotFoundError( errno.ENOENT, 'could not render frame', frameFileName )
+        outFilePath = os.path.join(dataDirPath, frameFileName )
+        logger.info( 'moving %s to %s', frameFilePath, dataDirPath )
         try:
-            retCode = subprocess.call( cmd, cwd=frameDirPath,
-                stdout=sys.stdout, stderr=sys.stderr
-                )
+            if os.path.isfile( outFilePath ):
+                os.remove( outFilePath )
+            shutil.move( os.path.join( frameDirPath, 'data', frameFileName), dataDirPath )
         except Exception as exc:
-            logger.warning( 'runDistributedBlender call threw exception (%s) %s',type(exc), exc )
+            logger.warning( 'trouble moving %s (%s) %s', frameFileName, type(exc), exc )
             logResult( 'exception', str(exc), frameNum )
             return exc
-        else:
-            logger.info( 'RC from runDistributed: %d', retCode )
-    if retCode:
-        logResult( 'retCode', retCode, frameNum )
-        releaseInstances( instances )
-        return retCode
-    frameFilePath = os.path.join( frameDirPath, 'data', frameFileName)
-    if not os.path.isfile( frameFilePath ):
-        logResult( 'retCode', errno.ENOENT, frameNum )
-        return FileNotFoundError( errno.ENOENT, 'could not render frame', frameFileName )
-    outFilePath = os.path.join(dataDirPath, frameFileName )
-    logger.info( 'moving %s to %s', frameFilePath, dataDirPath )
-    try:
-        if os.path.isfile( outFilePath ):
-            os.remove( outFilePath )
-        shutil.move( os.path.join( frameDirPath, 'data', frameFileName), dataDirPath )
-    except Exception as exc:
-        logger.warning( 'trouble moving %s (%s) %s', frameFileName, type(exc), exc )
-        logResult( 'exception', str(exc), frameNum )
-        return exc
-    releaseInstances( instances )
+    finally:
+        (byInstance, badSet) = demuxResults( installerFilePath )
+        if badSet:
+            logger.warning( 'instances not well installed: %s', badSet )
+            badIids = []
+            goodInstances = []
+            # remove bad instances from the list of instances to recycle
+            for inst in instances:
+                iid = inst['instanceId']
+                if iid in badSet:
+                    badIids.append( iid )
+                else:
+                    goodInstances.append( inst )
+            # terminate any bad instances
+            if badIids:
+                logResult( 'terminating bad instances', badIids, '<master>' )
+                ncs.terminateInstances( args.authToken, badIids )
+                instances = goodInstances
+        # recycle the (hopefully non-bad) instances
+        recycleInstances( instances )
 
     logResult( 'frameEnd', frameNum, frameNum )
     return 0
@@ -253,11 +302,15 @@ if __name__ == "__main__":
     args = ap.parse_args()
     #logger.debug('args: %s', args)
 
+    dataDirPath = './aniData'
+    os.makedirs( dataDirPath, exist_ok=True )
+
     signal.signal( signal.SIGTERM, sigtermHandler )
     myPid = os.getpid()
     logger.info('procID: %s', myPid)
 
-    resultsLogFilePath = os.path.splitext( os.path.basename( __file__ ) )[0] + '_results.log'
+    resultsLogFilePath = dataDirPath+'/'+ \
+        os.path.splitext( os.path.basename( __file__ ) )[0] + '_results.jlog'
     if resultsLogFilePath:
         resultsLogFile = open( resultsLogFilePath, "w", encoding="utf8" )
     else:
@@ -268,17 +321,16 @@ if __name__ == "__main__":
     extensions = {'PNG': 'png', 'OPEN_EXR': 'exr'}
     frameFilePattern = 'rendered_frame_######_seed_%d.%s'%(args.seed,extensions[args.fileType])
 
-    dataDirPath = './aniData'
     if False:
         for frameNum in range( args.startFrame, args.endFrame+1, args.frameStep ):
             renderFrame( frameNum )
     else:
-        nWorkers = 12
+        nParFrames = 50
         frameNums = list(range( args.startFrame, args.endFrame+1, args.frameStep ))
         # main loop to follow up and re-do frames that fail
         while len( frameNums ) > 0:
             logResult( 'parallelRender', len(frameNums), '<master>' )
-            with futures.ThreadPoolExecutor( max_workers=nWorkers ) as executor:
+            with futures.ThreadPoolExecutor( max_workers=nParFrames ) as executor:
                 parIter = executor.map( renderFrame, frameNums )
                 parResultList = list( parIter )
 
