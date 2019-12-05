@@ -469,6 +469,23 @@ def doCmdLaunch( args ):
     logger.info( 'finished')
     return 0 # no err
 
+def listNcsScInstances( authToken ):
+    try:
+        response = queryNcsSc( 'instances', authToken)
+    except Exception as exc:
+        logger.error( 'exception getting list of instances (%s) "%s"',
+            type(exc), exc )
+        raise
+    instancesJson = response['content']
+    logger.debug( 'response %s', instancesJson )
+    if 'running' in instancesJson:
+        runningInstances = instancesJson['my'] # 'running'
+    else:
+        runningInstances = []
+    logger.info( 'found %d allocated instances', len( runningInstances ) )
+    iids = [inst['id'] for inst in runningInstances]
+    return iids
+
 def doCmdList( args ):
     authToken = args.authToken
 
