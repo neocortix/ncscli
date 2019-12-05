@@ -300,7 +300,7 @@ if __name__ == "__main__":
     plt.title("Delivered Load During Test\n", fontsize=42*fontFactor)
     plt.xlabel("Time during Test (s)", fontsize=32*fontFactor)  
     plt.ylabel("Requests per second", fontsize=32*fontFactor)  
-    plt.show()    
+    #plt.show()    
     plt.savefig( outDirPath+'/rps.png' )
 
     plt.figure(figsize=figSize1)  # was figure 10
@@ -312,7 +312,7 @@ if __name__ == "__main__":
     plt.xlabel("Time during Test (s)", fontsize=32*fontFactor)  
     plt.ylabel("Response Times (ms)", fontsize=32*fontFactor)  
     # plt.savefig(outputPath + "\\plot_benchmarkVsDPR.png",bbox_inches='tight')   
-    plt.show()    
+    #plt.show()    
     # plt.clf()
     # plt.close()        
     plt.savefig( outDirPath+'/msprScatter1.png' )
@@ -330,7 +330,7 @@ if __name__ == "__main__":
         props={'size': 32*fontFactor}
         plt.gca().legend(["United States","Russia","Other"],loc='center right', prop=props, bbox_to_anchor=(1, 0.50))
         # plt.savefig(outputPath + "\\plot_durationHistogram.png",bbox_inches='tight')
-        plt.show() 
+        #plt.show() 
         # plt.clf()
         # plt.close()    
         plt.savefig( outDirPath+'/durationHistogram.png' )
@@ -347,7 +347,7 @@ if __name__ == "__main__":
     props={'size': 32*fontFactor}
     plt.gca().legend(["United States","Russia","Other"],loc='center right', prop=props, bbox_to_anchor=(1, 0.50))
     # plt.savefig(outputPath + "\\plot_durationHistogram.png",bbox_inches='tight')
-    plt.show() 
+    #plt.show() 
     # plt.clf()
     # plt.close()  
     plt.savefig( outDirPath+'/durationHistogramLoaded.png' )
@@ -377,7 +377,7 @@ if __name__ == "__main__":
         plt.plot(getColumn(instanceIdsAndCountries,3),getColumn(instanceIdsAndCountries,2),linestyle='', color=(0.0, 0.5, 1.0),marker='o',markersize=15*fontFactor)
         plt.xlim([-180,180])
         plt.ylim([-60,90])
-        plt.show()    
+        #plt.show()    
         plt.savefig( outDirPath+'/countryData.png' )
 
     
