@@ -176,8 +176,19 @@ def reportCompiledStats( stats ):
     # meanResponseTime = stats['mspr'].mean()  # unweighted
     meanResponseTime = (stats['mspr'] * stats['nr']).sum() / stats['nr'].sum()
 
+    # extract data for the last 30 secs, but only if longer than 30 seconds
+    if durSeconds <= 30:
+        meanResponseTimeMs30 = meanResponseTime
+    else:
+        lastStartTime = dateutil.parser.parse(stats.dateTime.max())
+        thresholdDateTime = lastStartTime - datetime.timedelta( seconds=30 )
+        lastPart = stats[ stats.dateTime >= thresholdDateTime.isoformat() ]
+        meanResponseTimeMs30 = (lastPart['mspr'] * lastPart['nr']).sum() / lastPart['nr'].sum()
+    resultsSummary['meanResponseTimeMs30'] = meanResponseTimeMs30
+
     print( 'mean response time: %.1f ms' % meanResponseTime )
     resultsSummary['meanResponseTimeMs'] = meanResponseTime
+    print( 'mean response time (last 30 secs): %.1f ms' % meanResponseTimeMs30 )
     print( 'median response time: %.1f ms' % resultsSummary['medianResponseTimeMs'] )
     print( 'response time range: %.1f-%.1f ms' % (stats['msprMin'].min(), stats['msprMax'].max() ) )
  
@@ -541,13 +552,16 @@ def plotIntegratedStats( inDf, outFilePath ):
     fig, axes = plt.subplots( 3, sharex=True )
     #fig.suptitle('performance over time')
     axes[0].plot( inDf.startRelTime, inDf.rps, label='requests per second' )
+    axes[0].legend( loc='lower center' )
     axes[1].plot( inDf.startRelTime, inDf.msprMean, label='mean response time (ms)' )
+    msprAx = axes[1]
     axes[1].plot( inDf.startRelTime, inDf.msprMed, label='median response time (ms)' )
+    axes[1].legend( loc='lower right' )
     axes[2].plot( inDf.startRelTime, inDf.failRate, label='failure rate' )
     for ax in range( 0, 3 ):
         axes[ax].set_ylim( bottom=0 )
-    for ax in range( 0, 2 ):
-        axes[ax].legend( loc='lower center' )
+    #for ax in range( 0, 2 ):
+    #    axes[ax].legend( loc='lower center' )
     axes[2].legend()
     plt.gca().set_xlabel("elapsed seconds")
     plt.gca().set(xlim=(0, inDf.startRelTime.max()) )
@@ -556,13 +570,26 @@ def plotIntegratedStats( inDf, outFilePath ):
     else:
         makeTimelyXTicks( 10, 1 )
 
+    threshRelTime = inDf.startRelTime.max() - 30
+    threshRelTime = 0 if threshRelTime < 0 else threshRelTime
+    recent = inDf[ inDf.startRelTime >= threshRelTime ]
+    msprHighMean = recent.msprMean.max()
+    msprHighMedian = recent.msprMed.max()
+    yMax = 1.1 * max(  msprHighMean, msprHighMedian )
+    logger.info( 'msprHighMean: %.1f, msprHighMedian: %.1f', msprHighMean, msprHighMedian )
+    msprAx.set_ylim( top=yMax )
 
     plt.savefig( outFilePath )
 
 
 if __name__ == "__main__":
     initLogging()
-    
+    '''
+    integrated = temporallyIntegrateLocustStats( 'data/locustStats.csv')
+    print( integrated.info() )
+    print( integrated.msprMean.describe( [.75, .8, .9, .95]) )
+    plotIntegratedStats( integrated, 'integratedPerf.png')
+    '''
     reportStats()
     '''
     g_dataDirPath = 'data'
