@@ -293,7 +293,7 @@ def genXmlReport( wasGood ):
 def testsPass( args, loadTestStats ):
     if loadTestStats.get('nReqsSatisfied', 0) <= 0:
         return False
-    return loadTestStats.get('meanResponseTimeMs', 99999) <= args.reqMsprMean
+    return loadTestStats.get('meanResponseTimeMs30', 99999) <= args.reqMsprMean
 
 def conductLoadtest( masterUrl, nWorkersWanted, usersPerWorker,
     startTimeLimit, susTime, stopWanted, nReqInstances, rampUpRate
