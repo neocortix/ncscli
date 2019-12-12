@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-anaimates using distributed blender rendering
+animates using distributed blender rendering
 """
 
 # standard library modules
@@ -30,6 +30,7 @@ import requests
 # neocortix modules
 try:
     import ncs
+    import devicePerformance
 except ImportError:
     # set system and python paths for default places, since path seems to be not set properly
     ncscliPath = os.path.expanduser('~/ncscli/ncscli')
@@ -103,6 +104,26 @@ def scriptDirPath():
     '''returns the absolute path to the directory containing this script'''
     return os.path.dirname(os.path.realpath(__file__))
 
+def instanceDpr( inst ):
+    #logger.info( 'NCSC Inst details %s', inst )
+    # cpuarch:      string like "aarch64" or "armv7l"
+    # cpunumcores:  int
+    # cpuspeeds:    list of floats of length cpunumcores, each representing a clock frequency in GHz
+    # cpufamily:    list of strings of length cpunumcores
+    cpuarch = inst['cpu']['arch']
+    cpunumcores = len( inst['cpu']['cores'])
+    cpuspeeds = []
+    cpufamily = []
+    for core in inst['cpu']['cores']:
+        cpuspeeds.append( core['freq'] / 1e9)
+        cpufamily.append( core['family'] )
+    
+    dpr = devicePerformance.devicePerformanceRating( cpuarch, cpunumcores, cpuspeeds, cpufamily )
+    #print( 'device', inst['device-id'], 'dpr', dpr )
+    if dpr < 37:
+        logger.info( 'unhappy dpr for dev %d with cpu %s', inst['device-id'], inst['cpu'] )
+    return dpr
+
 g_instanceBads = collections.Counter()
 g_badBadCount = 0
 
@@ -125,6 +146,21 @@ def checkFrame( frameNum ):
         launchedDateTime = datetime.datetime.fromtimestamp( os.path.getmtime( launchedJsonFilePath ) )
         info[ 'launchedDateTime' ] = launchedDateTime
         #logger.info( '%06d, launched %s', frameNum, launchedDateTime.strftime( '%Y-%m-%d_%H%M%S' ) )
+        # get instances from the launched json file
+        launchedInstances = []
+        with open( launchedJsonFilePath, 'r') as jsonInFile:
+            try:
+                launchedInstances = json.load(jsonInFile)  # an array
+            except Exception as exc:
+                logger.warning( 'could not load json (%s) %s', type(exc), exc )
+        instanceMap = {}
+        for inst in launchedInstances:
+            instanceMap[ inst['instanceId'] ] = inst
+        deviceIds = [inst['device-id'] for inst in launchedInstances]
+        info['deviceIds'] = deviceIds[0] if len(deviceIds)==1 else deviceIds  #scalarize if only one
+        dpr = [instanceDpr( inst ) for inst in launchedInstances ]
+        info['dpr'] = dpr[0] if len(dpr)==1 else dpr  #scalarize if only one
+
     if os.path.isfile( installerFilePath ):
         info['state'] = 'installing'
         installedDateTime = datetime.datetime.fromtimestamp( os.path.getmtime( installerFilePath ) )
@@ -137,6 +173,9 @@ def checkFrame( frameNum ):
             logger.warning( '%d badOnes for frame %d', len(badOnes), frameNum )
             for badIid in badOnes:
                 g_instanceBads[ badIid ] += 1
+        iidSet = set( byInstance.keys() )
+        iidSet.discard( '<master>' )
+        info['iids'] = list( iidSet )
         for iid, events in byInstance.items():
             for event in events:
                 if 'timeout' in event:
@@ -145,6 +184,7 @@ def checkFrame( frameNum ):
     if os.path.isfile( frameFilePath ):
         info['state'] = 'finished'
         info[ 'finishedDateTime' ] = datetime.datetime.fromtimestamp( os.path.getmtime( frameFilePath ) )
+        info['durSeconds'] = (info[ 'finishedDateTime' ] - info[ 'installedDateTime' ]).total_seconds()
     else:
         #info['state'] = 'unfinished'
         logger.warning( '%06d, %s not found', frameNum, frameFilePath )
@@ -166,7 +206,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser( description=__doc__,
         fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     #ap.add_argument( 'blendFilePath', help='the .blend file to render' )
-    ap.add_argument( '--authToken', required=False, help='the NCS authorization token to use' )
+    ap.add_argument( '--dataDir', help='where to read and write data', default='aniData' )
     ap.add_argument( '--filter', help='json to filter instances for launch' )
     ap.add_argument( '--instTimeLimit', type=int, default=900, help='amount of time (in seconds) installer is allowed to take on instances' )
     ap.add_argument( '--jobId', help='to identify this job' )
@@ -201,7 +241,7 @@ if __name__ == "__main__":
     extensions = {'PNG': 'png', 'OPEN_EXR': 'exr'}
     frameFilePattern = 'rendered_frame_######_seed_%d.%s'%(args.seed,extensions[args.fileType])
 
-    dataDirPath = './aniData'
+    dataDirPath = args.dataDir  # './aniData'
     frameInfos = []
     for frameNum in range( args.startFrame, args.endFrame+1, args.frameStep ):
         frameInfo = checkFrame( frameNum )
@@ -215,15 +255,16 @@ if __name__ == "__main__":
     animatorFilePath = os.path.join(dataDirPath, 'animateDistributed_results.jlog' )
     events = readJLog( animatorFilePath )
     recTable = pd.DataFrame( events )
-    print( recTable.info() )
+    recTable['dateTime'] = pd.to_datetime( recTable.dateTime )
+    #print( recTable.info() )
     recTable.to_csv( dataDirPath+'/parsedLog.csv', index=False)
 
     nTerminations = 0
     nTerminated = 0
     for event in events:
-        if 'terminating bad instances' in event:
+        if 'renderFrame would terminate bad instances' in event:
             nTerminations += 1
-            nTerminated += len( event['terminating bad instances'] )
+            nTerminated += len( event['renderFrame would terminate bad instances'] )
     print( nTerminated, 'instances terminated in', nTerminations, 'terminations' )
 
     print( 'g_instanceBads: count', len(g_instanceBads), 'max', g_instanceBads.most_common(1) )
@@ -234,21 +275,26 @@ if __name__ == "__main__":
     if not 'finishedDateTime' in framesTable:
         sys.exit( 'no frames finished')
     #logger.info( '%s', framesTable.info() )
-    framesTable['launchedDateTime'] = pd.to_datetime( framesTable.launchedDateTime )
-    framesTable['finishedDateTime'] = pd.to_datetime( framesTable.finishedDateTime )
+    framesTable['launchedDateTime'] = pd.to_datetime( framesTable.launchedDateTime, utc=True )
+    framesTable['finishedDateTime'] = pd.to_datetime( framesTable.finishedDateTime, utc=True )
 
     finished = framesTable[ ~pd.isnull(framesTable.finishedDateTime) ]
     justStarted = framesTable[ pd.isnull(framesTable.finishedDateTime) & ~pd.isnull(framesTable.launchedDateTime) ]
 
     print( len(finished), 'frames finished' )
     print( len(justStarted), 'frames launched but not finished' )
+    print( 'earliest event', recTable.dateTime.min() )
     print( 'earliest start', finished.launchedDateTime.min() )
     print( 'latest finish', finished.finishedDateTime.max() )
-    overallDur = finished.finishedDateTime.max() - finished.launchedDateTime.min()
+    overallDur = finished.finishedDateTime.max() - recTable.dateTime.min()
     print( 'overall duration %.2f minutes (%.2f hours)' % (overallDur.total_seconds() / 60, overallDur.total_seconds() / 3600) )
     timePerFrame = (finished.finishedDateTime.max() - finished.launchedDateTime.min()) / len(finished)
     #print( 'time per frame', timePerFrame, type(timePerFrame) )
     print( 'time per frame %d seconds (%.2f minutes)' % \
+        (timePerFrame.total_seconds(), timePerFrame.total_seconds()/60 ) )
+    timePerFrame = (finished.finishedDateTime.max() - recTable.dateTime.min()) / len(finished)
+    #print( 'time per frame', timePerFrame, type(timePerFrame) )
+    print( 'real time per frame %d seconds (%.2f minutes)' % \
         (timePerFrame.total_seconds(), timePerFrame.total_seconds()/60 ) )
 
 
