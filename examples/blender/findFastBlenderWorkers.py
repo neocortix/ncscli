@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-produces dtr configuration entries based on ncs json instance descriptions
+uses dtr to benchmark all the nodes in user_settings, looking for fast ones
 """
 # standard library modules
 import argparse
@@ -28,7 +28,8 @@ if __name__ == "__main__":
     logger.debug( 'the logger is configured' )
 
     ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@' )
-    #ap.add_argument('launchedJsonFilePath', default='launched.json')
+    ap.add_argument('--minWorkersToKeep', type=int, default=0)
+    ap.add_argument('--numToKeep', type=int, default=sys.maxsize)
     #ap.add_argument('outJsonFilePath', default='installed.json')
     args = ap.parse_args()
     #logger.info( 'args %s', args )
@@ -47,8 +48,8 @@ if __name__ == "__main__":
 
     maxReps = 3
     bmThreshold = 90
-    minWorkersToKeep = 36
-    numToKeep = 40
+    #minWorkersToKeep = 36
+    #numToKeep = 40
 
     #with open( settingsManualFilePath, 'r' ) as settingsFile:
     #    settings = settingsFile.read()
@@ -62,10 +63,12 @@ if __name__ == "__main__":
     #sys.exit()
 
     totTimes = {}
+    reps = {}
     with open( bmOutFilePath, 'w' ) as bmOutFile:
         print( 'node,time', file=bmOutFile )
         # run dtr up to maxReps times
         for rep in range( 0, maxReps ):
+            logger.info( 'benchmarking pass %d', rep+1 )
             rc = subprocess.call( [dtrBinPath, '--flush', '--benchmarkOnly'],
                 cwd=dataDirPath )
             if rc:
@@ -80,6 +83,7 @@ if __name__ == "__main__":
                     node = bm[0]
                     mTime = bm[1]
                     totTimes[ node ] = totTimes.get(node, 0) + mTime
+                    reps[ node ] = reps.get(node, 0) + 1
                     goodness = mTime <= bmThreshold
                     logger.info( '%s %s %s', node, mTime, goodness )
                     print( node, mTime, sep=',', file=bmOutFile )
@@ -94,22 +98,23 @@ if __name__ == "__main__":
                 for worker in goodWorkers:
                     print( 'node = root@%s' % (worker), file=workersOutFile )
                 workersOutFile.flush()
-            if len( goodWorkers ) <= minWorkersToKeep:
+            if len( goodWorkers ) <= args.minWorkersToKeep:
                 logger.info( 'quitting because n goodWorkers (%d) reached minimum (%d)',
-                    len( goodWorkers ), minWorkersToKeep
+                    len( goodWorkers ), args.minWorkersToKeep
                     )
                 break
-            if not anyBad:
-                logger.info( 'no bad workers in this rep' )
-                break
+            #if not anyBad:
+            #    logger.info( 'no bad workers in this rep' )
+            #    break
             logger.info( '%d good after %d reps', len( goodWorkers ), rep+1 )
         # done main loop
         survivors = []
         for node in goodWorkers:
-            survivors.append( {'node': node, 'totTime': totTimes[node]} )
+            survivors.append( {'node': node, 'totTime': totTimes[node], 'reps': reps[node] } )
         survivingDf = pd.DataFrame( survivors )
         sorted = survivingDf.sort_values( 'totTime' )
         #print( sorted )
+        numToKeep = min( args.numToKeep, len(sorted) )
         print( 'selected', numToKeep )
         print( sorted.iloc[0:numToKeep] )
         # save the final list as settings file
