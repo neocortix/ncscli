@@ -38,6 +38,7 @@ except ImportError:
     import ncs
 import jsonToKnownHosts
 import runDistributedBlender
+import tellInstances
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +113,7 @@ def allocateInstances( nWorkersWanted, launchedJsonFilePath ):
         if respCode < 200 or respCode >= 300:
             logger.warning( 'ncs.uploadSshClientKey returned %s', respCode )
             sys.exit( 'could not upload SSH client key')
-
+    logResult( 'launchInstances', nWorkersWanted, 'allocateInstances' )
     rc = runDistributedBlender.launchInstances( args.authToken, nWorkersWanted,
         sshClientKeyName, launchedJsonFilePath, filtersJson=args.filter )
     if rc:
@@ -141,9 +142,94 @@ def allocateInstances( nWorkersWanted, launchedJsonFilePath ):
 def recycleInstances( instances ):
     iids = [inst['instanceId'] for inst in instances]
     logResult( 'recycleInstances', iids, '<master>' )
-    #runDistributedBlender.terminateThese( args.authToken, instances )
     with g_releasedInstancesLock:
         g_releasedInstances.extend( instances )
+
+def triage( statuses ):
+    ''' separates good tellInstances statuses from bad ones'''
+    goodOnes = []
+    badOnes = []
+
+    for status in statuses:
+        if isinstance( status['status'], int) and status['status'] == 0:
+            goodOnes.append( status['instanceId'])
+        else:
+            badOnes.append( status )
+    return (goodOnes, badOnes)
+
+def recruitInstances( nWorkersWanted, launchedJsonFilePath ):
+    '''fancy function to preallocate instances with good blender installation'''
+    logger.info( 'recruiting %d instances', nWorkersWanted )
+    nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
+    if nWorkersWanted > (nAvail + 0):
+        logger.error( 'not enough devices available (%d requested, %d avail)', nWorkersWanted, nAvail )
+        raise ValueError( 'not enough devices available')
+    # prepare sshClientKey for launch
+    if args.sshClientKeyName:
+        sshClientKeyName = args.sshClientKeyName
+    else:
+        keyContents = runDistributedBlender.loadSshPubKey()
+        randomPart = str( uuid.uuid4() )[0:13]
+        keyContents += ' #' + randomPart
+        sshClientKeyName = 'bfr_%s' % (randomPart)
+        respCode = ncs.uploadSshClientKey( args.authToken, sshClientKeyName, keyContents )
+        if respCode < 200 or respCode >= 300:
+            logger.warning( 'ncs.uploadSshClientKey returned %s', respCode )
+            sys.exit( 'could not upload SSH client key')
+    #launch
+    logResult( 'launchInstances', nWorkersWanted, 'recruitInstances' )
+    rc = runDistributedBlender.launchInstances( args.authToken, nWorkersWanted,
+        sshClientKeyName, launchedJsonFilePath, filtersJson=args.filter )
+    if rc:
+        logger.debug( 'launchInstances returned %d', rc )
+    # delete sshClientKey only if we just uploaded it
+    if sshClientKeyName != args.sshClientKeyName:
+        logger.info( 'deleting sshClientKey %s', sshClientKeyName)
+        ncs.deleteSshClientKey( args.authToken, sshClientKeyName )
+    # get instances from the launched json file
+    launchedInstances = []
+    with open( launchedJsonFilePath, 'r') as jsonInFile:
+        try:
+            launchedInstances = json.load(jsonInFile)  # an array
+        except Exception as exc:
+            logger.warning( 'could not load json (%s) %s', type(exc), exc )
+    if len( launchedInstances ) < nWorkersWanted:
+        logger.warning( 'could not launch as many instances as wanted (%d vs %d)',
+            len( launchedInstances ), nWorkersWanted )
+    # proceed with instances that were actually started
+    startedInstances = [inst for inst in launchedInstances if inst['state'] == 'started' ]
+    # add instances to knownHosts
+    with open( os.path.expanduser('~/.ssh/known_hosts'), 'a' ) as khFile:
+        jsonToKnownHosts.jsonToKnownHosts( startedInstances, khFile )
+    # install blender on startedInstances
+    if not sigtermSignaled():
+        installerCmd = 'sudo apt-get -qq update && sudo apt-get -qq -y install blender > /dev/null'
+        logger.info( 'calling tellInstances to install on %d instances', len(startedInstances))
+        stepStatuses = tellInstances.tellInstances( startedInstances, installerCmd,
+            resultsLogFilePath=dataDirPath+'/recruitInstances.jlog',
+            download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
+            timeLimit=min(args.instTimeLimit, args.timeLimit), upload=None,
+            knownHostsOnly=True
+            )
+        # restore our handler because tellInstances may have overridden it
+        signal.signal( signal.SIGTERM, sigtermHandler )
+        if not stepStatuses:
+            logger.warning( 'no statuses returned from installer')
+        (goodOnes, badOnes) = triage( stepStatuses )
+        #stepTiming.finish()
+        #eventTimings.append(stepTiming)
+        logger.info( '%d good installs, %d bad installs', len(goodOnes), len(badOnes) )
+        logger.info( 'stepStatuses %s', stepStatuses )
+        goodInstances = [inst for inst in startedInstances if inst['instanceId'] in goodOnes ]
+        badIids = []
+        for status in badOnes:
+            badIids.append( status['instanceId'] )
+        if badIids:
+            logResult( 'recruitInstances would terminate bad instances', badIids, '<master>' )
+            ncs.terminateInstances( args.authToken, badIids )
+        if goodInstances:
+            recycleInstances( goodInstances )
+
 
 def demuxResults( inFilePath ):
     '''deinterleave jlog items into separate lists for each instance'''
@@ -246,7 +332,7 @@ def renderFrame( frameNum ):
                     goodInstances.append( inst )
             # terminate any bad instances
             if badIids:
-                logResult( 'terminating bad instances', badIids, '<master>' )
+                logResult( 'renderFrame would terminate bad instances', badIids, frameNum )
                 ncs.terminateInstances( args.authToken, badIids )
                 instances = goodInstances
         # recycle the (hopefully non-bad) instances
@@ -262,10 +348,10 @@ if __name__ == "__main__":
     logDateFmt = '%Y/%m/%d %H:%M:%S'
     formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
     logging.basicConfig(format=logFmt, datefmt=logDateFmt)
-    ncs.logger.setLevel(logging.WARNING)
+    ncs.logger.setLevel(logging.INFO)
     runDistributedBlender.logger.setLevel(logging.INFO)
     logger.setLevel(logging.INFO)
-    #tellInstances.logger.setLevel(logging.INFO)
+    tellInstances.logger.setLevel(logging.INFO)
     logger.debug('the logger is configured')
 
     ap = argparse.ArgumentParser( description=__doc__,
@@ -279,6 +365,8 @@ if __name__ == "__main__":
     ap.add_argument( '--nWorkers', type=int, default=1, help='the # of worker instances to launch (or zero for all available)' )
     ap.add_argument( '--sshAgent', type=boolArg, default=False, help='whether or not to use ssh agent' )
     ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use (default is random)' )
+    ap.add_argument( '--nParFrames', type=int, help='how many frames to render in parallel',
+        default=30 )
     ap.add_argument( '--timeLimit', type=int, help='time limit (in seconds) for the whole job',
         default=24*60*60 )
     ap.add_argument( '--useCompositor', type=boolArg, default=True, help='whether or not to use blender compositor' )
@@ -325,7 +413,13 @@ if __name__ == "__main__":
         for frameNum in range( args.startFrame, args.endFrame+1, args.frameStep ):
             renderFrame( frameNum )
     else:
-        nParFrames = 50
+        nParFrames = args.nParFrames  # 30
+        nToRecruit = min( args.endFrame+1-args.startFrame, nParFrames)*args.nWorkers
+        nToRecruit = int( nToRecruit * 1.5 )
+        #nToRecruit = 18  # min( nFrames, nParFrames)*args.nWorkers
+        recruitInstances( nToRecruit, dataDirPath+'/recruitLaunched.json' )
+        logger.info( 'sleeping for some seconds')
+        time.sleep( 90 )
         frameNums = list(range( args.startFrame, args.endFrame+1, args.frameStep ))
         # main loop to follow up and re-do frames that fail
         while len( frameNums ) > 0:
@@ -344,6 +438,10 @@ if __name__ == "__main__":
                     failedFrameNums.append( fn )
             frameNums = failedFrameNums
             logResult( 'progress', 'end of loop', '<master>' )
+
+    iids = ncs.listNcsScInstances( args.authToken )
+    logger.info( 'surviving iids (%d) %s', len(iids), iids)
+
     logger.info( 'terminating %d instances', len( g_releasedInstances) )
     runDistributedBlender.terminateThese( args.authToken, g_releasedInstances )
     elapsed = time.time() - startTime
