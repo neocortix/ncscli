@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-animates using distributed blender rendering
+analyzes performance of animation rendering, based on files
 """
 
 # standard library modules
@@ -252,7 +252,7 @@ if __name__ == "__main__":
     framesTable.to_csv( dataDirPath+'/frameSummaries.csv', index=False)
 
     # analyze the "outer" jlog file
-    animatorFilePath = os.path.join(dataDirPath, 'animateDistributed_results.jlog' )
+    animatorFilePath = os.path.join(dataDirPath, 'animateWholeFrames_results.jlog' )
     events = readJLog( animatorFilePath )
     recTable = pd.DataFrame( events )
     recTable['dateTime'] = pd.to_datetime( recTable.dateTime )
