@@ -15,6 +15,7 @@ import json
 import logging
 #import math
 import os
+import re
 #import socket
 import shutil
 import signal
@@ -69,6 +70,9 @@ def logResult( key, value, instanceId ):
         print( json.dumps( toLog, sort_keys=True ), file=resultsLogFile )
         resultsLogFile.flush()
 
+def logOperation( op, value, instanceId ):
+    logResult( 'operation', {op: value}, instanceId )
+
 def boolArg( v ):
     '''use with ArgumentParser add_argument for (case-insensitive) boolean arg'''
     if v.lower() == 'true':
@@ -84,6 +88,11 @@ def scriptDirPath():
 
 g_releasedInstances = collections.deque()
 g_releasedInstancesLock = threading.Lock()
+
+g_framesToDo = collections.deque()
+g_nFramesWanted = None  # total number to do; used as stopping criterion
+#g_framesToDoLock = threading.Lock()
+g_framesFinished = collections.deque()
 
 def allocateInstances( nWorkersWanted, launchedJsonFilePath ):
     # see if there are enough released ones to reuse
@@ -141,7 +150,7 @@ def allocateInstances( nWorkersWanted, launchedJsonFilePath ):
 
 def recycleInstances( instances ):
     iids = [inst['instanceId'] for inst in instances]
-    logResult( 'recycleInstances', iids, '<master>' )
+    logOperation( 'recycleInstances', iids, '<master>' )
     with g_releasedInstancesLock:
         g_releasedInstances.extend( instances )
 
@@ -180,7 +189,7 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted ):
                 logger.warning( 'ncs.uploadSshClientKey returned %s', respCode )
                 sys.exit( 'could not upload SSH client key')
         #launch
-        logResult( 'launchInstances', nWorkersWanted, 'recruitInstances' )
+        logResult( 'operation', {'launchInstances': nWorkersWanted}, '<recruitInstances>' )
         rc = runDistributedBlender.launchInstances( args.authToken, nWorkersWanted,
             sshClientKeyName, launchedJsonFilePath, filtersJson=args.filter )
         if rc:
@@ -228,7 +237,7 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted ):
         for status in badOnes:
             badIids.append( status['instanceId'] )
         if badIids:
-            logResult( 'recruitInstances would terminate bad instances', badIids, '<master>' )
+            logResult( 'operation', {'terminateBad': badIids}, '<recruitInstances>' )
             ncs.terminateInstances( args.authToken, badIids )
         if goodInstances:
             recycleInstances( goodInstances )
@@ -265,7 +274,7 @@ def demuxResults( inFilePath ):
 
 def renderFrame( frameNum ):
     frameDirPath = os.path.join( dataDirPath, 'frame_%06d' % frameNum )
-    frameFileName = frameFilePattern.replace( '######', '%06d' % frameNum )
+    frameFileName = g_outFilePattern.replace( '######', '%06d' % frameNum )
     installerFilePath = os.path.join(frameDirPath, 'data', 'runDistributedBlender.py.jlog' )
 
     logResult( 'frameStart', frameNum, frameNum )
@@ -364,38 +373,109 @@ def rsyncToRemote( local_filename, inst, timeLimit=60 ):
         logger.warning( 'rsync returnCode %d', returnCode )
     return returnCode
 
-def renderFramesOnInstance( inst, timeLimit=20 ):
+def renderFramesOnInstance( inst, timeLimit=1800 ):
     iid = inst['instanceId']
-    logger.info( 'would render frames on instance %s', iid[0:16] )
+    abbrevIid = iid[0:16]
+    logger.info( 'would render frames on instance %s', abbrevIid )
 
     # args.blendFilePath should be used
-    fileName = 'cube0c.blend'
-    rc = rsyncToRemote( fileName, inst, timeLimit=60 )
+    blendFileName = 'SpinningCube_002_c.blend'  # was 'cube0c.blend'
+    rc = rsyncToRemote( blendFileName, inst, timeLimit=240 )
     if rc != 0:
         logger.warning( 'rc from rsync was %d', rc )
-    returnCode = None
-    '''
-    cmd = ['blender', '--version']
-    logger.info( 'cmd %s', cmd )
-    with subprocess.Popen(cmd, shell=False, \
-        stdout=sys.stdout, stderr=sys.stderr) as proc:
-        returnCode = proc.wait( timeout=timeLimit )
-    '''
-    cmd = 'blender -b -noaudio --version'
-    logger.info( 'commanding %s', cmd )
-    sshSpecs = inst['ssh']
-    with subprocess.Popen(['ssh',
-                        '-p', str(sshSpecs['port']),
-                        '-o', 'ServerAliveInterval=360',
-                        '-o', 'ServerAliveCountMax=1',
-                        sshSpecs['user'] + '@' + sshSpecs['host'], cmd],
-                        stdout=sys.stdout,
-                        stderr=sys.stderr) as proc:
-         returnCode = proc.wait( timeout=timeLimit )
-    if returnCode != 0:
-        logger.warning( 'blender returnCode %d', returnCode )
-    else:
-        logger.info( 'ok' )
+        return -1
+    def trackStderr( proc ):
+        for line in proc.stderr:
+            print( '<stderr>', abbrevIid, line.strip(), file=sys.stderr )
+
+    def trackStdout( proc ):
+        for line in proc.stdout:
+            #print( '<stdout>', abbrevIid, line.strip(), file=sys.stderr )
+            if 'Path Tracing Tile' in line:
+                pass
+                '''
+                # yes, this progress-parsing code does work
+                pat = r'Path Tracing Tile ([0-9]+)/([0-9]+)'
+                match = re.search( pat, line )
+                if match:
+                    progress = float( match.group(1) ) / float( match.group(2) )
+                    if progress > 0.5:
+                        logger.info( '%s is %.1f %% done', abbrevIid, progress*100 )
+                '''
+            elif '| Updating ' in line:
+                pass
+            elif '| Synchronizing object |' in line:
+                pass
+            elif line.strip():
+                print( '<stdout>', abbrevIid, line.strip(), file=sys.stderr )
+
+    #seed = 0
+    #fileExt = 'png'
+    while len( g_framesFinished) < g_nFramesWanted:
+        logger.info( 'would claim a frame; %d done so far', len( g_framesFinished) )
+        try:
+            frameNum = g_framesToDo.popleft()
+        except IndexError:
+            logger.warning( 'empty g_framesToDo' )
+            time.sleep(5)
+            continue
+        #outFilePattern = 'rendered_frame_######_seed_%d.%s'%(args.seed,fileExt)
+        outFileName = g_outFilePattern.replace( '######', '%06d' % frameNum )
+        returnCode = None
+        #cmd = 'blender -b -noaudio --version'
+        cmd = 'blender -b -noaudio %s -o %s -f %d' % \
+            (blendFileName, g_outFilePattern, frameNum)
+        logger.info( 'commanding %s', cmd )
+        sshSpecs = inst['ssh']
+
+        with subprocess.Popen(['ssh',
+                            '-p', str(sshSpecs['port']),
+                            '-o', 'ServerAliveInterval=360',
+                            '-o', 'ServerAliveCountMax=1',
+                            sshSpecs['user'] + '@' + sshSpecs['host'], cmd],
+                            encoding='utf8',
+                            stdout=subprocess.PIPE,  # subprocess.PIPE subprocess.DEVNULL
+                            stderr=subprocess.PIPE) as proc:
+            #returnCode = proc.wait( timeout=timeLimit )
+            deadline = time.time() + timeLimit
+            stdoutThr = threading.Thread(target=trackStdout, args=(proc,))
+            stdoutThr.start()
+            stderrThr = threading.Thread(target=trackStderr, args=(proc,))
+            stderrThr.start()
+            while time.time() < deadline:
+                proc.poll() # sets proc.returncode
+                if proc.returncode != None:
+                    if proc.returncode == 0:
+                        logger.info( 'remote %s succeeded on frame %d', abbrevIid, frameNum )
+                        remoteFailed = False
+                    else:
+                        logger.warning( 'remote %s gave returnCode %d', abbrevIid, proc.returncode )
+                        remoteFailed = True
+                    break
+                time.sleep(1)
+            returnCode = proc.returncode if proc.returncode != None else 124
+            if returnCode:
+                logResult( 'unfinishedFrame', frameNum, iid )
+                g_framesToDo.append( frameNum )
+                time.sleep(10) # maybe we should retire this instance; at least, making it sleep so it is less competitive
+            else:
+                logResult( 'finishedFrame', frameNum, iid )
+                g_framesFinished.append( frameNum )
+
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+                if proc.returncode:
+                    logger.warning( 'ssh return code %d', proc.returncode )
+            except subprocess.TimeoutExpired:
+                logger.warning( 'ssh did not terminate in time' )
+            stdoutThr.join()
+            stderrThr.join()
+
+        if returnCode != 0:
+            logger.warning( 'blender returnCode %d for %s', returnCode, abbrevIid )
+        else:
+            logger.info( 'ok' )
     return 0
 
 
@@ -415,6 +495,7 @@ if __name__ == "__main__":
         fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( 'blendFilePath', help='the .blend file to render' )
     ap.add_argument( '--authToken', required=True, help='the NCS authorization token to use' )
+    ap.add_argument( '--dataDir', help='output data darectory', default='./aniData/' )
     ap.add_argument( '--filter', help='json to filter instances for launch' )
     ap.add_argument( '--instTimeLimit', type=int, default=900, help='amount of time (in seconds) installer is allowed to take on instances' )
     ap.add_argument( '--jobId', help='to identify this job' )
@@ -447,8 +528,8 @@ if __name__ == "__main__":
     args = ap.parse_args()
     #logger.debug('args: %s', args)
 
-    dateTimeTag = datetime.datetime.now().strftime( '%Y-%m-%d_%H%M%S' )
-    dataDirPath = './aniData/'  #  +  dateTimeTag
+    #dateTimeTag = datetime.datetime.now().strftime( '%Y-%m-%d_%H%M%S' )
+    dataDirPath = args.dataDir
     os.makedirs( dataDirPath, exist_ok=True )
 
     signal.signal( signal.SIGTERM, sigtermHandler )
@@ -465,7 +546,11 @@ if __name__ == "__main__":
 
     startTime = time.time()
     extensions = {'PNG': 'png', 'OPEN_EXR': 'exr'}
-    frameFilePattern = 'rendered_frame_######_seed_%d.%s'%(args.seed,extensions[args.fileType])
+    g_outFilePattern = 'rendered_frame_######_seed_%d.%s'%(args.seed,extensions[args.fileType])
+
+    g_framesToDo.extend( range(args.startFrame, args.endFrame+1, args.frameStep ) )
+    g_nFramesWanted = len( g_framesToDo )
+    logger.info( 'g_framesToDo %s', g_framesToDo )
 
     nParFrames = args.nParFrames  # 30
     nToRecruit = min( args.endFrame+1-args.startFrame, nParFrames)*args.nWorkers
@@ -475,7 +560,7 @@ if __name__ == "__main__":
     else:
         goodInstances = recruitInstances( nToRecruit, dataDirPath+'/survivingInstances.json', False )
 
-    logResult( 'parallelRender', len(goodInstances), '<master>' )
+    logOperation( 'parallelRender', len(goodInstances), '<master>' )
     with futures.ThreadPoolExecutor( max_workers=nParFrames ) as executor:
         parIter = executor.map( renderFramesOnInstance, goodInstances )
         parResultList = list( parIter )
