@@ -70,6 +70,14 @@ def logResult( key, value, instanceId ):
         print( json.dumps( toLog, sort_keys=True ), file=resultsLogFile )
         resultsLogFile.flush()
 
+def logFrameState( frameNum, state, instanceId, rc=0 ):
+    if resultsLogFile:
+        toLog = {'frameNum': frameNum, 'frameState':state,
+            'instanceId': instanceId, 'rc': rc,
+            'dateTime': datetime.datetime.now(datetime.timezone.utc).isoformat() }
+        print( json.dumps( toLog, sort_keys=True ), file=resultsLogFile )
+        resultsLogFile.flush()
+
 def logOperation( op, value, instanceId ):
     logResult( 'operation', {op: value}, instanceId )
 
@@ -355,14 +363,15 @@ def renderFrame( frameNum ):
     logResult( 'frameEnd', frameNum, frameNum )
     return 0
 
-def rsyncToRemote( local_filename, inst, timeLimit=60 ):
+def rsyncToRemote( srcFilePath, destFileName, inst, timeLimit=60 ):
     sshSpecs = inst['ssh']
     host = sshSpecs['host']
     port = sshSpecs['port']
     user = sshSpecs['user']
 
-    remote_filename = user + '@' + host + ':~/' + local_filename
-    cmd = ' '.join(['rsync -acq', '-e', '"ssh -p %d"' % port, local_filename, remote_filename])
+    srcFilePathFull = os.path.realpath(os.path.abspath( srcFilePath ))
+    remote_filename = user + '@' + host + ':~/' + destFileName
+    cmd = ' '.join(['rsync -acq', '-e', '"ssh -p %d"' % port, srcFilePathFull, remote_filename])
     logger.info( 'rsyncing %s', cmd )
     returnCode = None
     
@@ -373,14 +382,34 @@ def rsyncToRemote( local_filename, inst, timeLimit=60 ):
         logger.warning( 'rsync returnCode %d', returnCode )
     return returnCode
 
-def renderFramesOnInstance( inst, timeLimit=1800 ):
+def scpFromRemote( srcFileName, destFilePath, inst, timeLimit=60 ):
+    sshSpecs = inst['ssh']
+    host = sshSpecs['host']
+    port = sshSpecs['port']
+    user = sshSpecs['user']
+
+    destFilePathFull = os.path.realpath(os.path.abspath( destFilePath ))
+    cmd = [ 'scp', '-P', str(port), user+'@'+host+':~/'+srcFileName,
+        destFilePathFull
+    ]
+    logger.info( 'SCPing %s', cmd )
+    returnCode = None
+    
+    with subprocess.Popen(cmd, shell=False, \
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) as proc:
+        returnCode = proc.wait( timeout=timeLimit )
+    if returnCode:
+        logger.warning( 'SCP returnCode %d', returnCode )
+    return returnCode
+
+def renderFramesOnInstance( inst, timeLimit=1500 ):
     iid = inst['instanceId']
     abbrevIid = iid[0:16]
     logger.info( 'would render frames on instance %s', abbrevIid )
 
     # args.blendFilePath should be used
-    blendFileName = 'SpinningCube_002_c.blend'  # was 'cube0c.blend'
-    rc = rsyncToRemote( blendFileName, inst, timeLimit=240 )
+    blendFileName = 'render.blend'  # was SpinningCube_002_c.blend 'cube0c.blend'
+    rc = rsyncToRemote( args.blendFilePath, blendFileName, inst, timeLimit=240 )
     if rc != 0:
         logger.warning( 'rc from rsync was %d', rc )
         return -1
@@ -389,19 +418,18 @@ def renderFramesOnInstance( inst, timeLimit=1800 ):
             print( '<stderr>', abbrevIid, line.strip(), file=sys.stderr )
 
     def trackStdout( proc ):
+        nonlocal frameProgress
         for line in proc.stdout:
             #print( '<stdout>', abbrevIid, line.strip(), file=sys.stderr )
             if 'Path Tracing Tile' in line:
                 pass
-                '''
                 # yes, this progress-parsing code does work
                 pat = r'Path Tracing Tile ([0-9]+)/([0-9]+)'
                 match = re.search( pat, line )
                 if match:
-                    progress = float( match.group(1) ) / float( match.group(2) )
-                    if progress > 0.5:
-                        logger.info( '%s is %.1f %% done', abbrevIid, progress*100 )
-                '''
+                    frameProgress = float( match.group(1) ) / float( match.group(2) )
+                    #if (frameProgress < 0.1) or (frameProgress > 0.9):
+                    #    logger.info( '%s is %.1f %% done', abbrevIid, frameProgress*100 )
             elif '| Updating ' in line:
                 pass
             elif '| Synchronizing object |' in line:
@@ -412,11 +440,11 @@ def renderFramesOnInstance( inst, timeLimit=1800 ):
     #seed = 0
     #fileExt = 'png'
     while len( g_framesFinished) < g_nFramesWanted:
-        logger.info( 'would claim a frame; %d done so far', len( g_framesFinished) )
+        logger.info( '%s would claim a frame; %d done so far', abbrevIid, len( g_framesFinished) )
         try:
             frameNum = g_framesToDo.popleft()
         except IndexError:
-            logger.warning( 'empty g_framesToDo' )
+            #logger.info( 'empty g_framesToDo' )
             time.sleep(5)
             continue
         #outFilePattern = 'rendered_frame_######_seed_%d.%s'%(args.seed,fileExt)
@@ -428,6 +456,8 @@ def renderFramesOnInstance( inst, timeLimit=1800 ):
         logger.info( 'commanding %s', cmd )
         sshSpecs = inst['ssh']
 
+        curFrameRendered = False
+        logFrameState( frameNum, 'starting', iid )
         with subprocess.Popen(['ssh',
                             '-p', str(sshSpecs['port']),
                             '-o', 'ServerAliveInterval=360',
@@ -436,7 +466,7 @@ def renderFramesOnInstance( inst, timeLimit=1800 ):
                             encoding='utf8',
                             stdout=subprocess.PIPE,  # subprocess.PIPE subprocess.DEVNULL
                             stderr=subprocess.PIPE) as proc:
-            #returnCode = proc.wait( timeout=timeLimit )
+            frameProgress = 0
             deadline = time.time() + timeLimit
             stdoutThr = threading.Thread(target=trackStdout, args=(proc,))
             stdoutThr.start()
@@ -444,22 +474,30 @@ def renderFramesOnInstance( inst, timeLimit=1800 ):
             stderrThr.start()
             while time.time() < deadline:
                 proc.poll() # sets proc.returncode
-                if proc.returncode != None:
+                if proc.returncode == None:
+                    if (frameProgress < 0.01) or (frameProgress > 0.9):
+                        logger.info( '%s is %.1f %% done', abbrevIid, frameProgress*100 )
+                    if ((deadline - time.time() < timeLimit/2)) and frameProgress < .5:
+                        logger.warning( '%s SEEMS SLOW for frame %d', abbrevIid, frameNum )
+                        logFrameState( frameNum, 'seemsSlow', iid, frameProgress )
+                else:
                     if proc.returncode == 0:
                         logger.info( 'remote %s succeeded on frame %d', abbrevIid, frameNum )
-                        remoteFailed = False
+                        curFrameRendered = True
                     else:
                         logger.warning( 'remote %s gave returnCode %d', abbrevIid, proc.returncode )
-                        remoteFailed = True
                     break
                 time.sleep(1)
             returnCode = proc.returncode if proc.returncode != None else 124
             if returnCode:
-                logResult( 'unfinishedFrame', frameNum, iid )
+                logger.warning( 'unfinishedFrame %d, %s', frameNum, iid )
+                #logResult( 'unfinishedFrame', [frameNum, returnCode], iid )
+                logFrameState( frameNum, 'renderFailed', iid, returnCode )
                 g_framesToDo.append( frameNum )
                 time.sleep(10) # maybe we should retire this instance; at least, making it sleep so it is less competitive
             else:
-                logResult( 'finishedFrame', frameNum, iid )
+                logFrameState( frameNum, 'rendered', iid )
+                #logResult( 'finishedFrame', frameNum, iid )
                 g_framesFinished.append( frameNum )
 
             proc.terminate()
@@ -471,11 +509,17 @@ def renderFramesOnInstance( inst, timeLimit=1800 ):
                 logger.warning( 'ssh did not terminate in time' )
             stdoutThr.join()
             stderrThr.join()
-
+        # may not need this logging here
         if returnCode != 0:
             logger.warning( 'blender returnCode %d for %s', returnCode, abbrevIid )
         else:
             logger.info( 'ok' )
+        if curFrameRendered:
+            returnCode = scpFromRemote( outFileName, os.path.join( dataDirPath, outFileName ), inst )
+            if returnCode == 0:
+                logFrameState( frameNum, 'retrieved', iid )
+            else:
+                logFrameState( frameNum, 'retrieveFailed', iid, returnCode )
     return 0
 
 
@@ -518,7 +562,7 @@ if __name__ == "__main__":
     ap.add_argument( '--fileType', choices=['PNG', 'OPEN_EXR'], help='the type of output file',
         default='PNG' )
     ap.add_argument( '--startFrame', type=int, help='the first frame number to render',
-        default=1 )
+        default=0 )
     ap.add_argument( '--endFrame', type=int, help='the last frame number to render',
         default=1 )
     ap.add_argument( '--frameStep', type=int, help='the frame number increment',
@@ -528,6 +572,8 @@ if __name__ == "__main__":
     args = ap.parse_args()
     #logger.debug('args: %s', args)
 
+    if not os.path.isfile( args.blendFilePath ):
+        sys.exit( 'file not found: '+args.blendFilePath )
     #dateTimeTag = datetime.datetime.now().strftime( '%Y-%m-%d_%H%M%S' )
     dataDirPath = args.dataDir
     os.makedirs( dataDirPath, exist_ok=True )
@@ -561,7 +607,7 @@ if __name__ == "__main__":
         goodInstances = recruitInstances( nToRecruit, dataDirPath+'/survivingInstances.json', False )
 
     logOperation( 'parallelRender', len(goodInstances), '<master>' )
-    with futures.ThreadPoolExecutor( max_workers=nParFrames ) as executor:
+    with futures.ThreadPoolExecutor( max_workers=len(goodInstances) ) as executor:
         parIter = executor.map( renderFramesOnInstance, goodInstances )
         parResultList = list( parIter )
 
