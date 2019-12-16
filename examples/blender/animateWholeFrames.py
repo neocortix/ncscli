@@ -49,6 +49,13 @@ global resultsLogFile
 # possible place for globals is this class's attributes
 class g_:
     signaled = False
+g_releasedInstances = collections.deque()
+g_releasedInstancesLock = threading.Lock()
+
+g_framesToDo = collections.deque()
+g_nFramesWanted = None  # total number to do; used as stopping criterion
+#g_framesToDoLock = threading.Lock()
+g_framesFinished = collections.deque()
 
 class SigTerm(BaseException):
     #logger.warning( 'unsupported SigTerm exception created')
@@ -93,14 +100,6 @@ def boolArg( v ):
 def scriptDirPath():
     '''returns the absolute path to the directory containing this script'''
     return os.path.dirname(os.path.realpath(__file__))
-
-g_releasedInstances = collections.deque()
-g_releasedInstancesLock = threading.Lock()
-
-g_framesToDo = collections.deque()
-g_nFramesWanted = None  # total number to do; used as stopping criterion
-#g_framesToDoLock = threading.Lock()
-g_framesFinished = collections.deque()
 
 def allocateInstances( nWorkersWanted, launchedJsonFilePath ):
     # see if there are enough released ones to reuse
@@ -250,118 +249,6 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted ):
         if goodInstances:
             recycleInstances( goodInstances )
     return goodInstances
-
-
-def demuxResults( inFilePath ):
-    '''deinterleave jlog items into separate lists for each instance'''
-    byInstance = {}
-    badOnes = set()
-    topLevelKeys = collections.Counter()
-    # demux by instance
-    with open( inFilePath, 'rb' ) as inFile:
-        for line in inFile:
-            decoded = json.loads( line )
-            for key in decoded:
-                topLevelKeys[ key ] += 1
-            iid = decoded.get( 'instanceId', '<unknown>')
-            have = byInstance.get( iid, [] )
-            have.append( decoded )
-            byInstance[iid] = have
-            if 'returncode' in decoded:
-                rc = decoded['returncode']
-                if rc:
-                    logger.info( 'returncode %d for %s', rc, iid )
-                    badOnes.add( iid )
-            if 'exception' in decoded:
-                logger.info( 'exception %s for %s', decoded['exception'], iid )
-                badOnes.add( iid )
-            if 'timeout' in decoded:
-                logger.info( 'timeout %s for %s', decoded['timeout'], iid )
-                badOnes.add( iid )
-    return byInstance, badOnes
-
-def renderFrame( frameNum ):
-    frameDirPath = os.path.join( dataDirPath, 'frame_%06d' % frameNum )
-    frameFileName = g_outFilePattern.replace( '######', '%06d' % frameNum )
-    installerFilePath = os.path.join(frameDirPath, 'data', 'runDistributedBlender.py.jlog' )
-
-    logResult( 'frameStart', frameNum, frameNum )
-    os.makedirs( frameDirPath+'/data', exist_ok=True )
-
-    instances = allocateInstances( args.nWorkers, frameDirPath+'/data/launched.json')
-    try:
-        cmd = [
-            scriptDirPath()+'/runDistributedBlender.py',
-            os.path.realpath( args.blendFilePath ),
-            '--launch', False,
-            '--authToken', args.authToken,
-            '--blocks_user', args.blocks_user,
-            '--nWorkers', args.nWorkers,
-            '--filter', args.filter,
-            '--width', args.width,
-            '--height', args.height,
-            '--seed', args.seed,
-            '--timeLimit', args.timeLimit,
-            '--useCompositor', args.useCompositor,
-            '--frame', frameNum
-        ]
-        cmd = [ str( arg ) for arg in cmd ]
-        logger.info( 'frame %d, %s', frameNum, frameDirPath )
-        logger.info( 'cmd %s', cmd )
-
-        if True:
-            try:
-                retCode = subprocess.call( cmd, cwd=frameDirPath,
-                    stdout=sys.stdout, stderr=sys.stderr
-                    )
-            except Exception as exc:
-                logger.warning( 'runDistributedBlender call threw exception (%s) %s',type(exc), exc )
-                logResult( 'exception', str(exc), frameNum )
-                return exc
-            else:
-                logger.info( 'RC from runDistributed: %d', retCode )
-        if retCode:
-            logResult( 'retCode', retCode, frameNum )
-            #recycleInstances( instances )
-            return retCode
-        frameFilePath = os.path.join( frameDirPath, 'data', frameFileName)
-        if not os.path.isfile( frameFilePath ):
-            logResult( 'retCode', errno.ENOENT, frameNum )
-            return FileNotFoundError( errno.ENOENT, 'could not render frame', frameFileName )
-        outFilePath = os.path.join(dataDirPath, frameFileName )
-        logger.info( 'moving %s to %s', frameFilePath, dataDirPath )
-        try:
-            if os.path.isfile( outFilePath ):
-                os.remove( outFilePath )
-            shutil.move( os.path.join( frameDirPath, 'data', frameFileName), dataDirPath )
-            logResult( 'goodFrame', frameNum, frameNum )
-        except Exception as exc:
-            logger.warning( 'trouble moving %s (%s) %s', frameFileName, type(exc), exc )
-            logResult( 'exception', str(exc), frameNum )
-            return exc
-    finally:
-        (byInstance, badSet) = demuxResults( installerFilePath )
-        if badSet:
-            logger.warning( 'instances not well installed: %s', badSet )
-            badIids = []
-            goodInstances = []
-            # remove bad instances from the list of instances to recycle
-            for inst in instances:
-                iid = inst['instanceId']
-                if iid in badSet:
-                    badIids.append( iid )
-                else:
-                    goodInstances.append( inst )
-            # terminate any bad instances
-            if badIids:
-                logResult( 'renderFrame would terminate bad instances', badIids, frameNum )
-                ncs.terminateInstances( args.authToken, badIids )
-                instances = goodInstances
-        # recycle the (hopefully non-bad) instances
-        recycleInstances( instances )
-
-    logResult( 'frameEnd', frameNum, frameNum )
-    return 0
 
 def rsyncToRemote( srcFilePath, destFileName, inst, timeLimit=60 ):
     sshSpecs = inst['ssh']
