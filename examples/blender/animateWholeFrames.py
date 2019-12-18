@@ -262,9 +262,15 @@ def rsyncToRemote( srcFilePath, destFileName, inst, timeLimit=60 ):
     logger.info( 'rsyncing %s', cmd )
     returnCode = None
     
-    with subprocess.Popen(cmd, shell=True, \
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) as proc:
-        returnCode = proc.wait( timeout=timeLimit )
+    try:
+        with subprocess.Popen(cmd, shell=True, \
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) as proc:
+            returnCode = proc.wait( timeout=timeLimit )
+    except subprocess.TimeoutExpired:
+        returnCode = 124
+    except Exception as exc:
+        logger.warning( 'rsync threw exception (%s) %s', type(exc), exc )
+        returnCode = -1
     if returnCode:
         logger.warning( 'rsync returnCode %d', returnCode )
     return returnCode
@@ -294,12 +300,16 @@ def renderFramesOnInstance( inst, timeLimit=1500 ):
     abbrevIid = iid[0:16]
     logger.info( 'would render frames on instance %s', abbrevIid )
 
-    # args.blendFilePath should be used
+    # rsync the blend file, with standardized dest file name
     blendFileName = 'render.blend'  # was SpinningCube_002_c.blend 'cube0c.blend'
     rc = rsyncToRemote( args.blendFilePath, blendFileName, inst, timeLimit=240 )
-    if rc != 0:
+    if rc == 0:
+        logFrameState( -1, 'rsynced', iid )
+    else:
+        logFrameState( -1, 'rsyncFailed', iid, rc )
         logger.warning( 'rc from rsync was %d', rc )
-        return -1
+        return -1  # go no further if we can't rsync to the worker
+
     def trackStderr( proc ):
         for line in proc.stderr:
             print( '<stderr>', abbrevIid, line.strip(), file=sys.stderr )
@@ -409,6 +419,19 @@ def renderFramesOnInstance( inst, timeLimit=1500 ):
                 logFrameState( frameNum, 'retrieveFailed', iid, returnCode )
     return 0
 
+def encodeTo264( destDirPath, seed=0, frameFileType='png' ):
+    cmd = [ 'ffmpeg', '-y', '-framerate', '30',
+        '-i', destDirPath + '/rendered_frame_%%06d_seed_%d.%s'%(seed,frameFileType),
+        '-c:v', 'libx264', '-preset', 'fast', '-pix_fmt', 'yuv420p', 
+        '-b:v', '4000k',
+        destDirPath + '/rendered_4mbps.mp4'
+    ]
+    try:
+        subprocess.check_call( cmd,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+    except Exception as exc:
+        logger.warning( 'ffmpeg call threw exception (%s) %s',type(exc), exc )
 
 if __name__ == "__main__":
     # configure logger formatting
@@ -475,7 +498,10 @@ if __name__ == "__main__":
         resultsLogFile = open( resultsLogFilePath, "w", encoding="utf8" )
     else:
         resultsLogFile = None
-    logResult( 'operation', 'starting', '<master>')
+    #logResult( 'operation', 'starting', '<master>')
+    argsToSave = vars(args).copy()
+    del argsToSave['authToken']
+    logOperation( 'starting', argsToSave, '<master>')
 
     startTime = time.time()
     extensions = {'PNG': 'png', 'OPEN_EXR': 'exr'}
@@ -493,39 +519,12 @@ if __name__ == "__main__":
     else:
         goodInstances = recruitInstances( nToRecruit, dataDirPath+'/survivingInstances.json', False )
 
-    logOperation( 'parallelRender', len(goodInstances), '<master>' )
+    logOperation( 'parallelRender',
+        {'blendFilePath': args.blendFilePath, 'nInstances': len(goodInstances)},
+        '<master>' )
     with futures.ThreadPoolExecutor( max_workers=len(goodInstances) ) as executor:
         parIter = executor.map( renderFramesOnInstance, goodInstances )
         parResultList = list( parIter )
-
-    '''
-    if False:
-        for frameNum in range( args.startFrame, args.endFrame+1, args.frameStep ):
-            renderFrame( frameNum )
-    else:
-        logger.info( 'sleeping for some seconds')
-        time.sleep( 30 )
-        frameNums = list(range( args.startFrame, args.endFrame+1, args.frameStep ))
-        # main loop to follow up and re-do frames that fail
-        while len( frameNums ) > 0:
-            logResult( 'parallelRender', len(frameNums), '<master>' )
-            with futures.ThreadPoolExecutor( max_workers=nParFrames ) as executor:
-                parIter = executor.map( renderFrame, frameNums )
-                parResultList = list( parIter )
-
-            logResult( 'progress', 'map() returned', '<master>' )
-            #break  # remove this
-            failedFrameNums = []
-            for (index, result) in enumerate( parResultList ):
-                fn = frameNums[ index ]
-                if result:  # tup[1]:
-                    logger.warning( 'frame # %d got result %s', fn, result )
-                    failedFrameNums.append( fn )
-            frameNums = failedFrameNums
-            logResult( 'progress', 'end of loop', '<master>' )
-    iids = ncs.listNcsScInstances( args.authToken )
-    logger.info( 'surviving iids (%d) %s', len(iids), iids)
-    '''
 
     if False:  # args.launch:
         logger.info( 'terminating %d instances', len( g_releasedInstances) )
@@ -534,7 +533,11 @@ if __name__ == "__main__":
         with open( dataDirPath + '/survivingInstances.json','w' ) as outFile:
             json.dump( list(g_releasedInstances), outFile )
 
+    if len(g_framesFinished):
+        encodeTo264( dataDirPath, args.seed, extensions[args.fileType] )
+
     elapsed = time.time() - startTime
+    logger.info( 'rendered %d frames using %d "good" instances', len(g_framesFinished), len(goodInstances) )
     logger.info( 'finished; elapsed time %.1f seconds (%.1f minutes)', elapsed, elapsed/60 )
 
 
