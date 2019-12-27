@@ -118,9 +118,11 @@ async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.
             logger.info( 'imported %s', key.export_public_key() )
             #known_hosts = key # nope
             known_hosts = asyncssh.import_known_hosts(keyStr)
+        logResult( 'operation', ['connect', host, port], iid )
         #sshAgent = os.getenv( 'SSH_AUTH_SOCK' )
         #async with asyncssh.connect(host, port=port, username=user, password=password, known_hosts=None) as conn:
         async with asyncssh.connect(host, port=port, username=user,
+            keepalive_interval=10, keepalive_count_max=3,
             known_hosts=known_hosts, agent_path=sshAgent ) as conn:
             serverHostKey = conn.get_server_host_key()
             #logger.info( 'got serverHostKey (%s) %s', type(serverHostKey), serverHostKey )
@@ -327,7 +329,12 @@ def tellInstances( instancesSpec, command, resultsLogFilePath, download, downloa
         resultsLogFile = open( resultsLogFilePath, "w", encoding="utf8" )
     else:
         resultsLogFile = None
-    logResult( 'operation', ['tellInstances', {'args': args} ], '<master>')
+
+    # save args, but avoid saving too much
+    argsToSave = args.copy()
+    del argsToSave['instancesSpec']
+    argsToSave['instanceIds'] = [inst['instanceId'] for inst in startedInstances]
+    logResult( 'operation', ['tellInstances', {'args': argsToSave} ], '<master>')
     
     #installed = set()
     #failed = set()
