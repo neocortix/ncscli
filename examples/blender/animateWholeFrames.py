@@ -69,7 +69,6 @@ def sigtermHandler( sig, frame ):
 def sigtermSignaled():
     return g_.signaled
 
-
 def logResult( key, value, instanceId ):
     if resultsLogFile:
         toLog = {key: value, 'instanceId': instanceId,
@@ -77,16 +76,53 @@ def logResult( key, value, instanceId ):
         print( json.dumps( toLog, sort_keys=True ), file=resultsLogFile )
         resultsLogFile.flush()
 
+def logEvent( eventType, argv, instanceId ):
+    if resultsLogFile:
+        toLog = {
+            'dateTime': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            'instanceId': instanceId, 
+            'type': eventType,
+            'args': argv
+        }
+        print( json.dumps( toLog, sort_keys=True ), file=resultsLogFile )
+        resultsLogFile.flush()
+
+def logStderr( text, instanceId ):
+    logEvent( 'stderr', text, instanceId )
+
+def logStdout( text, instanceId ):
+    logEvent( 'stdout', text, instanceId )
+
 def logFrameState( frameNum, state, instanceId, rc=0 ):
     if resultsLogFile:
+        toLog = {
+            'dateTime': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            'instanceId': instanceId, 
+            'type': 'frameState',
+            'args': {
+                'rc': rc,
+                'frameNum': frameNum, 
+                'state':state
+            }
+        }
+        '''
         toLog = {'frameNum': frameNum, 'frameState':state,
             'instanceId': instanceId, 'rc': rc,
             'dateTime': datetime.datetime.now(datetime.timezone.utc).isoformat() }
+        '''
         print( json.dumps( toLog, sort_keys=True ), file=resultsLogFile )
         resultsLogFile.flush()
 
 def logOperation( op, value, instanceId ):
-    logResult( 'operation', {op: value}, instanceId )
+    if resultsLogFile:
+        toLog = {
+            'dateTime': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            'instanceId': instanceId,
+            'type': 'operation',
+            'args': {op: value}
+            }
+        print( json.dumps( toLog, sort_keys=True ), file=resultsLogFile )
+        resultsLogFile.flush()
 
 def boolArg( v ):
     '''use with ArgumentParser add_argument for (case-insensitive) boolean arg'''
@@ -129,7 +165,8 @@ def allocateInstances( nWorkersWanted, launchedJsonFilePath ):
         if respCode < 200 or respCode >= 300:
             logger.warning( 'ncs.uploadSshClientKey returned %s', respCode )
             sys.exit( 'could not upload SSH client key')
-    logResult( 'launchInstances', nWorkersWanted, 'allocateInstances' )
+    #logResult( 'launchInstances', nWorkersWanted, 'allocateInstances' )
+    logOperation( 'launchInstances', nWorkersWanted, '<allocateInstances>' )
     rc = runDistributedBlender.launchInstances( args.authToken, nWorkersWanted,
         sshClientKeyName, launchedJsonFilePath, filtersJson=args.filter )
     if rc:
@@ -196,7 +233,8 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted ):
                 logger.warning( 'ncs.uploadSshClientKey returned %s', respCode )
                 sys.exit( 'could not upload SSH client key')
         #launch
-        logResult( 'operation', {'launchInstances': nWorkersWanted}, '<recruitInstances>' )
+        #logResult( 'operation', {'launchInstances': nWorkersWanted}, '<recruitInstances>' )
+        logOperation( 'launchInstances', nWorkersWanted, '<recruitInstances>' )
         rc = runDistributedBlender.launchInstances( args.authToken, nWorkersWanted,
             sshClientKeyName, launchedJsonFilePath, filtersJson=args.filter )
         if rc:
@@ -244,7 +282,7 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted ):
         for status in badOnes:
             badIids.append( status['instanceId'] )
         if badIids:
-            logResult( 'operation', {'terminateBad': badIids}, '<recruitInstances>' )
+            logOperation( 'terminateBad', badIids, '<recruitInstances>' )
             ncs.terminateInstances( args.authToken, badIids )
         if goodInstances:
             recycleInstances( goodInstances )
@@ -259,21 +297,28 @@ def rsyncToRemote( srcFilePath, destFileName, inst, timeLimit=60 ):
     srcFilePathFull = os.path.realpath(os.path.abspath( srcFilePath ))
     remote_filename = user + '@' + host + ':~/' + destFileName
     cmd = ' '.join(['rsync -acq', '-e', '"ssh -p %d"' % port, srcFilePathFull, remote_filename])
+    # just for testing
+    #cmd += '; >&2 echo "humbug"; exit 101'
     logger.info( 'rsyncing %s', cmd )
     returnCode = None
-    
-    try:
-        with subprocess.Popen(cmd, shell=True, \
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) as proc:
-            returnCode = proc.wait( timeout=timeLimit )
-    except subprocess.TimeoutExpired:
-        returnCode = 124
-    except Exception as exc:
-        logger.warning( 'rsync threw exception (%s) %s', type(exc), exc )
-        returnCode = -1
+    stderr=''
+    with subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE )as proc:
+        try:
+            (stdout, stderr) = proc.communicate( timeout=timeLimit )
+            logger.info( 'stdout %s, stderr %s', stdout, stderr )
+            stdout = stdout.decode('utf8')
+            stderr = stderr.decode('utf8')
+            returnCode = proc.returncode
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            returnCode = 124
+            proc.communicate()  # ignoring any additional outputs
+        except Exception as exc:
+            logger.warning( 'rsync threw exception (%s) %s', type(exc), exc )
+            returnCode = -1
     if returnCode:
         logger.warning( 'rsync returnCode %d', returnCode )
-    return returnCode
+    return returnCode, stderr
 
 def scpFromRemote( srcFileName, destFilePath, inst, timeLimit=60 ):
     sshSpecs = inst['ssh']
@@ -287,13 +332,23 @@ def scpFromRemote( srcFileName, destFilePath, inst, timeLimit=60 ):
     ]
     logger.info( 'SCPing %s', cmd )
     returnCode = None
-    
-    with subprocess.Popen(cmd, shell=False, \
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) as proc:
-        returnCode = proc.wait( timeout=timeLimit )
+    stderr=''
+    with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE )as proc:
+        try:
+            (stdout, stderr) = proc.communicate( timeout=timeLimit )
+            stdout = stdout.decode('utf8')
+            stderr = stderr.decode('utf8')
+            returnCode = proc.returncode
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            returnCode = 124
+            proc.communicate()  # ignoring any additional outputs
+        except Exception as exc:
+            logger.warning( 'scp threw exception (%s) %s', type(exc), exc )
+            returnCode = -1
     if returnCode:
         logger.warning( 'SCP returnCode %d', returnCode )
-    return returnCode
+    return returnCode, stderr
 
 def renderFramesOnInstance( inst, timeLimit=1500 ):
     iid = inst['instanceId']
@@ -301,11 +356,13 @@ def renderFramesOnInstance( inst, timeLimit=1500 ):
     logger.info( 'would render frames on instance %s', abbrevIid )
 
     # rsync the blend file, with standardized dest file name
+    logFrameState( -1, 'rsyncing', iid, 0 )
     blendFileName = 'render.blend'  # was SpinningCube_002_c.blend 'cube0c.blend'
-    rc = rsyncToRemote( args.blendFilePath, blendFileName, inst, timeLimit=240 )
+    (rc, stderr) = rsyncToRemote( args.blendFilePath, blendFileName, inst, timeLimit=240 )
     if rc == 0:
         logFrameState( -1, 'rsynced', iid )
     else:
+        logStderr( stderr.rstrip(), iid )
         logFrameState( -1, 'rsyncFailed', iid, rc )
         logger.warning( 'rc from rsync was %d', rc )
         return -1  # go no further if we can't rsync to the worker
@@ -313,6 +370,7 @@ def renderFramesOnInstance( inst, timeLimit=1500 ):
     def trackStderr( proc ):
         for line in proc.stderr:
             print( '<stderr>', abbrevIid, line.strip(), file=sys.stderr )
+            logStderr( line.rstrip(), iid )
 
     def trackStdout( proc ):
         nonlocal frameProgress
@@ -333,10 +391,12 @@ def renderFramesOnInstance( inst, timeLimit=1500 ):
                 pass
             elif line.strip():
                 print( '<stdout>', abbrevIid, line.strip(), file=sys.stderr )
-
-    #seed = 0
-    #fileExt = 'png'
+                logStdout( line.rstrip(), iid )
+    nFailures = 0    
     while len( g_framesFinished) < g_nFramesWanted:
+        if nFailures > 1:
+            logger.warning( 'exiting thread because instance has encountered %d failures', nFailures )
+            break
         logger.info( '%s would claim a frame; %d done so far', abbrevIid, len( g_framesFinished) )
         try:
             frameNum = g_framesToDo.popleft()
@@ -388,13 +448,11 @@ def renderFramesOnInstance( inst, timeLimit=1500 ):
             returnCode = proc.returncode if proc.returncode != None else 124
             if returnCode:
                 logger.warning( 'unfinishedFrame %d, %s', frameNum, iid )
-                #logResult( 'unfinishedFrame', [frameNum, returnCode], iid )
                 logFrameState( frameNum, 'renderFailed', iid, returnCode )
                 g_framesToDo.append( frameNum )
                 time.sleep(10) # maybe we should retire this instance; at least, making it sleep so it is less competitive
             else:
                 logFrameState( frameNum, 'rendered', iid )
-                #logResult( 'finishedFrame', frameNum, iid )
                 g_framesFinished.append( frameNum )
 
             proc.terminate()
@@ -412,11 +470,17 @@ def renderFramesOnInstance( inst, timeLimit=1500 ):
         else:
             logger.info( 'ok' )
         if curFrameRendered:
-            returnCode = scpFromRemote( outFileName, os.path.join( dataDirPath, outFileName ), inst )
+            logFrameState( frameNum, 'retrieving', iid )
+            (returnCode, stderr) = scpFromRemote( 
+                outFileName, os.path.join( dataDirPath, outFileName ), inst
+                )
             if returnCode == 0:
                 logFrameState( frameNum, 'retrieved', iid )
             else:
+                logStderr( stderr.rstrip(), iid )
                 logFrameState( frameNum, 'retrieveFailed', iid, returnCode )
+        if returnCode:
+            nFailures += 1
     return 0
 
 def encodeTo264( destDirPath, seed=0, frameFileType='png' ):
@@ -498,7 +562,6 @@ if __name__ == "__main__":
         resultsLogFile = open( resultsLogFilePath, "w", encoding="utf8" )
     else:
         resultsLogFile = None
-    #logResult( 'operation', 'starting', '<master>')
     argsToSave = vars(args).copy()
     del argsToSave['authToken']
     logOperation( 'starting', argsToSave, '<master>')
