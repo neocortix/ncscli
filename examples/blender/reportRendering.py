@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-merges instance info from a json file with success info from an inv file
+reports results of rendering tests using data from mongodb
 """
 # standard library modules
 import argparse
@@ -8,6 +8,7 @@ import collections
 import datetime
 import json
 import logging
+import math
 import os
 import shutil
 import sys
@@ -15,7 +16,8 @@ import time
 
 # third-party modules
 import dateutil.parser
-import pymongo  # would be needed for indexing
+import pandas as pd
+import pymongo
 import requests
 
 # neocortix module(s)
@@ -24,12 +26,8 @@ import ncs
 logger = logging.getLogger(__name__)
 
 
-def itemsNotFound( a, b ):
-    ''' return all items from iterable a not found in iterable b '''
-    return [x for x in a if x not in b]
-
 def demuxResults( collection ):
-    '''deinterleave jlog items into separate lists for each instance'''
+    '''deinterleave jlog-like items into separate lists for each instance'''
     byInstance = {}
     badOnes = set()
     topLevelKeys = collections.Counter()
@@ -79,27 +77,52 @@ if __name__ == "__main__":
     ap.add_argument( '--tag', help='database collection-naming tag' )
     ap.add_argument('--mongoHost', help='the host of mongodb server', default='localhost')
     ap.add_argument('--mongoPort', help='the port of mongodb server', default=27017)
-    ap.add_argument('--csvOut', default=None)
+    ap.add_argument('--outDir', help='directory path for output files', default='.')
     args = ap.parse_args()
     #logger.debug( 'args %s', args )
 
-    csvOutFilePath = args.csvOut
+    mclient = pymongo.MongoClient(args.mongoHost, args.mongoPort)
+    logsDb = mclient.renderLogs
+    # get the list of all coillections in the db (avoiding using 'collections' as a global var name)
+    tables = sorted(logsDb.list_collection_names())
+    logger.info( 'database collections %s', tables )
 
     if args.tag:
         launchedCollName = 'launchedInstances_' + args.tag
         installerCollName = 'installerLog_' + args.tag
+        rendererCollName = 'rendererLog_' + args.tag
     else:
-        sys.exit( 'unimplemented: would get latest official test' )
+        # use the latest test from the 'officialTests' collection
+        officialColl = logsDb[ 'officialTests' ]
+        tests = list( officialColl.find() )
+        if not tests:
+            sys.exit( 'no officialTests found' )
+        #logger.info( 'all offical tests: %s', tests )
+        testsDf = pd.DataFrame( tests )
+        testsDf.sort_values( 'dateTime', inplace=True )
+        latestTest = testsDf.iloc[-1]  # the last row
+        logger.info( 'found %d official tests, latest at %s', len(testsDf), testsDf.dateTime.max() )
+        logger.info( 'using test with tag %s, from %s', latestTest.tag, latestTest.dateTime )
+        launchedCollName = latestTest.launchedInstances
+        installerCollName = latestTest.installerLog
+        rendererCollName = latestTest.rendererLog
 
-    mclient = pymongo.MongoClient(args.mongoHost, args.mongoPort)
-    logsDb = mclient.renderLogs
-    tables = sorted(logsDb.list_collection_names())  # avpiding using 'collections' as a global var name
-    logger.info( 'database collections %s', tables )
+    if launchedCollName not in tables:
+        sys.exit( 'could not find collection ' + launchedCollName )
+    if installerCollName not in tables:
+        sys.exit( 'could not find collection ' + installerCollName )
+    if rendererCollName not in tables:
+        sys.exit( 'could not find collection ' + rendererCollName )
+        
+    os.makedirs( args.outDir, exist_ok=True )
+    instAttemptsFilePath = args.outDir + '/instAttempts.csv'
+    frameSummariesFilePath = args.outDir + '/frameSummaries.csv'
+    workerSummariesFilePath = args.outDir + '/workerSummaries.csv'
 
-    launchedColl = logsDb[launchedCollName]
 
     # gather instances from launchedInstances collection into a dict
     instancesAllocated = {}
+    launchedColl = logsDb[launchedCollName]
     inRecs = launchedColl.find()
     for inRec in inRecs:
         if 'instanceId' not in inRec:
@@ -109,7 +132,7 @@ if __name__ == "__main__":
         instancesAllocated[ iid ] = inRec
     logger.info( 'found %d instances in collection %s', len(instancesAllocated), launchedCollName )
     
-    # partition events by instance from the installer jlog
+    # get events by instance from the installer log
     (eventsByInstance, badIids) = demuxResults( logsDb[installerCollName] )
     logger.info( 'badIids (%d) %s', len(badIids), badIids )
 
@@ -196,16 +219,15 @@ if __name__ == "__main__":
                 print( '>>>', locInfo['country-code'] )
             print( inst['stderrLines'][-5:] )
 
-
-    if csvOutFilePath:
-        dbPreexisted = os.path.isfile( csvOutFilePath )
+    if instAttemptsFilePath:
+        dbPreexisted = os.path.isfile( instAttemptsFilePath )
 
         if True:  #  not dbPreexisted:
-            with open( csvOutFilePath, 'w' ) as csvOutFile:
+            with open( instAttemptsFilePath, 'w' ) as csvOutFile:
                 print( 'eventType,devId,state,code,dateTime,dur,instanceId,country,sshAddr,storageFree,ramTotal,arch,nCores,freq1,freq2,families,appVersion,ref',
                     file=csvOutFile )
 
-        with open( csvOutFilePath, 'a' ) as csvOutFile:
+        with open( instAttemptsFilePath, 'a' ) as csvOutFile:
             for iid in instancesAllocated:
                 inst = instancesAllocated[iid]
                 #iid = inst['instanceId']
@@ -271,8 +293,6 @@ if __name__ == "__main__":
                 else:
                     logger.warning( 'no "cpu" info found for instance %s (dev %d)',
                         iid, devId )
-                #logger.info( '%s,%d,%s,%s,%s,%.1f,%s',
-                #    inst['state'], devId, iid, arch, nCores, maxFreq, families )
                 instDur = inst.get( 'dur', 0 )
                 print( 'launch_install,%d,%s,%s,%s,%.0f,%s,%s,%s,%.1f,%.1f,%s,%s,%.1f,%.1f,"%s",%d,%s' %
                     (devId, inst.get('state'), instCode, startDateTime,
@@ -281,3 +301,121 @@ if __name__ == "__main__":
                      families, appVersion, installerCollName)
                     , file=csvOutFile )
 
+    # get events by instance from the renderer jlog
+    (byInstance, _badIids) = demuxResults( logsDb[rendererCollName] )
+    # _badIids is expected to be always empty (because demux was designed for installer jlogs)
+
+    blendFilePath = '<unknown>'
+    allErrMsgs = set()
+    badIids = set()
+    goodIids = set()
+    prStartDateTime = None
+    sumRecs = []  # building a list of frameSummary records
+    for iid, events in byInstance.items():
+        logger.info( '%s had %d events', iid, len(events) )
+        if iid in instancesAllocated:
+            devId = instancesAllocated[iid].get( 'device-id' )
+        else:
+            devId = 0
+        seemedSlow = False
+        startDateTime = None
+        retrievingDateTime = None
+        stderrEvents = []
+        for event in events:
+            eventType = event.get('type')
+            eventArgs = event.get('args')
+            if eventType == 'operation':
+                if 'parallelRender' in eventArgs:
+                    parallelRenderOp = eventArgs['parallelRender']
+                    logger.info( 'parallelRender %s', parallelRenderOp )
+                    if blendFilePath != '<unknown>':
+                        logger.warning( 'replacing blendFilePath %s' )
+                    blendFilePath = parallelRenderOp['blendFilePath']
+                    logger.info( 'blendFilePath %s', blendFilePath )
+                    prStartDateTime = dateutil.parser.parse( event['dateTime'] )
+            elif eventType == 'stderr':
+                stderrEvents.append( event )
+            elif eventType == 'stdout':
+                #logger.debug( 'stdout %s', eventArgs ) # could do something with these
+                pass
+            elif eventType == 'frameState':
+                frameState = eventArgs['state']
+                frameNum = eventArgs['frameNum']
+                rc = eventArgs['rc']
+
+                # in reporting, rsync of the blend file is treated as if it were frame # -1 (minus one)
+                if frameState in ['rsyncing', 'starting']:
+                    startDateTime = dateutil.parser.parse( event['dateTime'] )
+                if frameState == 'retrieving':
+                    retrievingDateTime = dateutil.parser.parse( event['dateTime'] )
+                if frameState == 'seemsSlow':
+                    if seemedSlow:
+                        continue  # avoid verbosity for already-slow cases
+                    seemedSlow = True
+                # save a record if this is the end of a frame attempt
+                if frameState in ['rsynced', 'retrieved', 'renderFailed', 'retrieveFailed', 'rsyncFailed']:
+                    errMsg = None
+                    if len( stderrEvents ):
+                        errMsg = stderrEvents[-1]['args'].strip()
+                        allErrMsgs.add( errMsg )
+                    endDateTime = dateutil.parser.parse( event['dateTime'] )
+                    sdt = startDateTime
+                    if not startDateTime:
+                        logger.info( 'endDateTime %s, startDateTime %s, iid %s', endDateTime, startDateTime, iid )
+                        sdt = prStartDateTime
+                    dur = (endDateTime-sdt).total_seconds()
+                    retrievingDur = None
+                    if frameState in ['retrieved', 'retrieveFailed'] and retrievingDateTime:
+                        retrievingDur = (endDateTime-retrievingDateTime).total_seconds()
+
+                    sumRec = { 'instanceId': iid, 'devId': devId, 'blendFilePath': blendFilePath,
+                        'frameNum': frameNum, 'frameState': frameState,
+                        'startDateTime': startDateTime, 'endDateTime': endDateTime,
+                        'dur': dur, 'retrievingDur': retrievingDur,
+                        'rc': rc, 'slowness': seemedSlow, 'errMsg': errMsg
+                    }
+                    sumRecs.append( sumRec )
+                    if frameState in ['renderFailed', 'retrieveFailed', 'rsyncFailed']:
+                        badIids.add( iid )
+                    elif frameState == 'retrieved':
+                        goodIids.add( iid )
+
+    logger.info( 'allErrMsgs %s', allErrMsgs )
+    frameSummaries = pd.DataFrame( sumRecs )
+    if frameSummariesFilePath:
+        frameSummaries.to_csv( frameSummariesFilePath, index=False )
+
+    workerIids = [iid for iid in byInstance.keys() if '<' not in iid]
+    logger.info( '%d worker instances', len(workerIids))
+    logger.info( '%d good instances', len(goodIids))
+    logger.info( '%d bad instances', len(badIids))
+    logger.info( '%d partly-good instances', len( goodIids & badIids ))
+
+    # traverse the workers and generate a summary table
+    sumRecs = []
+    for iid in sorted( workerIids ):
+        devId = devId = instancesAllocated[iid].get( 'device-id' )
+        subset = frameSummaries[ frameSummaries.instanceId == iid ]
+        #nAttempts = len( subset )
+        nAttempts = len( frameSummaries[ (frameSummaries.instanceId == iid) & (frameSummaries.frameNum >=0) ]  )
+        nRenderFailed = (subset.frameState=='renderFailed').sum()
+        nRetrieveFailed = (subset.frameState=='retrieveFailed').sum()
+        nRsyncFailed = (subset.frameState=='rsyncFailed').sum()
+        successes = subset[ subset.frameState == 'retrieved']
+        meanDurGood = successes.dur.mean()
+        if math.isnan( meanDurGood ):
+            meanDurGood = 0  # force nans to zero
+        logger.info( '%s dev %d, %d attempts, %d good, %d renderFailed, %d other, %.1f meanDurGood',
+            iid[0:16], devId, nAttempts, len(successes),
+            nRenderFailed, nRetrieveFailed+nRsyncFailed,
+            meanDurGood
+            )
+        sumRec = { 'instanceId': iid, 'devId': devId, 'blendFilePath': blendFilePath,
+            'nAttempts': nAttempts, 'nGood': len(successes), 'nRenderFailed': nRenderFailed,
+            'nRetrieveFailed': nRetrieveFailed, 'nRsyncFailed': nRsyncFailed,
+            'meanDurGood': meanDurGood
+        }
+        sumRecs.append( sumRec )
+    workerSummaries = pd.DataFrame( sumRecs )
+    if workerSummariesFilePath:
+        workerSummaries.to_csv( workerSummariesFilePath, index=False )
