@@ -589,7 +589,7 @@ if __name__ == "__main__":
         parIter = executor.map( renderFramesOnInstance, goodInstances )
         parResultList = list( parIter )
 
-    if False:  # args.launch:
+    if args.launch:
         logger.info( 'terminating %d instances', len( g_releasedInstances) )
         runDistributedBlender.terminateThese( args.authToken, g_releasedInstances )
     else:
