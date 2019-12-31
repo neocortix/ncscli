@@ -10,7 +10,8 @@ import os
 import subprocess
 
 # third-party module(s)
-import pymongo  # would be needed for indexing
+import dateutil.parser
+import pymongo
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ def postCollection( fileName, collName=None ):
     cmd = [
         'mongoimport', '--host', args.server, '--port', str(args.port),
         '--drop',
-        '-d', 'renderLogs', '-c', collectionName,
+        '-d', 'renderingLogs', '-c', collectionName,
         srcFilePath
     ]
     if fileName.endswith( '.json' ):
@@ -35,9 +36,11 @@ def postCollection( fileName, collName=None ):
 
     collection = logsDb[collectionName]
     logger.info( '%s has %d documents', collectionName, collection.count_documents({}) )
-    #collection.create_index( 'dateTime' )
-    #collection.create_index( 'instanceId' )
-    #collection.create_index( 'type' )
+    for doc in collection.find():
+        if 'dateTime' in doc and isinstance( doc['dateTime'], str ):
+            dateTime = dateutil.parser.parse( doc['dateTime'] )
+            #logger.info( 'would replace %s with %s', doc['dateTime'], dateTime )
+            collection.update_one( {'_id': doc['_id']}, { "$set": { "dateTime": dateTime } } )
     return collection
 
 if __name__ == "__main__":
@@ -54,7 +57,7 @@ if __name__ == "__main__":
     args = ap.parse_args()
 
     mclient = pymongo.MongoClient(args.server, args.port)
-    logsDb = mclient.renderLogs
+    logsDb = mclient.renderingLogs
     collections = sorted(logsDb.list_collection_names())
     logger.info( 'existing collections %s', collections )
 
