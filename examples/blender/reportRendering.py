@@ -26,13 +26,24 @@ import ncs
 logger = logging.getLogger(__name__)
 
 
+def datetimeIsAware( dt ):
+    if not dt: return None
+    return (dt.tzinfo is not None) and (dt.tzinfo.utcoffset( dt ) is not None)
+
+def universalizeDateTime( dt ):
+    if not dt: return None
+    if datetimeIsAware( dt ):
+        #return dt
+        return dt.astimezone(datetime.timezone.utc)
+    return dt.replace( tzinfo=datetime.timezone.utc )
+
 def demuxResults( collection ):
     '''deinterleave jlog-like items into separate lists for each instance'''
     byInstance = {}
     badOnes = set()
     topLevelKeys = collections.Counter()
     # demux by instance
-    for decoded in collection.find():
+    for decoded in collection.find( {}, hint=[('dateTime', pymongo.ASCENDING)] ):
         for key in decoded:
             topLevelKeys[ key ] += 1
         iid = decoded.get( 'instanceId', '<unknown>')
@@ -68,6 +79,15 @@ def getCountryCodeGoogle( lat, lon ):
     else:
         return None
 
+def interpretDateTimeField( field ):
+    if isinstance( field, datetime.datetime ):
+        return universalizeDateTime( field )
+    elif isinstance( field, str ):
+        return dateutil.parser.parse( field )
+    else:
+        raise TypeError( 'datetime or parseable string required' )
+
+
 if __name__ == "__main__":
     logging.basicConfig(format='%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s', datefmt='%Y/%m/%d %H:%M:%S')
     logger.setLevel(logging.DEBUG)
@@ -82,7 +102,7 @@ if __name__ == "__main__":
     #logger.debug( 'args %s', args )
 
     mclient = pymongo.MongoClient(args.mongoHost, args.mongoPort)
-    logsDb = mclient.renderLogs
+    logsDb = mclient.renderingLogs
     # get the list of all coillections in the db (avoiding using 'collections' as a global var name)
     tables = sorted(logsDb.list_collection_names())
     logger.info( 'database collections %s', tables )
@@ -149,7 +169,7 @@ if __name__ == "__main__":
         stderrLines = []
         for event in events:
             if 'operation' in event and 'tellInstances' in event['operation']:
-                tellInstancesDateTime = dateutil.parser.parse( event['dateTime'] )
+                tellInstancesDateTime = interpretDateTimeField( event['dateTime'] )
                 try:
                     launchedIids = event["operation"][1]["args"]["instanceIds"]
                     logger.info( '%d instances were launched', len(launchedIids) )
@@ -157,12 +177,12 @@ if __name__ == "__main__":
                     logger.info( 'exception ignored for tellInstances op (%s)', type(exc) )
             if 'operation' in event and 'connect' in event['operation']:
                 # start of ssh connection for this instance
-                connectingDateTime = dateutil.parser.parse( event['dateTime'] )
+                connectingDateTime = interpretDateTimeField( event['dateTime'] )
                 #logger.info( 'installer connecting %s %s', iid, connectingDateTime )
                 instancesAllocated[iid]['connectingDateTime'] = connectingDateTime
             if 'operation' in event and 'command' in event['operation']:
                 # start of installation for this instance
-                installingDateTime = dateutil.parser.parse( event['dateTime'] )
+                installingDateTime = interpretDateTimeField( event['dateTime'] )
                 #logger.info( 'installer starting %s %s', iid, installingDateTime )
                 connectingDur = (installingDateTime-connectingDateTime).total_seconds()
             if 'stderr' in event:
@@ -171,7 +191,7 @@ if __name__ == "__main__":
             # calculate and store duration when getting an ending event
             if ('returncode' in event) or ('exception' in event) or ('timeout' in event):
                 iid = event['instanceId']
-                endDateTime = dateutil.parser.parse( event['dateTime'] )
+                endDateTime = interpretDateTimeField( event['dateTime'] )
                 sdt = connectingDateTime
                 if not connectingDateTime:
                     logger.info( 'endDateTime %s, connectingDateTime %s, iid %s',
@@ -244,6 +264,7 @@ if __name__ == "__main__":
 
                 instCode = inst.get( 'instCode')
                 startDateTime = inst.get( 'connectingDateTime' )
+                startDateTimeStr = startDateTime.isoformat() if startDateTime else None
                 #if not startDateTime:
                 #    startDateTime = eventDateTime
 
@@ -295,7 +316,7 @@ if __name__ == "__main__":
                         iid, devId )
                 instDur = inst.get( 'dur', 0 )
                 print( 'launch_install,%d,%s,%s,%s,%.0f,%s,%s,%s,%.1f,%.1f,%s,%s,%.1f,%.1f,"%s",%d,%s' %
-                    (devId, inst.get('state'), instCode, startDateTime,
+                    (devId, inst.get('state'), instCode, startDateTimeStr,
                     instDur, iid, countryCode, sshAddr,
                      storageFree, ramTotal, arch, nCores, maxFreq, minFreq,
                      families, appVersion, installerCollName)
@@ -306,13 +327,13 @@ if __name__ == "__main__":
     # _badIids is expected to be always empty (because demux was designed for installer jlogs)
 
     blendFilePath = '<unknown>'
-    allErrMsgs = set()
+    allErrMsgs = collections.Counter()  # set()
     badIids = set()
     goodIids = set()
     prStartDateTime = None
     sumRecs = []  # building a list of frameSummary records
     for iid, events in byInstance.items():
-        logger.info( '%s had %d events', iid, len(events) )
+        #logger.info( '%s had %d events', iid, len(events) )
         if iid in instancesAllocated:
             devId = instancesAllocated[iid].get( 'device-id' )
         else:
@@ -332,7 +353,7 @@ if __name__ == "__main__":
                         logger.warning( 'replacing blendFilePath %s' )
                     blendFilePath = parallelRenderOp['blendFilePath']
                     logger.info( 'blendFilePath %s', blendFilePath )
-                    prStartDateTime = dateutil.parser.parse( event['dateTime'] )
+                    prStartDateTime = interpretDateTimeField( event['dateTime'] )
             elif eventType == 'stderr':
                 stderrEvents.append( event )
             elif eventType == 'stdout':
@@ -345,9 +366,9 @@ if __name__ == "__main__":
 
                 # in reporting, rsync of the blend file is treated as if it were frame # -1 (minus one)
                 if frameState in ['rsyncing', 'starting']:
-                    startDateTime = dateutil.parser.parse( event['dateTime'] )
+                    startDateTime = interpretDateTimeField( event['dateTime'] )
                 if frameState == 'retrieving':
-                    retrievingDateTime = dateutil.parser.parse( event['dateTime'] )
+                    retrievingDateTime = interpretDateTimeField( event['dateTime'] )
                 if frameState == 'seemsSlow':
                     if seemedSlow:
                         continue  # avoid verbosity for already-slow cases
@@ -357,8 +378,9 @@ if __name__ == "__main__":
                     errMsg = None
                     if len( stderrEvents ):
                         errMsg = stderrEvents[-1]['args'].strip()
-                        allErrMsgs.add( errMsg )
-                    endDateTime = dateutil.parser.parse( event['dateTime'] )
+                        #allErrMsgs.add( errMsg )
+                        allErrMsgs[errMsg] += 1
+                    endDateTime = interpretDateTimeField( event['dateTime'] )
                     sdt = startDateTime
                     if not startDateTime:
                         logger.info( 'endDateTime %s, startDateTime %s, iid %s', endDateTime, startDateTime, iid )
@@ -382,8 +404,9 @@ if __name__ == "__main__":
 
     logger.info( 'allErrMsgs %s', allErrMsgs )
     frameSummaries = pd.DataFrame( sumRecs )
+    isoFormat = '%Y-%m-%dT%H:%M:%S.%f%z'
     if frameSummariesFilePath:
-        frameSummaries.to_csv( frameSummariesFilePath, index=False )
+        frameSummaries.to_csv( frameSummariesFilePath, index=False, date_format=isoFormat )
 
     workerIids = [iid for iid in byInstance.keys() if '<' not in iid]
     logger.info( '%d worker instances', len(workerIids))
