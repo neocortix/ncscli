@@ -518,21 +518,19 @@ if __name__ == "__main__":
     ap.add_argument( '--instTimeLimit', type=int, default=900, help='amount of time (in seconds) installer is allowed to take on instances' )
     ap.add_argument( '--jobId', help='to identify this job' )
     ap.add_argument( '--launch', type=boolArg, default=True, help='to launch and terminate instances' )
-    ap.add_argument( '--nWorkers', type=int, default=1, help='the # of worker instances to launch (or zero for all available)' )
+    #ap.add_argument( '--nWorkers', type=int, default=1, help='the # of worker instances to launch (or zero for all available)' )
     ap.add_argument( '--sshAgent', type=boolArg, default=False, help='whether or not to use ssh agent' )
     ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use (default is random)' )
     ap.add_argument( '--nParFrames', type=int, help='how many frames to render in parallel',
-        default=30 )
+        default=1 )
     ap.add_argument( '--timeLimit', type=int, help='time limit (in seconds) for the whole job',
         default=24*60*60 )
-    ap.add_argument( '--useCompositor', type=boolArg, default=True, help='whether or not to use blender compositor' )
+    #ap.add_argument( '--useCompositor', type=boolArg, default=True, help='whether or not to use blender compositor' )
     # dtr-specific args
-    ap.add_argument( '--width', type=int, help='the width (in pixels) of the output',
-        default=960 )
-    ap.add_argument( '--height', type=int, help='the height (in pixels) of the output',
-        default=540 )
-    ap.add_argument( '--blocks_user', type=int, help='the number of blocks to partition the image (or zero for "auto"',
-        default=0 )
+    #ap.add_argument( '--width', type=int, help='the width (in pixels) of the output',
+    #    default=960 )
+    #ap.add_argument( '--height', type=int, help='the height (in pixels) of the output',
+    #    default=540 )
     ap.add_argument( '--fileType', choices=['PNG', 'OPEN_EXR'], help='the type of output file',
         default='PNG' )
     ap.add_argument( '--startFrame', type=int, help='the first frame number to render',
@@ -570,20 +568,31 @@ if __name__ == "__main__":
     extensions = {'PNG': 'png', 'OPEN_EXR': 'exr'}
     g_outFilePattern = 'rendered_frame_######_seed_%d.%s'%(args.seed,extensions[args.fileType])
 
-    g_framesToDo.extend( range(args.startFrame, args.endFrame+1, args.frameStep ) )
-    g_nFramesWanted = len( g_framesToDo )
-    logger.info( 'g_framesToDo %s', g_framesToDo )
 
-    nParFrames = args.nParFrames  # 30
-    nToRecruit = min( args.endFrame+1-args.startFrame, nParFrames)*args.nWorkers
-    nToRecruit = int( nToRecruit * 2 )
+    if args.nParFrames:
+        nParFrames = args.nParFrames  # 30
+        nToRecruit = min( args.endFrame+1-args.startFrame, nParFrames)
+        nToRecruit = int( nToRecruit * 2 )
+    else:
+        nToRecruit = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
+
     if args.launch:
         goodInstances= recruitInstances( nToRecruit, dataDirPath+'/recruitLaunched.json', True )
     else:
         goodInstances = recruitInstances( nToRecruit, dataDirPath+'/survivingInstances.json', False )
 
+    if args.nParFrames:
+        g_framesToDo.extend( range(args.startFrame, args.endFrame+1, args.frameStep ) )
+    else:
+        #TODO use startFreme, endFrame, and frameStep in this case, too, but limiting total number
+        g_framesToDo = collections.deque( range( 0, len(goodInstances) * 3) )
+        
+    logger.info( 'g_framesToDo %s', g_framesToDo )
+    g_nFramesWanted = len( g_framesToDo )
+
     logOperation( 'parallelRender',
-        {'blendFilePath': args.blendFilePath, 'nInstances': len(goodInstances)},
+        {'blendFilePath': args.blendFilePath, 'nInstances': len(goodInstances),
+            'nFramesReq': g_nFramesWanted },
         '<master>' )
     with futures.ThreadPoolExecutor( max_workers=len(goodInstances) ) as executor:
         parIter = executor.map( renderFramesOnInstance, goodInstances )
@@ -602,5 +611,9 @@ if __name__ == "__main__":
     elapsed = time.time() - startTime
     logger.info( 'rendered %d frames using %d "good" instances', len(g_framesFinished), len(goodInstances) )
     logger.info( 'finished; elapsed time %.1f seconds (%.1f minutes)', elapsed, elapsed/60 )
-
-
+    logOperation( 'finished',
+        {'nInstancesRecruited': len(goodInstances),
+            'nInstancesSurviving': len(g_releasedInstances)
+        },
+        '<master>'
+        )
