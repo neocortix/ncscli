@@ -87,6 +87,134 @@ def interpretDateTimeField( field ):
     else:
         raise TypeError( 'datetime or parseable string required' )
 
+def summarizeRenderingLog( instancesAllocated, rendererCollName, tag=None ):
+    # get events by instance from the renderer jlog
+    (byInstance, _badIids) = demuxResults( logsDb[rendererCollName] )
+    # _badIids is expected to be always empty (because demux was designed for installer jlogs)
+
+    blendFilePath = '<unknown>'
+    allErrMsgs = collections.Counter()  # set()
+    badIids = set()
+    goodIids = set()
+    prStartDateTime = None
+    sumRecs = []  # building a list of frameSummary records
+    for iid, events in byInstance.items():
+        #logger.info( '%s had %d events', iid, len(events) )
+        if iid in instancesAllocated:
+            devId = instancesAllocated[iid].get( 'device-id' )
+        else:
+            devId = 0
+        seemedSlow = False
+        startDateTime = None
+        frameStartTimes = {}
+        retrievingDateTime = None
+        stderrEvents = []
+        for event in events:
+            eventType = event.get('type')
+            eventArgs = event.get('args')
+            if eventType == 'operation':
+                if 'parallelRender' in eventArgs:
+                    parallelRenderOp = eventArgs['parallelRender']
+                    logger.info( 'parallelRender %s', parallelRenderOp )
+                    if blendFilePath != '<unknown>':
+                        logger.warning( 'replacing blendFilePath %s' )
+                    blendFilePath = parallelRenderOp['blendFilePath']
+                    logger.info( 'blendFilePath %s', blendFilePath )
+                    prStartDateTime = interpretDateTimeField( event['dateTime'] )
+            elif eventType == 'stderr':
+                stderrEvents.append( event )
+            elif eventType == 'stdout':
+                #logger.debug( 'stdout %s', eventArgs ) # could do something with these
+                pass
+            elif eventType == 'frameState':
+                if '184331e1' in iid:
+                    logger.info( 'CHECK %s %s %s', event['dateTime'], eventType, eventArgs.get('state') )
+                frameState = eventArgs['state']
+                frameNum = eventArgs['frameNum']
+                rc = eventArgs['rc']
+
+                # in reporting, rsync of the blend file is treated as if it were frame # -1 (minus one)
+                if frameState in ['rsyncing', 'starting']:
+                    startDateTime = interpretDateTimeField( event['dateTime'] )
+                    frameStartTimes[frameNum] = startDateTime
+                if frameState == 'retrieving':
+                    retrievingDateTime = interpretDateTimeField( event['dateTime'] )
+                if frameState == 'seemsSlow':
+                    if seemedSlow:
+                        continue  # avoid verbosity for already-slow cases
+                    seemedSlow = True
+                # save a record if this is the end of a frame attempt
+                if frameState in ['rsynced', 'retrieved', 'renderFailed', 'retrieveFailed', 'rsyncFailed']:
+                    errMsg = None
+                    if len( stderrEvents ):
+                        errMsg = stderrEvents[-1]['args'].strip()
+                        #allErrMsgs.add( errMsg )
+                        allErrMsgs[errMsg] += 1
+                    endDateTime = interpretDateTimeField( event['dateTime'] )
+                    sdt = frameStartTimes.get(frameNum)  # startDateTime
+                    if not sdt:
+                        logger.warning( 'endDateTime %s, startDateTime %s, iid %s', endDateTime, sdt, iid )
+                        sdt = prStartDateTime
+                    dur = (endDateTime-sdt).total_seconds()
+                    if dur <= 0:
+                        logger.warning( 'zero duration for %s frame %d', iid, frameNum )
+                    retrievingDur = None
+                    if frameState in ['retrieved', 'retrieveFailed'] and retrievingDateTime:
+                        retrievingDur = (endDateTime-retrievingDateTime).total_seconds()
+
+                    sumRec = { 'instanceId': iid, 'devId': devId, 'blendFilePath': blendFilePath,
+                        'frameNum': frameNum, 'frameState': frameState,
+                        'startDateTime': sdt, 'endDateTime': endDateTime,
+                        'dur': dur, 'retrievingDur': retrievingDur,
+                        'rc': rc, 'slowness': seemedSlow, 'errMsg': errMsg,
+                        'tag': tag
+                    }
+                    sumRecs.append( sumRec )
+                    if frameState in ['renderFailed', 'retrieveFailed', 'rsyncFailed']:
+                        badIids.add( iid )
+                    elif frameState == 'retrieved':
+                        goodIids.add( iid )
+    return sumRecs
+
+def summarizeWorkers( workerIids, instancesAllocated, frameSummaries ):
+    #devList = [inst['device-id'] for inst in instancesAllocated.values() ]
+    devList = frameSummaries.devId.unique()
+    devIds = set( devList )
+    logger.info( 'devIds (%d), %s)', len(devIds), devIds )
+    # traverse the workers and generate a summary table
+    sumRecs = []
+    for devId in sorted( list(devIds) ):
+        #devId = instancesAllocated[iid].get( 'device-id' )
+        subset = frameSummaries[ frameSummaries.devId == devId ]
+        #logger.info( 'subset for dev %d contains %d rows', devId, len(subset) )
+        blendFilePaths = subset.blendFilePath.unique()
+        if len( blendFilePaths ) > 1:
+            logger.warning( 'more than one blendFilePath in frameSUmmaries')
+        blendFilePath = blendFilePaths[0]
+        #nAttempts = len( subset )
+        nAttempts = len( frameSummaries[ (frameSummaries.devId == devId) & (frameSummaries.frameNum >=0) ]  )
+        nRenderFailed = (subset.frameState=='renderFailed').sum()
+        nRetrieveFailed = (subset.frameState=='retrieveFailed').sum()
+        nRsyncFailed = (subset.frameState=='rsyncFailed').sum()
+        successes = subset[ subset.frameState == 'retrieved']
+        meanDurGood = successes.dur.mean()
+        if math.isnan( meanDurGood ):
+            meanDurGood = 0  # force nans to zero
+        '''
+        logger.info( '%s dev %d, %d attempts, %d good, %d renderFailed, %d other, %.1f meanDurGood',
+            iid[0:16], devId, nAttempts, len(successes),
+            nRenderFailed, nRetrieveFailed+nRsyncFailed,
+            meanDurGood
+            )
+        '''
+        sumRec = { 'devId': devId, 'blendFilePath': blendFilePath,
+            'nAttempts': nAttempts, 'nGood': len(successes), 'nRenderFailed': nRenderFailed,
+            'nRetrieveFailed': nRetrieveFailed, 'nRsyncFailed': nRsyncFailed,
+            'meanDurGood': meanDurGood
+        }
+        sumRecs.append( sumRec )
+    return sumRecs
+
 
 if __name__ == "__main__":
     logging.basicConfig(format='%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s', datefmt='%Y/%m/%d %H:%M:%S')
@@ -103,16 +231,22 @@ if __name__ == "__main__":
 
     mclient = pymongo.MongoClient(args.mongoHost, args.mongoPort)
     logsDb = mclient.renderingLogs
-    # get the list of all coillections in the db (avoiding using 'collections' as a global var name)
+    # get the list of all collections in the db (avoiding using 'collections' as a global var name)
     tables = sorted(logsDb.list_collection_names())
     logger.info( 'database collections %s', tables )
+
+    os.makedirs( args.outDir, exist_ok=True )
+    instAttemptsFilePath = args.outDir + '/instAttempts.csv'
+    frameSummariesFilePath = args.outDir + '/frameSummaries.csv'
+    workerSummariesFilePath = args.outDir + '/workerSummaries.csv'
+    isoFormat = '%Y-%m-%dT%H:%M:%S.%f%z'
 
     if args.tag:
         launchedCollName = 'launchedInstances_' + args.tag
         installerCollName = 'installerLog_' + args.tag
         rendererCollName = 'rendererLog_' + args.tag
     else:
-        # use the latest test from the 'officialTests' collection
+        # inspect the 'officialTests' collection
         officialColl = logsDb[ 'officialTests' ]
         tests = list( officialColl.find() )
         if not tests:
@@ -120,12 +254,43 @@ if __name__ == "__main__":
         #logger.info( 'all offical tests: %s', tests )
         testsDf = pd.DataFrame( tests )
         testsDf.sort_values( 'dateTime', inplace=True )
-        latestTest = testsDf.iloc[-1]  # the last row
+        logger.info( 'testsDf: %s', testsDf.info() )
         logger.info( 'found %d official tests, latest at %s', len(testsDf), testsDf.dateTime.max() )
-        logger.info( 'using test with tag %s, from %s', latestTest.tag, latestTest.dateTime )
+        #latestTest = testsDf.iloc[-1]  # the last row
+        #logger.info( 'using test with tag %s, from %s', latestTest.tag, latestTest.dateTime )
+        allFrameSummaries = pd.DataFrame()
+        allInstancesById = {}
+        for row in testsDf.itertuples():
+            #logger.info( 'row: %s', row )
+            logger.info( '>>> %s; %s, %d', row.rendererLog, row.blendFilePath, row.nFramesReq )
+
+            # gather instances from launchedInstances collection into a dict
+            instancesAllocated = {}
+            launchedColl = logsDb[row.launchedInstances]
+            inRecs = launchedColl.find()
+            for inRec in inRecs:
+                if 'instanceId' not in inRec:
+                    logger.warning( 'no instance ID in input record')
+                    continue
+                iid = inRec['instanceId']
+                instancesAllocated[ iid ] = inRec
+            allInstancesById.update( instancesAllocated )
+            frameSummaryRecs = summarizeRenderingLog( instancesAllocated, row.rendererLog, row.tag )
+            logger.info( 'frameSummaryRecs %d', len(frameSummaryRecs) )
+            allFrameSummaries = allFrameSummaries.append( frameSummaryRecs )
+        #print( allFrameSummaries.info() )
+        allFrameSummaries.to_csv( frameSummariesFilePath, index=False, date_format=isoFormat )
+        workerIids = allFrameSummaries.instanceId.unique()
+        sumRecs = summarizeWorkers( workerIids, allInstancesById, allFrameSummaries )
+        workerSummaries = pd.DataFrame( sumRecs )
+        if workerSummariesFilePath:
+            workerSummaries.to_csv( workerSummariesFilePath, index=False )
+        '''
         launchedCollName = latestTest.launchedInstances
         installerCollName = latestTest.installerLog
         rendererCollName = latestTest.rendererLog
+        '''
+        sys.exit()
 
     if launchedCollName not in tables:
         sys.exit( 'could not find collection ' + launchedCollName )
@@ -133,12 +298,6 @@ if __name__ == "__main__":
         sys.exit( 'could not find collection ' + installerCollName )
     if rendererCollName not in tables:
         sys.exit( 'could not find collection ' + rendererCollName )
-        
-    os.makedirs( args.outDir, exist_ok=True )
-    instAttemptsFilePath = args.outDir + '/instAttempts.csv'
-    frameSummariesFilePath = args.outDir + '/frameSummaries.csv'
-    workerSummariesFilePath = args.outDir + '/workerSummaries.csv'
-
 
     # gather instances from launchedInstances collection into a dict
     instancesAllocated = {}
@@ -322,6 +481,8 @@ if __name__ == "__main__":
                      families, appVersion, installerCollName)
                     , file=csvOutFile )
 
+    sumRecs = summarizeRenderingLog( instancesAllocated, rendererCollName, tag=args.tag )
+    '''
     # get events by instance from the renderer jlog
     (byInstance, _badIids) = demuxResults( logsDb[rendererCollName] )
     # _badIids is expected to be always empty (because demux was designed for installer jlogs)
@@ -403,16 +564,17 @@ if __name__ == "__main__":
                         goodIids.add( iid )
 
     logger.info( 'allErrMsgs %s', allErrMsgs )
+    '''
     frameSummaries = pd.DataFrame( sumRecs )
-    isoFormat = '%Y-%m-%dT%H:%M:%S.%f%z'
     if frameSummariesFilePath:
         frameSummaries.to_csv( frameSummariesFilePath, index=False, date_format=isoFormat )
 
-    workerIids = [iid for iid in byInstance.keys() if '<' not in iid]
-    logger.info( '%d worker instances', len(workerIids))
-    logger.info( '%d good instances', len(goodIids))
-    logger.info( '%d bad instances', len(badIids))
-    logger.info( '%d partly-good instances', len( goodIids & badIids ))
+    if frameSummaries.blendFilePath.max() != frameSummaries.blendFilePath.min():
+        logger.warning( 'more than 1 diofferent blendFilePath found %s', 
+            list(frameSummaries.blendFilePath.unique()) )
+    blendFilePath = frameSummaries.blendFilePath[0]
+    workerIids = list( frameSummaries.instanceId.unique() )
+    #workerIids = [iid for iid in byInstance.keys() if '<' not in iid]
 
     # traverse the workers and generate a summary table
     sumRecs = []
@@ -442,3 +604,9 @@ if __name__ == "__main__":
     workerSummaries = pd.DataFrame( sumRecs )
     if workerSummariesFilePath:
         workerSummaries.to_csv( workerSummariesFilePath, index=False )
+    logger.info( '%d worker instances', len(workerSummaries))
+    logger.info( '%d good instances', len(workerSummaries[workerSummaries.nGood > 0] ) )
+    logger.info( '%d bad instances', len(workerSummaries[workerSummaries.nGood < workerSummaries.nAttempts ] ) )
+    logger.info( '%d partly-good instances',
+        len(workerSummaries[(workerSummaries.nGood < workerSummaries.nAttempts) & (workerSummaries.nGood > 0) ] ) )
+    #logger.info( '%d partly-good instances', len( goodIids & badIids ))
