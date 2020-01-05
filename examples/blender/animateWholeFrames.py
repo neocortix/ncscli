@@ -253,6 +253,10 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted ):
     if len( launchedInstances ) < nWorkersWanted:
         logger.warning( 'could not launch as many instances as wanted (%d vs %d)',
             len( launchedInstances ), nWorkersWanted )
+    exhaustedIids = [inst['instanceId'] for inst in launchedInstances if inst['state'] == 'exhausted' ]
+    if exhaustedIids:
+        logger.warning( 'terminating exhausted instances %s', exhaustedIids )
+        ncs.terminateInstances( args.authToken, exhaustedIids )
     # proceed with instances that were actually started
     startedInstances = [inst for inst in launchedInstances if inst['state'] == 'started' ]
     # add instances to knownHosts
@@ -348,9 +352,11 @@ def scpFromRemote( srcFileName, destFilePath, inst, timeLimit=60 ):
             returnCode = -1
     if returnCode:
         logger.warning( 'SCP returnCode %d', returnCode )
+    if (returnCode == 1) and ('closed by remote host' in stderr):
+        returnCode = 255
     return returnCode, stderr
 
-def renderFramesOnInstance( inst, timeLimit=1500 ):
+def renderFramesOnInstance( inst, timeLimit=1800 ):
     iid = inst['instanceId']
     abbrevIid = iid[0:16]
     logger.info( 'would render frames on instance %s', abbrevIid )
