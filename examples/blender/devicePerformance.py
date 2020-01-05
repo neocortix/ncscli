@@ -35,6 +35,7 @@ cpuRatings = [
               ['Exynos-M1',2.5],   # guess similar to A9
               ['Exynos-M2',3.25],   # guess similar to A53
               ['Exynos-M3',3.75],   # guess similar to A57
+              ['Exynos-M4',3.75],   # from Dmitry's table
               ['Krait',1.25],        # successor to Scorpion.  Guess similar to A9
               ['Kryo',3.4],          # 64-bit successor to Krait.  Similar to A53, good FP (was 1.25, created problem for domestic GS7)
               ['Scorpion',1.0]]     # early Qualcomm, pre-2012.  Guess similar to A7 
