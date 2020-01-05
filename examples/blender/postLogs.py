@@ -36,11 +36,13 @@ def postCollection( fileName, collName=None ):
 
     collection = logsDb[collectionName]
     logger.info( '%s has %d documents', collectionName, collection.count_documents({}) )
+    # this code would produce mongo/bson Date filds, but those have only millisecond resolution
+    '''
     for doc in collection.find():
         if 'dateTime' in doc and isinstance( doc['dateTime'], str ):
             dateTime = dateutil.parser.parse( doc['dateTime'] )
-            #logger.info( 'would replace %s with %s', doc['dateTime'], dateTime )
-            collection.update_one( {'_id': doc['_id']}, { "$set": { "dateTime": dateTime } } )
+            collection.update_one( {'_id': doc['_id']}, { "$set": { "dateTimeStamp": dateTime } } )
+    '''
     return collection
 
 if __name__ == "__main__":
