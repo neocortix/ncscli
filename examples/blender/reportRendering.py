@@ -27,6 +27,14 @@ import ncs
 logger = logging.getLogger(__name__)
 
 
+def boolArg( v ):
+    if v.lower() == 'true':
+        return True
+    elif v.lower() == 'false':
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 def datetimeIsAware( dt ):
     if not dt: return None
     return (dt.tzinfo is not None) and (dt.tzinfo.utcoffset( dt ) is not None)
@@ -107,6 +115,156 @@ def interpretDateTimeField( field ):
         return dateutil.parser.parse( field )
     else:
         raise TypeError( 'datetime or parseable string required' )
+
+def summarizeInstallerLog( eventsByInstance, instancesByIid, installerCollName ):
+    # update state from the installer jlog (modifies instances in instancesByIid)
+    nSucceeded = 0
+    nFailed = 0
+    nExceptions = 0
+    nTimeout = 0
+    tellInstancesDateTime = None
+    for iid, events in eventsByInstance.items():
+        connectingDateTime = None
+        connectingDur = None
+        installingDateTime = None
+        stderrLines = []
+        for event in events:
+            if 'operation' in event and 'tellInstances' in event['operation']:
+                tellInstancesDateTime = interpretDateTimeField( event['dateTime'] )
+                try:
+                    launchedIids = event["operation"][1]["args"]["instanceIds"]
+                    logger.info( '%d instances were launched', len(launchedIids) )
+                except Exception as exc:
+                    logger.info( 'exception ignored for tellInstances op (%s)', type(exc) )
+            if 'operation' in event and 'connect' in event['operation']:
+                # start of ssh connection for this instance
+                connectingDateTime = interpretDateTimeField( event['dateTime'] )
+                #logger.info( 'installer connecting %s %s', iid, connectingDateTime )
+                instancesByIid[iid]['connectingDateTime'] = connectingDateTime
+            if 'operation' in event and 'command' in event['operation']:
+                # start of installation for this instance
+                installingDateTime = interpretDateTimeField( event['dateTime'] )
+                #logger.info( 'installer starting %s %s', iid, installingDateTime )
+                connectingDur = (installingDateTime-connectingDateTime).total_seconds()
+            if 'stderr' in event:
+                stderrLines.append( event['stderr'] )
+
+            # calculate and store duration when getting an ending event
+            if ('returncode' in event) or ('exception' in event) or ('timeout' in event):
+                iid = event['instanceId']
+                endDateTime = interpretDateTimeField( event['dateTime'] )
+                sdt = connectingDateTime
+                if not connectingDateTime:
+                    logger.info( 'endDateTime %s, connectingDateTime %s, iid %s',
+                        endDateTime, connectingDateTime, iid )
+                    sdt = tellInstancesDateTime
+                dur = (endDateTime-sdt).total_seconds()
+                instancesByIid[iid]['dur'] = dur
+                instancesByIid[iid]['connectingDur'] = connectingDur
+                instancesByIid[iid]['stderrLines'] = stderrLines
+            if 'returncode' in event:
+                iid = event['instanceId']
+                installerCode = event['returncode']
+                if installerCode:
+                    nFailed += 1
+                else:
+                    nSucceeded += 1
+                state = 'installerFailed' if installerCode else 'installed'
+                instancesByIid[iid]['state'] = state
+                instancesByIid[iid]['instCode'] = installerCode
+            elif 'exception' in event:
+                iid = event['instanceId']
+                installerCode = event['exception']['type']
+                nExceptions += 1
+                instancesByIid[iid]['state'] = 'installerException'
+                instancesByIid[iid]['instCode'] = installerCode
+            elif 'timeout' in event:
+                iid = event['instanceId']
+                installerCode = event['timeout']
+                nTimeout += 1
+                instancesByIid[iid]['state'] = 'installerTimeout'
+                instancesByIid[iid]['instCode'] = installerCode
+    logger.info( '%d succeeded, %d failed, %d timeout, %d exceptions',
+        nSucceeded, nFailed, nTimeout, nExceptions)
+    sumRecs = []
+    for iid in instancesAllocated:
+        inst = instancesAllocated[iid]
+        arch = ''    
+        families = set()
+        nCores = 0
+        maxFreq = 0
+        minFreq = float("inf")
+        devId = 0
+        appVersion = 0
+        ramTotal = 0
+        storageFree = 0
+        sshAddr = ''
+
+        instCode = inst.get( 'instCode')
+        startDateTime = inst.get( 'connectingDateTime' )
+        startDateTimeStr = startDateTime.isoformat() if startDateTime else None
+        #if not startDateTime:
+        #    startDateTime = eventDateTime
+
+        if 'device-id' in inst:
+            devId = inst['device-id']
+        else:
+            logger.warning( 'no device id for instance "%s"', iid )
+
+        if 'app-version' in inst:
+            appVersion = inst['app-version']['code']
+        else:
+            logger.warning( 'no app-version for instance "%s"', iid )
+
+        countryCode = None
+        if 'device-location' in inst:
+            locInfo = inst['device-location']
+            countryCode = locInfo.get( 'country-code' )
+            if not countryCode:
+                #logger.info( 'mystery location %s', inst['device-location'] )
+                countryCode = getCountryCodeGoogle( locInfo['latitude'], locInfo['longitude'] )
+                if not countryCode:
+                    countryCode = str(locInfo['latitude']) + ';' + str(locInfo['longitude'])
+        if 'ram' in inst:
+            ramTotal = inst['ram']['total'] / 1000000
+        if 'ssh' in inst:
+            sshAddr = inst['ssh']['host'] + ':' + str(inst['ssh']['port'])
+        if 'storage' in inst:
+            storageFree = inst['storage']['free'] / 1000000
+        if 'cpu' in inst:
+            details = inst['cpu']
+            arch = details['arch']
+            nCores = len( details['cores'] )
+            for core in details['cores']:
+                families.add( '%s-%s' % (core['vendor'], core['family']) )
+                freq = core['freq']
+                maxFreq = max( maxFreq, freq )
+                if freq:
+                    minFreq = min( minFreq, freq )
+                else:
+                    logger.info( 'zero freq in inst %s', inst )
+            maxFreq = maxFreq / 1000000
+            if minFreq < float("inf"):
+                minFreq = minFreq / 1000000
+            else:
+                minFreq = 0
+            #print( details['arch'], len( details['cores']), families )
+        else:
+            logger.warning( 'no "cpu" info found for instance %s (dev %d)',
+                iid, devId )
+        dpr = instanceDpr( inst )
+        #inst['dpr'] = dpr
+        instDur = inst.get( 'dur', 0 )
+        sumRec = {
+            'devId': devId, 'state': inst.get('state'), 'code': instCode,
+            'dateTime': startDateTimeStr,
+            'dur': instDur, 'instanceId': iid, 'countryCode': countryCode, 'sshAddr': sshAddr,
+            'storageFree':storageFree, 'ramTotal':ramTotal, 'arch':arch, 
+            'nCores':nCores, 'freq1':maxFreq, 'freq2':minFreq, 'dpr': dpr,
+            'families':families, 'appVersion':appVersion, 'installerCollName':installerCollName
+        }
+        sumRecs.append( sumRec )
+    return sumRecs
 
 def summarizeRenderingLog( instancesAllocated, rendererCollName, tag=None ):
     # get events by instance from the renderer jlog
@@ -253,6 +411,7 @@ if __name__ == "__main__":
     ap.add_argument('--mongoHost', help='the host of mongodb server', default='localhost')
     ap.add_argument('--mongoPort', help='the port of mongodb server', default=27017)
     ap.add_argument('--outDir', help='directory path for output files', default='.')
+    ap.add_argument('--sendMail', type=boolArg, default=False, help='to email results (default=False)' )
     args = ap.parse_args()
     #logger.debug( 'args %s', args )
 
@@ -264,6 +423,7 @@ if __name__ == "__main__":
 
     os.makedirs( args.outDir, exist_ok=True )
     instAttemptsFilePath = args.outDir + '/instAttempts.csv'
+    installerSummariesFilePath = args.outDir + '/installerSummaries.csv'
     frameSummariesFilePath = args.outDir + '/frameSummaries.csv'
     workerSummariesFilePath = args.outDir + '/workerSummaries.csv'
     isoFormat = '%Y-%m-%dT%H:%M:%S.%f%z'
@@ -286,6 +446,7 @@ if __name__ == "__main__":
         #latestTest = testsDf.iloc[-1]  # the last row
         #logger.info( 'using test with tag %s, from %s', latestTest.tag, latestTest.dateTime )
         allFrameSummaries = pd.DataFrame()
+        allInstallerSummaries = pd.DataFrame()
         allInstancesById = {}
         for row in testsDf.itertuples():
             #logger.info( 'row: %s', row )
@@ -308,11 +469,18 @@ if __name__ == "__main__":
                     )
                 inRec['dpr'] = dpr
                 instancesAllocated[ iid ] = inRec
+            
+            # get events by instance from the installer log
+            (eventsByInstance, badIids) = demuxResults( logsDb[row.installerLog] )
+            installerSumRecs = summarizeInstallerLog( eventsByInstance, instancesAllocated, row.installerLog )
+            allInstallerSummaries = allInstallerSummaries.append( installerSumRecs )
+
             allInstancesById.update( instancesAllocated )
             frameSummaryRecs = summarizeRenderingLog( instancesAllocated, row.rendererLog, row.tag )
             logger.info( 'frameSummaryRecs %d', len(frameSummaryRecs) )
             allFrameSummaries = allFrameSummaries.append( frameSummaryRecs )
         #print( allFrameSummaries.info() )
+        allInstallerSummaries.to_csv( installerSummariesFilePath, index=False, date_format=isoFormat )
         allFrameSummaries.to_csv( frameSummariesFilePath, index=False, date_format=isoFormat )
         workerIids = allFrameSummaries.instanceId.unique()
         sumRecs = summarizeWorkers( workerIids, allInstancesById, allFrameSummaries )
@@ -348,6 +516,11 @@ if __name__ == "__main__":
     # get events by instance from the installer log
     (eventsByInstance, badIids) = demuxResults( logsDb[installerCollName] )
     logger.info( 'badIids (%d) %s', len(badIids), badIids )
+
+    # summarize jlog into array of dicts, with side-effect of modifying instance records
+    installerSumRecs = summarizeInstallerLog( eventsByInstance, instancesAllocated, installerCollName )
+    installerSummaries = pd.DataFrame( installerSumRecs )
+    installerSummaries.to_csv( installerSummariesFilePath, index=False, date_format=isoFormat )
 
     # update state from the installer jlog (modifies instances in instancesAllocated)
     nSucceeded = 0
@@ -566,3 +739,11 @@ if __name__ == "__main__":
     logger.info( '%d partly-good instances',
         len(workerSummaries[(workerSummaries.nGood < workerSummaries.nAttempts) & (workerSummaries.nGood > 0) ] ) )
     #logger.info( '%d partly-good instances', len( goodIids & badIids ))
+    if args.sendMail:
+        import neocortixMail
+        recipients = ['mcoffey@neocortix.com']
+        #recipients = ['mcoffey@neocortix.com', 'lwatts@neocortix.com', 'dm@neocortix.com']
+        body = str( workerSummaries )
+        attachmentPaths = [workerSummariesFilePath]
+        neocortixMail.sendMailWithAttachments( 'mcoffey@neocortix.com',
+            recipients, 'blenderation result summary', body, attachmentPaths )
