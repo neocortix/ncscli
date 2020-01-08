@@ -400,6 +400,118 @@ def summarizeWorkers( _workerIids, instances, frameSummaries ):
         sumRecs.append( sumRec )
     return sumRecs
 
+import matplotlib.pyplot as plt
+def plotRenderTimes( fetcherTable ):
+    '''plots fetcher (and some core) job timings based on file dates'''
+    import matplotlib as mpl
+    import matplotlib.patches as patches
+    import numpy as np
+    def pdTimeToSeconds( pdTime ):
+        '''convert pandas (or numpy?) time stamp to seconds since epoch'''
+        if isinstance( pdTime, pd.Timestamp ):
+            return pdTime.to_pydatetime().timestamp()
+        return 0
+    fetcherCounts = fetcherTable.hostSpec.value_counts()
+    fetcherNames = sorted( list( fetcherCounts.index ), reverse = True )
+    #fetcherNames.append( 'core' )
+    nClusters = len( fetcherNames )
+    fig = plt.figure()
+    ax = plt.gca()
+    clusterHeight = 1
+    yMargin = .25
+    yMax = nClusters*clusterHeight + yMargin
+    ax.set_ylim( 0, yMax )
+    yTickLocs = np.arange( clusterHeight/2, nClusters*clusterHeight, clusterHeight)
+    plt.yticks( yTickLocs, fetcherNames )
+    tickLocator10 = mpl.ticker.MultipleLocator(60)
+    ax.xaxis.set_minor_locator( tickLocator10 )
+    ax.xaxis.set_major_locator( mpl.ticker.MultipleLocator(600) )
+    ax.xaxis.set_ticks_position( 'both' )
+    alpha = .6
+    
+    # get the xMin and xMax from the union of all cluster time ranges
+    allStartTimes = pd.Series()
+    allFinishTimes = pd.Series()
+    for cluster in fetcherNames:
+        #print( cluster )
+        jobs = fetcherTable[fetcherTable.hostSpec==cluster]
+        startTimes = jobs.dateTime
+        finishTimes = jobs.dateTime + jobs.durTd
+        allStartTimes = allStartTimes.append( startTimes )
+        allFinishTimes = allFinishTimes.append( finishTimes )
+    xMin = pdTimeToSeconds( allStartTimes.min() )
+    xMax = pdTimeToSeconds( allFinishTimes.max() ) + 10
+    xMax = max( xMax, pdTimeToSeconds( allStartTimes.max() ) ) # + 40
+    #print( xMin, xMax )
+    ax.set_xlim( xMin, xMax )
+    ax.set_xlim( 0, xMax-xMin )
+    
+    #jobColors = { 'collect': 'tab:blue', 'rsync': 'mediumpurple', 'render':  'lightseagreen' }
+    #jobColors = { 'collect': 'lightseagreen', 'rsync': 'mediumpurple', 'render':  'tab:blue' }
+    jobColors = { 'retrieved': 'lightseagreen', 'rsynced': 'tab:blue',
+                 'renderFailed': 'tab:red', 'rsyncFailed': 'tab:purple', 'retrieveFailed': 'tab:pink' }
+    jiggers = { 'renderFailed': .1, 'rsyncFailed': .1, 'retrieveFailed': .1 }
+  
+    jobColor0 = mpl.colors.to_rgb( 'gray' )
+   
+    #jobBottom = clusterHeight * .1 + yMargin
+    jobBottom = yMargin
+    for cluster in fetcherNames:
+        #print( cluster )
+        jobs = fetcherTable[fetcherTable.hostSpec==cluster]
+        # plot some things for each segment tied to this fetcher
+        for row in jobs.iterrows():
+            job = row[1]
+            startSeconds = pdTimeToSeconds( job.dateTime ) - xMin
+            durSeconds = job.duration
+            if durSeconds < 10:
+                durSeconds = 10
+            color = jobColors.get( job.eventType, jobColor0 )
+            jigger = jiggers.get( job.eventType, 0 )
+            boxHeight = clusterHeight*.7
+            #if job.eventType == 'rsync':
+            #    boxHeight -= clusterHeight * .2
+            ax.add_patch(
+                patches.Rectangle(
+                    (startSeconds, jobBottom-jigger),   # (x,y)
+                    durSeconds,          # width
+                    boxHeight,          # height
+                    facecolor=color, edgecolor='k', linewidth=0.5,
+                    alpha=alpha
+                    )
+                )
+            if job.retrievingDur > 0:
+                ax.add_patch(
+                    patches.Rectangle(
+                        (startSeconds+durSeconds-job.retrievingDur, jobBottom-jigger),
+                        job.retrievingDur,          # width
+                        boxHeight,          # height
+                        facecolor=color, edgecolor='k', linewidth=0.25,
+                        alpha=alpha
+                        )
+                    )
+
+            if job.sequenceNum >= 0:
+                label = str(job.sequenceNum)
+                y = jobBottom+.1
+                ax.annotate( label, xy=(startSeconds+.4, y) )
+        jobBottom += clusterHeight
+        
+    
+    
+    plt.gca().grid( True, axis='x')
+    plt.tight_layout()
+
+def plotRenderingTimes( frameSummaries, outFilePath ):
+    frameSummaries['hostSpec'] = frameSummaries.devId    
+    frameSummaries['dateTime'] = frameSummaries.startDateTime
+    frameSummaries['duration'] = frameSummaries.dur
+    frameSummaries['eventType'] = frameSummaries.frameState
+    frameSummaries['sequenceNum'] = frameSummaries.frameNum
+    frameSummaries['durTd'] = pd.to_timedelta(frameSummaries.duration, unit='s')
+
+    plotRenderTimes( frameSummaries )
+    plt.savefig( outFilePath )
 
 if __name__ == "__main__":
     logging.basicConfig(format='%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s', datefmt='%Y/%m/%d %H:%M:%S')
@@ -426,6 +538,7 @@ if __name__ == "__main__":
     installerSummariesFilePath = args.outDir + '/installerSummaries.csv'
     frameSummariesFilePath = args.outDir + '/frameSummaries.csv'
     workerSummariesFilePath = args.outDir + '/workerSummaries.csv'
+    rendererTimingPlotFilePath = args.outDir + '/rendererTiming.png'
     isoFormat = '%Y-%m-%dT%H:%M:%S.%f%z'
 
     if args.tag:
@@ -521,77 +634,6 @@ if __name__ == "__main__":
     installerSumRecs = summarizeInstallerLog( eventsByInstance, instancesAllocated, installerCollName )
     installerSummaries = pd.DataFrame( installerSumRecs )
     installerSummaries.to_csv( installerSummariesFilePath, index=False, date_format=isoFormat )
-
-    # update state from the installer jlog (modifies instances in instancesAllocated)
-    nSucceeded = 0
-    nFailed = 0
-    nExceptions = 0
-    nTimeout = 0
-    tellInstancesDateTime = None
-    for iid, events in eventsByInstance.items():
-        connectingDateTime = None
-        connectingDur = None
-        installingDateTime = None
-        stderrLines = []
-        for event in events:
-            if 'operation' in event and 'tellInstances' in event['operation']:
-                tellInstancesDateTime = interpretDateTimeField( event['dateTime'] )
-                try:
-                    launchedIids = event["operation"][1]["args"]["instanceIds"]
-                    logger.info( '%d instances were launched', len(launchedIids) )
-                except Exception as exc:
-                    logger.info( 'exception ignored for tellInstances op (%s)', type(exc) )
-            if 'operation' in event and 'connect' in event['operation']:
-                # start of ssh connection for this instance
-                connectingDateTime = interpretDateTimeField( event['dateTime'] )
-                #logger.info( 'installer connecting %s %s', iid, connectingDateTime )
-                instancesAllocated[iid]['connectingDateTime'] = connectingDateTime
-            if 'operation' in event and 'command' in event['operation']:
-                # start of installation for this instance
-                installingDateTime = interpretDateTimeField( event['dateTime'] )
-                #logger.info( 'installer starting %s %s', iid, installingDateTime )
-                connectingDur = (installingDateTime-connectingDateTime).total_seconds()
-            if 'stderr' in event:
-                stderrLines.append( event['stderr'] )
-
-            # calculate and store duration when getting an ending event
-            if ('returncode' in event) or ('exception' in event) or ('timeout' in event):
-                iid = event['instanceId']
-                endDateTime = interpretDateTimeField( event['dateTime'] )
-                sdt = connectingDateTime
-                if not connectingDateTime:
-                    logger.info( 'endDateTime %s, connectingDateTime %s, iid %s',
-                        endDateTime, connectingDateTime, iid )
-                    sdt = tellInstancesDateTime
-                dur = (endDateTime-sdt).total_seconds()
-                instancesAllocated[iid]['dur'] = dur
-                instancesAllocated[iid]['connectingDur'] = connectingDur
-                instancesAllocated[iid]['stderrLines'] = stderrLines
-            if 'returncode' in event:
-                iid = event['instanceId']
-                installerCode = event['returncode']
-                if installerCode:
-                    nFailed += 1
-                else:
-                    nSucceeded += 1
-                state = 'installerFailed' if installerCode else 'installed'
-                instancesAllocated[iid]['state'] = state
-                instancesAllocated[iid]['instCode'] = installerCode
-            elif 'exception' in event:
-                iid = event['instanceId']
-                installerCode = event['exception']['type']
-                nExceptions += 1
-                instancesAllocated[iid]['state'] = 'installerException'
-                instancesAllocated[iid]['instCode'] = installerCode
-            elif 'timeout' in event:
-                iid = event['instanceId']
-                installerCode = event['timeout']
-                nTimeout += 1
-                instancesAllocated[iid]['state'] = 'installerTimeout'
-                instancesAllocated[iid]['instCode'] = installerCode
-    logger.info( '%d succeeded, %d failed, %d timeout, %d exceptions',
-        nSucceeded, nFailed, nTimeout, nExceptions)
-
     if False:
         # enable this code to print more details (mainly stderr if available) for non-good instances
         for iid in badIids:
@@ -604,92 +646,16 @@ if __name__ == "__main__":
             if locInfo:
                 print( '>>>', locInfo['country-code'] )
             print( inst['stderrLines'][-5:] )
+    if installerSummariesFilePath:
+        installerSummaries.to_csv( installerSummariesFilePath, index=False )
 
-    if instAttemptsFilePath:
-        dbPreexisted = os.path.isfile( instAttemptsFilePath )
+    startingEvent = logsDb[rendererCollName].find_one( 
+        {'instanceId': '<master>'}, hint=[('dateTime', pymongo.ASCENDING)] 
+        )
+    startDateTime = interpretDateTimeField( startingEvent['dateTime'] )
 
-        if True:  #  not dbPreexisted:
-            with open( instAttemptsFilePath, 'w' ) as csvOutFile:
-                print( 'eventType,devId,state,code,dateTime,dur,instanceId,country,sshAddr,storageFree,ramTotal,arch,nCores,freq1,freq2,families,appVersion,ref',
-                    file=csvOutFile )
 
-        with open( instAttemptsFilePath, 'a' ) as csvOutFile:
-            for iid in instancesAllocated:
-                inst = instancesAllocated[iid]
-                #iid = inst['instanceId']
-                arch = ''    
-                families = set()
-                nCores = 0
-                maxFreq = 0
-                minFreq = float("inf")
-                devId = 0
-                appVersion = 0
-                ramTotal = 0
-                storageFree = 0
-                sshAddr = ''
-
-                instCode = inst.get( 'instCode')
-                startDateTime = inst.get( 'connectingDateTime' )
-                startDateTimeStr = startDateTime.isoformat() if startDateTime else None
-                #if not startDateTime:
-                #    startDateTime = eventDateTime
-
-                if 'device-id' in inst:
-                    devId = inst['device-id']
-                else:
-                    logger.warning( 'no device id for instance "%s"', iid )
-
-                if 'app-version' in inst:
-                    appVersion = inst['app-version']['code']
-                else:
-                    logger.warning( 'no app-version for instance "%s"', iid )
-
-                countryCode = None
-                if 'device-location' in inst:
-                    locInfo = inst['device-location']
-                    countryCode = locInfo.get( 'country-code' )
-                    if not countryCode:
-                        #logger.info( 'mystery location %s', inst['device-location'] )
-                        countryCode = getCountryCodeGoogle( locInfo['latitude'], locInfo['longitude'] )
-                        if not countryCode:
-                            countryCode = str(locInfo['latitude']) + ';' + str(locInfo['longitude'])
-                if 'ram' in inst:
-                    ramTotal = inst['ram']['total'] / 1000000
-                if 'ssh' in inst:
-                    sshAddr = inst['ssh']['host'] + ':' + str(inst['ssh']['port'])
-                if 'storage' in inst:
-                    storageFree = inst['storage']['free'] / 1000000
-                if 'cpu' in inst:
-                    details = inst['cpu']
-                    arch = details['arch']
-                    nCores = len( details['cores'] )
-                    for core in details['cores']:
-                        families.add( '%s-%s' % (core['vendor'], core['family']) )
-                        freq = core['freq']
-                        maxFreq = max( maxFreq, freq )
-                        if freq:
-                            minFreq = min( minFreq, freq )
-                        else:
-                            logger.info( 'zero freq in inst %s', inst )
-                    maxFreq = maxFreq / 1000000
-                    if minFreq < float("inf"):
-                        minFreq = minFreq / 1000000
-                    else:
-                        minFreq = 0
-                    #print( details['arch'], len( details['cores']), families )
-                else:
-                    logger.warning( 'no "cpu" info found for instance %s (dev %d)',
-                        iid, devId )
-                dpr = instanceDpr( inst )
-                inst['dpr'] = dpr
-                instDur = inst.get( 'dur', 0 )
-                print( 'launch_install,%d,%s,%s,%s,%.0f,%s,%s,%s,%.1f,%.1f,%s,%s,%.1f,%.1f,"%s",%d,%s' %
-                    (devId, inst.get('state'), instCode, startDateTimeStr,
-                    instDur, iid, countryCode, sshAddr,
-                     storageFree, ramTotal, arch, nCores, maxFreq, minFreq,
-                     families, appVersion, installerCollName)
-                    , file=csvOutFile )
-
+    # summarize renderer events into a table
     sumRecs = summarizeRenderingLog( instancesAllocated, rendererCollName, tag=args.tag )
     frameSummaries = pd.DataFrame( sumRecs )
     if frameSummariesFilePath:
@@ -732,6 +698,8 @@ if __name__ == "__main__":
     workerSummaries = pd.DataFrame( sumRecs )
     if workerSummariesFilePath:
         workerSummaries.to_csv( workerSummariesFilePath, index=False )
+    plotRenderingTimes( frameSummaries, rendererTimingPlotFilePath )
+
     logger.info( '%d worker instances', len(workerSummaries))
     logger.info( '%d good instances', len(workerSummaries[workerSummaries.nGood > 0] ) )
     badCondition = (workerSummaries.nGood < workerSummaries.nAttempts) | (workerSummaries.nGood <= 0)
@@ -741,9 +709,27 @@ if __name__ == "__main__":
     #logger.info( '%d partly-good instances', len( goodIids & badIids ))
     if args.sendMail:
         import neocortixMail
-        recipients = ['mcoffey@neocortix.com']
-        #recipients = ['mcoffey@neocortix.com', 'lwatts@neocortix.com', 'dm@neocortix.com']
-        body = str( workerSummaries )
-        attachmentPaths = [workerSummariesFilePath]
+        #recipients = ['mcoffey@neocortix.com']
+        recipients = ['mcoffey@neocortix.com', 'lwatts@neocortix.com', 'dm@neocortix.com']
+        body = ''
+        body += 'startDateTime %s\n' % startDateTime.isoformat()
+        body += 'installing started %s\n' % installerSummaries.dateTime.min()
+        body += 'rendering started %s\n' % frameSummaries.startDateTime.min()
+        body += 'rendering finished %s\n' % frameSummaries.endDateTime.max()
+        body += '\n'
+
+        body += '%d instances requested\n' % len(instancesAllocated) 
+        stateCounts = installerSummaries.state.value_counts()
+        #logger.info( 'instCodes %s', stateCounts )
+        body += '%d installed Blender\n' % (stateCounts['installed'])
+        body += '%d installerTimeouts\n' % (stateCounts['installerTimeout'])
+        body += '%d installerFailed\n' % (stateCounts.get('installerFailed', 0))
+        body += '%d installerException\n' % (stateCounts.get('installerException', 0))
+        body += '\n'
+
+        body += '%d did some rendering\n' % len(workerSummaries[workerSummaries.nGood > 0] )
+        body += '%d frames rendered\n' % len(frameSummaries[frameSummaries.frameState == 'retrieved'] )
+
+        attachmentPaths = [rendererTimingPlotFilePath]
         neocortixMail.sendMailWithAttachments( 'mcoffey@neocortix.com',
-            recipients, 'blenderation result summary', body, attachmentPaths )
+            recipients, 'render-test result summary', body, attachmentPaths )
