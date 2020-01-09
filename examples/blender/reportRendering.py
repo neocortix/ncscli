@@ -400,9 +400,9 @@ def summarizeWorkers( _workerIids, instances, frameSummaries ):
         sumRecs.append( sumRec )
     return sumRecs
 
-import matplotlib.pyplot as plt
-def plotRenderTimes( fetcherTable ):
-    '''plots fetcher (and some core) job timings based on file dates'''
+def plotRenderTimes( fetcherTable, outFilePath ):
+    '''plots rendering job timings based on frame summaries'''
+    import matplotlib.pyplot as plt
     import matplotlib as mpl
     import matplotlib.patches as patches
     import numpy as np
@@ -411,9 +411,8 @@ def plotRenderTimes( fetcherTable ):
         if isinstance( pdTime, pd.Timestamp ):
             return pdTime.to_pydatetime().timestamp()
         return 0
-    fetcherCounts = fetcherTable.hostSpec.value_counts()
+    fetcherCounts = fetcherTable.devId.value_counts()
     fetcherNames = sorted( list( fetcherCounts.index ), reverse = True )
-    #fetcherNames.append( 'core' )
     nClusters = len( fetcherNames )
     fig = plt.figure()
     ax = plt.gca()
@@ -433,44 +432,37 @@ def plotRenderTimes( fetcherTable ):
     allStartTimes = pd.Series()
     allFinishTimes = pd.Series()
     for cluster in fetcherNames:
-        #print( cluster )
-        jobs = fetcherTable[fetcherTable.hostSpec==cluster]
-        startTimes = jobs.dateTime
-        finishTimes = jobs.dateTime + jobs.durTd
+        jobs = fetcherTable[fetcherTable.devId==cluster]
+        startTimes = jobs.startDateTime
+        #finishTimes = jobs.startDateTime + jobs.durTd
+        finishTimes = jobs.startDateTime + pd.to_timedelta(jobs.dur, unit='s')
         allStartTimes = allStartTimes.append( startTimes )
         allFinishTimes = allFinishTimes.append( finishTimes )
     xMin = pdTimeToSeconds( allStartTimes.min() )
     xMax = pdTimeToSeconds( allFinishTimes.max() ) + 10
     xMax = max( xMax, pdTimeToSeconds( allStartTimes.max() ) ) # + 40
-    #print( xMin, xMax )
     ax.set_xlim( xMin, xMax )
     ax.set_xlim( 0, xMax-xMin )
     
-    #jobColors = { 'collect': 'tab:blue', 'rsync': 'mediumpurple', 'render':  'lightseagreen' }
-    #jobColors = { 'collect': 'lightseagreen', 'rsync': 'mediumpurple', 'render':  'tab:blue' }
-    jobColors = { 'retrieved': 'lightseagreen', 'rsynced': 'tab:blue',
-                 'renderFailed': 'tab:red', 'rsyncFailed': 'tab:purple', 'retrieveFailed': 'tab:pink' }
+    jobColors = { 'retrieved': 'tab:cyan', 'rsynced': 'tab:blue',
+                 'renderFailed': 'tab:red', 'rsyncFailed': 'tab:orange', 'retrieveFailed': 'tab:pink' }
     jiggers = { 'renderFailed': .1, 'rsyncFailed': .1, 'retrieveFailed': .1 }
   
     jobColor0 = mpl.colors.to_rgb( 'gray' )
    
-    #jobBottom = clusterHeight * .1 + yMargin
     jobBottom = yMargin
     for cluster in fetcherNames:
-        #print( cluster )
-        jobs = fetcherTable[fetcherTable.hostSpec==cluster]
+        jobs = fetcherTable[fetcherTable.devId==cluster]
         # plot some things for each segment tied to this fetcher
         for row in jobs.iterrows():
             job = row[1]
-            startSeconds = pdTimeToSeconds( job.dateTime ) - xMin
-            durSeconds = job.duration
+            startSeconds = pdTimeToSeconds( job.startDateTime ) - xMin
+            durSeconds = job.dur
             if durSeconds < 10:
                 durSeconds = 10
-            color = jobColors.get( job.eventType, jobColor0 )
-            jigger = jiggers.get( job.eventType, 0 )
+            color = jobColors.get( job.frameState, jobColor0 )
+            jigger = jiggers.get( job.frameState, 0 )
             boxHeight = clusterHeight*.7
-            #if job.eventType == 'rsync':
-            #    boxHeight -= clusterHeight * .2
             ax.add_patch(
                 patches.Rectangle(
                     (startSeconds, jobBottom-jigger),   # (x,y)
@@ -491,27 +483,19 @@ def plotRenderTimes( fetcherTable ):
                         )
                     )
 
-            if job.sequenceNum >= 0:
-                label = str(job.sequenceNum)
+            if job.frameNum >= 0:
+                label = str(job.frameNum)
                 y = jobBottom+.1
                 ax.annotate( label, xy=(startSeconds+.4, y) )
         jobBottom += clusterHeight
-        
-    
-    
+
     plt.gca().grid( True, axis='x')
     plt.tight_layout()
+    if outFilePath:
+        plt.savefig( outFilePath )
+    else:
+        plt.show()
 
-def plotRenderingTimes( frameSummaries, outFilePath ):
-    frameSummaries['hostSpec'] = frameSummaries.devId    
-    frameSummaries['dateTime'] = frameSummaries.startDateTime
-    frameSummaries['duration'] = frameSummaries.dur
-    frameSummaries['eventType'] = frameSummaries.frameState
-    frameSummaries['sequenceNum'] = frameSummaries.frameNum
-    frameSummaries['durTd'] = pd.to_timedelta(frameSummaries.duration, unit='s')
-
-    plotRenderTimes( frameSummaries )
-    plt.savefig( outFilePath )
 
 if __name__ == "__main__":
     logging.basicConfig(format='%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s', datefmt='%Y/%m/%d %H:%M:%S')
@@ -523,7 +507,7 @@ if __name__ == "__main__":
     ap.add_argument('--mongoHost', help='the host of mongodb server', default='localhost')
     ap.add_argument('--mongoPort', help='the port of mongodb server', default=27017)
     ap.add_argument('--outDir', help='directory path for output files', default='.')
-    ap.add_argument('--sendMail', type=boolArg, default=False, help='to email results (default=False)' )
+    ap.add_argument('--sendMail', help='to email results with given settings (default=no email)' )
     args = ap.parse_args()
     #logger.debug( 'args %s', args )
 
@@ -662,7 +646,7 @@ if __name__ == "__main__":
         frameSummaries.to_csv( frameSummariesFilePath, index=False, date_format=isoFormat )
 
     if frameSummaries.blendFilePath.max() != frameSummaries.blendFilePath.min():
-        logger.warning( 'more than 1 diofferent blendFilePath found %s', 
+        logger.warning( 'more than 1 different blendFilePath found %s', 
             list(frameSummaries.blendFilePath.unique()) )
     blendFilePath = frameSummaries.blendFilePath[0]
     workerIids = list( frameSummaries.instanceId.unique() )
@@ -698,7 +682,7 @@ if __name__ == "__main__":
     workerSummaries = pd.DataFrame( sumRecs )
     if workerSummariesFilePath:
         workerSummaries.to_csv( workerSummariesFilePath, index=False )
-    plotRenderingTimes( frameSummaries, rendererTimingPlotFilePath )
+    plotRenderTimes( frameSummaries, rendererTimingPlotFilePath )
 
     logger.info( '%d worker instances', len(workerSummaries))
     logger.info( '%d good instances', len(workerSummaries[workerSummaries.nGood > 0] ) )
@@ -709,13 +693,22 @@ if __name__ == "__main__":
     #logger.info( '%d partly-good instances', len( goodIids & badIids ))
     if args.sendMail:
         import neocortixMail
-        #recipients = ['mcoffey@neocortix.com']
-        recipients = ['mcoffey@neocortix.com', 'lwatts@neocortix.com', 'dm@neocortix.com']
+        try:
+            emailSettings = json.loads( args.sendMail )
+        except Exception as exc:
+            logger.warning( 'did not recognize "sendMail" arg as json (%s) %s', type(exc), exc )
+            logger.info( 'sendMail arg: %s', args.sendMail )
+
+        sender = emailSettings['from']
+        smtpHost = emailSettings['smtpHost']
+        pwd = emailSettings.get('pwd')
+        recipients = emailSettings['to']
         body = ''
         body += 'startDateTime %s\n' % startDateTime.isoformat()
         body += 'installing started %s\n' % installerSummaries.dateTime.min()
         body += 'rendering started %s\n' % frameSummaries.startDateTime.min()
         body += 'rendering finished %s\n' % frameSummaries.endDateTime.max()
+        body += 'database tag is %s\n' % args.tag
         body += '\n'
 
         body += '%d instances requested\n' % len(instancesAllocated) 
@@ -728,8 +721,9 @@ if __name__ == "__main__":
         body += '\n'
 
         body += '%d did some rendering\n' % len(workerSummaries[workerSummaries.nGood > 0] )
-        body += '%d frames rendered\n' % len(frameSummaries[frameSummaries.frameState == 'retrieved'] )
+        body += '%d frames rendered from %s\n' % \
+            (len(frameSummaries[frameSummaries.frameState == 'retrieved'] ), blendFilePath )
 
         attachmentPaths = [rendererTimingPlotFilePath]
-        neocortixMail.sendMailWithAttachments( 'mcoffey@neocortix.com',
-            recipients, 'render-test result summary', body, attachmentPaths )
+        neocortixMail.sendMailWithAttachments( sender,
+            recipients, 'render-test result summary', body, smtpHost, attachmentPaths, pwd=pwd )
