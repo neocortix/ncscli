@@ -459,7 +459,7 @@ def renderFramesOnInstance( inst, timeLimit=1800 ):
                 time.sleep(10) # maybe we should retire this instance; at least, making it sleep so it is less competitive
             else:
                 logFrameState( frameNum, 'rendered', iid )
-                g_framesFinished.append( frameNum )
+                #g_framesFinished.append( frameNum )  # too soon
 
             proc.terminate()
             try:
@@ -482,9 +482,11 @@ def renderFramesOnInstance( inst, timeLimit=1800 ):
                 )
             if returnCode == 0:
                 logFrameState( frameNum, 'retrieved', iid )
+                g_framesFinished.append( frameNum )
             else:
                 logStderr( stderr.rstrip(), iid )
                 logFrameState( frameNum, 'retrieveFailed', iid, returnCode )
+                g_framesToDo.append( frameNum )
         if returnCode:
             nFailures += 1
     return 0
