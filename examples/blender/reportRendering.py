@@ -400,7 +400,7 @@ def summarizeWorkers( _workerIids, instances, frameSummaries ):
         sumRecs.append( sumRec )
     return sumRecs
 
-def plotRenderTimes( fetcherTable, outFilePath ):
+def plotRenderTimes( framesDf, outFilePath ):
     '''plots rendering job timings based on frame summaries'''
     import matplotlib.pyplot as plt
     import matplotlib as mpl
@@ -411,28 +411,28 @@ def plotRenderTimes( fetcherTable, outFilePath ):
         if isinstance( pdTime, pd.Timestamp ):
             return pdTime.to_pydatetime().timestamp()
         return 0
-    fetcherCounts = fetcherTable.devId.value_counts()
-    fetcherNames = sorted( list( fetcherCounts.index ), reverse = True )
-    nClusters = len( fetcherNames )
+    devCounts = framesDf.devId.value_counts()
+    devIds = sorted( list( devCounts.index ), reverse = True )
+    nDevices = len( devIds )
     fig = plt.figure()
     ax = plt.gca()
-    clusterHeight = 1
+    rowHeight = 1
     yMargin = .25
-    yMax = nClusters*clusterHeight + yMargin
+    yMax = nDevices*rowHeight + yMargin
     ax.set_ylim( 0, yMax )
-    yTickLocs = np.arange( clusterHeight/2, nClusters*clusterHeight, clusterHeight)
-    plt.yticks( yTickLocs, fetcherNames )
+    yTickLocs = np.arange( rowHeight/2, nDevices*rowHeight, rowHeight)
+    plt.yticks( yTickLocs, devIds )
     tickLocator10 = mpl.ticker.MultipleLocator(60)
     ax.xaxis.set_minor_locator( tickLocator10 )
     ax.xaxis.set_major_locator( mpl.ticker.MultipleLocator(600) )
     ax.xaxis.set_ticks_position( 'both' )
     alpha = .6
     
-    # get the xMin and xMax from the union of all cluster time ranges
+    # get the xMin and xMax from the union of all device time ranges
     allStartTimes = pd.Series()
     allFinishTimes = pd.Series()
-    for cluster in fetcherNames:
-        jobs = fetcherTable[fetcherTable.devId==cluster]
+    for devId in devIds:
+        jobs = framesDf[framesDf.devId==devId]
         startTimes = jobs.startDateTime
         #finishTimes = jobs.startDateTime + jobs.durTd
         finishTimes = jobs.startDateTime + pd.to_timedelta(jobs.dur, unit='s')
@@ -451,9 +451,9 @@ def plotRenderTimes( fetcherTable, outFilePath ):
     jobColor0 = mpl.colors.to_rgb( 'gray' )
    
     jobBottom = yMargin
-    for cluster in fetcherNames:
-        jobs = fetcherTable[fetcherTable.devId==cluster]
-        # plot some things for each segment tied to this fetcher
+    for devId in devIds:
+        jobs = framesDf[framesDf.devId==devId]
+        # plot some things for each frame assigned to this device (including rsync)
         for row in jobs.iterrows():
             job = row[1]
             startSeconds = pdTimeToSeconds( job.startDateTime ) - xMin
@@ -462,7 +462,7 @@ def plotRenderTimes( fetcherTable, outFilePath ):
                 durSeconds = 10
             color = jobColors.get( job.frameState, jobColor0 )
             jigger = jiggers.get( job.frameState, 0 )
-            boxHeight = clusterHeight*.7
+            boxHeight = rowHeight*.7
             ax.add_patch(
                 patches.Rectangle(
                     (startSeconds, jobBottom-jigger),   # (x,y)
@@ -487,7 +487,7 @@ def plotRenderTimes( fetcherTable, outFilePath ):
                 label = str(job.frameNum)
                 y = jobBottom+.1
                 ax.annotate( label, xy=(startSeconds+.4, y) )
-        jobBottom += clusterHeight
+        jobBottom += rowHeight
 
     plt.gca().grid( True, axis='x')
     plt.tight_layout()
