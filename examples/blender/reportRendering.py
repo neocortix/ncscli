@@ -22,6 +22,7 @@ import requests
 
 # neocortix module(s)
 import devicePerformance
+import eventTiming
 import ncs
 
 logger = logging.getLogger(__name__)
@@ -189,6 +190,8 @@ def summarizeInstallerLog( eventsByInstance, instancesByIid, installerCollName )
     sumRecs = []
     for iid in instancesAllocated:
         inst = instancesAllocated[iid]
+        if inst.get( 'state' ) == 'exhausted':
+            continue
         arch = ''    
         families = set()
         nCores = 0
@@ -385,6 +388,8 @@ def summarizeWorkers( _workerIids, instances, frameSummaries ):
         meanDurGood = successes.dur.mean()
         if math.isnan( meanDurGood ):
             meanDurGood = 0  # force nans to zero
+        earliest = subset.startDateTime.min()
+        latest = subset.endDateTime.max()
         '''
         logger.info( '%s dev %d, %d attempts, %d good, %d renderFailed, %d other, %.1f meanDurGood',
             iid[0:16], devId, nAttempts, len(successes),
@@ -395,7 +400,7 @@ def summarizeWorkers( _workerIids, instances, frameSummaries ):
         sumRec = { 'devId': devId, 'dpr': dpr, 'blendFilePath': blendFilePath,
             'nAttempts': nAttempts, 'nGood': len(successes), 'nRenderFailed': nRenderFailed,
             'nRetrieveFailed': nRetrieveFailed, 'nRsyncFailed': nRsyncFailed, 'nSlow': nSlow,
-            'meanDurGood': meanDurGood
+            'meanDurGood': meanDurGood, 'earliest':earliest, 'latest':latest
         }
         sumRecs.append( sumRec )
     return sumRecs
@@ -511,11 +516,13 @@ if __name__ == "__main__":
     args = ap.parse_args()
     #logger.debug( 'args %s', args )
 
+    eventTimings = []
+
     mclient = pymongo.MongoClient(args.mongoHost, args.mongoPort)
     logsDb = mclient.renderingLogs
     # get the list of all collections in the db (avoiding using 'collections' as a global var name)
     tables = sorted(logsDb.list_collection_names())
-    logger.info( 'database collections %s', tables )
+    #logger.info( 'database collections %s', tables )
 
     os.makedirs( args.outDir, exist_ok=True )
     instAttemptsFilePath = args.outDir + '/instAttempts.csv'
@@ -530,7 +537,7 @@ if __name__ == "__main__":
         installerCollName = 'installerLog_' + args.tag
         rendererCollName = 'rendererLog_' + args.tag
     else:
-        # inspect the 'officialTests' collection
+        # analyze everything listed in the 'officialTests' collection
         officialColl = logsDb[ 'officialTests' ]
         tests = list( officialColl.find() )
         if not tests:
@@ -637,7 +644,11 @@ if __name__ == "__main__":
         {'instanceId': '<master>'}, hint=[('dateTime', pymongo.ASCENDING)] 
         )
     startDateTime = interpretDateTimeField( startingEvent['dateTime'] )
-
+    finishedEvent = logsDb[rendererCollName].find_one( 
+        {'args.finished': {'$exists':True}, 'instanceId': '<master>'} 
+        )
+    #logger.info( 'finishedEvent %s', finishedEvent )
+    endDateTime = interpretDateTimeField( finishedEvent['dateTime'] )
 
     # summarize renderer events into a table
     sumRecs = summarizeRenderingLog( instancesAllocated, rendererCollName, tag=args.tag )
@@ -703,26 +714,75 @@ if __name__ == "__main__":
         smtpHost = emailSettings['smtpHost']
         pwd = emailSettings.get('pwd')
         recipients = emailSettings['to']
+
         body = ''
+        body += 'database tag is %s\n' % args.tag
         body += 'startDateTime %s\n' % startDateTime.isoformat()
         body += 'installing started %s\n' % installerSummaries.dateTime.min()
         body += 'rendering started %s\n' % frameSummaries.startDateTime.min()
         body += 'rendering finished %s\n' % frameSummaries.endDateTime.max()
-        body += 'database tag is %s\n' % args.tag
         body += '\n'
-
-        body += '%d instances requested\n' % len(instancesAllocated) 
+        nRequested = len(instancesAllocated) 
+        body += '%d instances requested\n' % nRequested
         stateCounts = installerSummaries.state.value_counts()
         #logger.info( 'instCodes %s', stateCounts )
         body += '%d installed Blender\n' % (stateCounts['installed'])
-        body += '%d installerTimeouts\n' % (stateCounts['installerTimeout'])
+        body += '%d installerTimeout\n' % (stateCounts['installerTimeout'])
         body += '%d installerFailed\n' % (stateCounts.get('installerFailed', 0))
         body += '%d installerException\n' % (stateCounts.get('installerException', 0))
         body += '\n'
 
-        body += '%d did some rendering\n' % len(workerSummaries[workerSummaries.nGood > 0] )
-        body += '%d frames rendered from %s\n' % \
+        nWorking = len(workerSummaries[workerSummaries.nGood > 0] )
+        frameStateCounts = frameSummaries.frameState.value_counts()
+        failureTypeCounts = frameSummaries[frameSummaries.frameState == 'renderFailed'].rc.value_counts()
+        #logger.info( 'frameStateCounts %s', frameStateCounts )
+        body += '%d did some rendering (%.1f %% of requested instances)\n' % \
+            (nWorking, nWorking*100/nRequested )
+        body += '\n'
+        body += '%d frame(s) rendered from %s\n' % \
             (len(frameSummaries[frameSummaries.frameState == 'retrieved'] ), blendFilePath )
+        body += '%d frame-render failure(s)\n' % frameStateCounts.get('renderFailed', 0)
+        body += '(including %d timeout and %d ssh)\n' % (failureTypeCounts.get(124, 0), failureTypeCounts.get(255, 0))
+        body += '%d frame-retrieve failure(s)\n' % frameStateCounts.get('retrieveFailed', 0)
+        body += '%d instance(s) failed to rsync\n' % frameStateCounts.get('rsyncFailed', 0)
+        body += '\n'
+
+        meanDurGood = frameSummaries[ frameSummaries.frameState == 'retrieved'].dur.mean()
+        body += 'mean duration of good frame-render was %.1f minutes\n' % (meanDurGood/60)
+
+        totWorkerTime = frameSummaries.dur.sum()
+        body += 'overall cost of rendering was %.1f worker-minutes per frame (including failures but not idle time)\n' % \
+            ((totWorkerTime/60) / frameStateCounts.get('retrieved', 0))
+
+        renderingElapsedTime = (frameSummaries.endDateTime.max() - frameSummaries.endDateTime.min()).total_seconds()
+        body += 'overall cost of rendering was %.1f worker-minutes per frame (including failures and idle time)\n' % \
+            ((renderingElapsedTime*stateCounts['installed']/60) / frameStateCounts.get('retrieved', 0))
+
+        body += '\nTiming Summary (durations in minutes)\n'
+        eventTimings.append( eventTiming.eventTiming( 
+            'launching', startDateTime,
+                dateutil.parser.parse(installerSummaries.dateTime.min() )
+        ))
+        eventTimings.append( eventTiming.eventTiming( 
+            'installing', dateutil.parser.parse( installerSummaries.dateTime.min() ),
+                frameSummaries.startDateTime.min()
+        ))
+        eventTimings.append( eventTiming.eventTiming( 
+            'rendering', frameSummaries.startDateTime.min(),
+                frameSummaries.endDateTime.max()
+        ))
+        eventTimings.append( eventTiming.eventTiming( 
+            'overall', startDateTime,
+                endDateTime
+        ))
+        for ev in eventTimings:
+            s1 = ev.startDateTime.strftime( '%H:%M:%S' )
+            if ev.endDateTime:
+                s2 = ev.endDateTime.strftime( '%H:%M:%S' )
+            else:
+                s2 = s1
+            dur = ev.duration().total_seconds() / 60
+            body += ' '.join([ s1, s2, '%7.1f' % (dur), ev.eventName ]) + '\n'
 
         attachmentPaths = [rendererTimingPlotFilePath]
         neocortixMail.sendMailWithAttachments( sender,
