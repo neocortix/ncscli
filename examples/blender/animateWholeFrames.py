@@ -51,6 +51,7 @@ class g_:
     signaled = False
 g_releasedInstances = collections.deque()
 g_releasedInstancesLock = threading.Lock()
+g_progressFileLock = threading.Lock()
 
 g_framesToDo = collections.deque()
 g_nFramesWanted = None  # total number to do; used as stopping criterion
@@ -356,6 +357,18 @@ def scpFromRemote( srcFileName, destFilePath, inst, timeLimit=60 ):
         returnCode = 255
     return returnCode, stderr
 
+def saveProgress():
+    # lock it to avoid race conditions
+    with g_progressFileLock:
+        nFinished = len( g_framesFinished)
+        struc = {
+            'nFramesFinished': nFinished,
+            'nFramesWanted': g_nFramesWanted
+        }
+        with open( progressFilePath, 'w' ) as progressFile:
+            json.dump( struc, progressFile )
+
+
 def renderFramesOnInstance( inst, timeLimit=1800 ):
     iid = inst['instanceId']
     abbrevIid = iid[0:16]
@@ -412,7 +425,7 @@ def renderFramesOnInstance( inst, timeLimit=1800 ):
             frameNum = g_framesToDo.popleft()
         except IndexError:
             #logger.info( 'empty g_framesToDo' )
-            time.sleep(5)
+            time.sleep(10)
             continue
         #outFilePattern = 'rendered_frame_######_seed_%d.%s'%(args.seed,fileExt)
         outFileName = g_outFilePattern.replace( '######', '%06d' % frameNum )
@@ -457,7 +470,7 @@ def renderFramesOnInstance( inst, timeLimit=1800 ):
                 time.sleep(1)
             returnCode = proc.returncode if proc.returncode != None else 124
             if returnCode:
-                logger.warning( 'unfinishedFrame %d, %s', frameNum, iid )
+                logger.warning( 'renderFailed for frame %d on %s', frameNum, iid )
                 logFrameState( frameNum, 'renderFailed', iid, returnCode )
                 g_framesToDo.append( frameNum )
                 time.sleep(10) # maybe we should retire this instance; at least, making it sleep so it is less competitive
@@ -486,7 +499,10 @@ def renderFramesOnInstance( inst, timeLimit=1800 ):
                 )
             if returnCode == 0:
                 logFrameState( frameNum, 'retrieved', iid )
+                logger.info( 'retrieved frame %d', frameNum )
+                logger.info( 'finished %d frames out of %d', len( g_framesFinished), g_nFramesWanted )
                 g_framesFinished.append( frameNum )
+                saveProgress()
             else:
                 logStderr( stderr.rstrip(), iid )
                 logFrameState( frameNum, 'retrieveFailed', iid, returnCode )
@@ -566,6 +582,7 @@ if __name__ == "__main__":
     myPid = os.getpid()
     logger.info('procID: %s', myPid)
 
+    progressFilePath = dataDirPath + '/progress.json'
     settingsJsonFilePath = dataDirPath + '/settings.json'
     resultsLogFilePath = dataDirPath+'/'+ \
         os.path.splitext( os.path.basename( __file__ ) )[0] + '_results.jlog'
@@ -610,6 +627,7 @@ if __name__ == "__main__":
         logger.error( 'no good instances were recruited')
     else:
         g_nFramesWanted = len( g_framesToDo )
+        saveProgress()
         logOperation( 'parallelRender',
             {'blendFilePath': args.blendFilePath, 'nInstances': len(goodInstances),
                 'nFramesReq': g_nFramesWanted },
