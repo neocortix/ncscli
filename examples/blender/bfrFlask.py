@@ -34,6 +34,7 @@ jsonify = flask.json.jsonify  # handy alias
 g_workingDirPath = os.getcwd() + '/bfrData'
 #g_dataDirPath = os.getcwd() + '/data'
 g_minDpr = 37
+g_engineScriptName = 'animateWholeFrames.py'
 
 @app.route('/')
 @app.route('/api/')
@@ -134,7 +135,7 @@ def findRunningScript( targets ):
 def findRunningJob( jobId ):
     '''find a process that is running the job with the given id'''
     logger.info( 'looking for job %s', jobId)
-    targets = ['runDistributedBlender.py']
+    targets = [g_engineScriptName]
     myPid = os.getpid()
     otherProcId = None
     foundProc = None
@@ -170,7 +171,7 @@ def stdFilePath( baseName, jobId ):
     return '%s/%s.txt' % (dataDirPath( jobId ), baseName)
 
 def anyJobsRunning():
-    targetScriptNames = ['runDistributedBlender']
+    targetScriptNames = [g_engineScriptName]
     found = findRunningScript( targetScriptNames )
     return found
 
@@ -225,7 +226,7 @@ def getJobInfo( jobId ):
     if os.path.isfile( settingsFilePath ):
         with open( settingsFilePath, encoding='utf8' ) as settingsFile:
             settings = json.load( settingsFile )
-            outFileName = settings.get( 'outFileName' )
+            outFileName = settings.get( 'outVideoFileName' )
             logger.info( 'outFileName %s', outFileName )
             if outFileName:
                 outFilePath = dataDirPath( jobId ) + '/' + outFileName
@@ -234,7 +235,7 @@ def getJobInfo( jobId ):
                     url = flask.url_for( 'jobFileHandler', jobId=jobId, fileName=outFileName )
                     logger.info( 'outFileName url: %s', url )
                     if url:
-                        info['outputImgUrl'] = url
+                        info['outputVidUrl'] = url
 
 
     return jsonify(info), 200
@@ -283,7 +284,8 @@ def launchJob( args ):
 
         argsStr = ' '.join(args)
     argsStr += ' --jobId ' + jobId
-    cmd = 'cd  %s && LANG=en_US.UTF-8 PYTHONPATH=%s %s/runDistributedBlender.py %s' \
+    argsStr += ' --dataDir ' + dataDirPath( jobId )
+    cmd = 'cd  %s && LANG=en_US.UTF-8 PYTHONPATH=%s %s/animateWholeFrames.py %s' \
         % (wdPath, pyLibPath, pyLibPath, argsStr)
     #cmd += ' --filter \'{"regions":"north-america","dpr": ">=37"}\''
 
