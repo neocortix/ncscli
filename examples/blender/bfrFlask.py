@@ -236,6 +236,15 @@ def getJobInfo( jobId ):
                     logger.info( 'outFileName url: %s', url )
                     if url:
                         info['outputVidUrl'] = url
+    progressFilePath = dataDirPath( jobId ) + '/progress.json'
+    if os.path.isfile( progressFilePath ):
+        with open( progressFilePath, encoding='utf8' ) as progressFile:
+            try:
+                progress = json.load( progressFile )
+            except Exception as exc:
+                logger.warning( 'exception parsing progress (%s) %s ', type(exc), exc )
+            else:
+                info['progress'] = progress
 
 
     return jsonify(info), 200
