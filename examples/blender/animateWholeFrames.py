@@ -371,6 +371,8 @@ def renderFramesOnInstance( inst, timeLimit=1800 ):
         logStderr( stderr.rstrip(), iid )
         logFrameState( -1, 'rsyncFailed', iid, rc )
         logger.warning( 'rc from rsync was %d', rc )
+        logOperation( 'terminateFailedWorker', iid, '<master>')
+        ncs.terminateInstances( args.authToken, [iid] )
         return -1  # go no further if we can't rsync to the worker
 
     def trackStderr( proc ):
@@ -402,6 +404,8 @@ def renderFramesOnInstance( inst, timeLimit=1800 ):
     while len( g_framesFinished) < g_nFramesWanted:
         if nFailures > 1:
             logger.warning( 'exiting thread because instance has encountered %d failures', nFailures )
+            logOperation( 'terminateFailedWorker', iid, '<master>')
+            ncs.terminateInstances( args.authToken, [iid] )
             break
         logger.info( '%s would claim a frame; %d done so far', abbrevIid, len( g_framesFinished) )
         try:
@@ -424,7 +428,7 @@ def renderFramesOnInstance( inst, timeLimit=1800 ):
         with subprocess.Popen(['ssh',
                             '-p', str(sshSpecs['port']),
                             '-o', 'ServerAliveInterval=360',
-                            '-o', 'ServerAliveCountMax=1',
+                            '-o', 'ServerAliveCountMax=3',
                             sshSpecs['user'] + '@' + sshSpecs['host'], cmd],
                             encoding='utf8',
                             stdout=subprocess.PIPE,  # subprocess.PIPE subprocess.DEVNULL
@@ -562,6 +566,7 @@ if __name__ == "__main__":
     myPid = os.getpid()
     logger.info('procID: %s', myPid)
 
+    settingsJsonFilePath = dataDirPath + '/settings.json'
     resultsLogFilePath = dataDirPath+'/'+ \
         os.path.splitext( os.path.basename( __file__ ) )[0] + '_results.jlog'
     if resultsLogFilePath:
@@ -594,20 +599,29 @@ if __name__ == "__main__":
     else:
         #TODO use startFreme, endFrame, and frameStep in this case, too, but limiting total number
         g_framesToDo = collections.deque( range( 0, len(goodInstances) * 3) )
-        
     logger.info( 'g_framesToDo %s', g_framesToDo )
-    g_nFramesWanted = len( g_framesToDo )
 
-    logOperation( 'parallelRender',
-        {'blendFilePath': args.blendFilePath, 'nInstances': len(goodInstances),
-            'nFramesReq': g_nFramesWanted },
-        '<master>' )
-    with futures.ThreadPoolExecutor( max_workers=len(goodInstances) ) as executor:
-        parIter = executor.map( renderFramesOnInstance, goodInstances )
-        parResultList = list( parIter )
+    settingsToSave = argsToSave.copy()
+    settingsToSave['outVideoFileName'] = 'rendered_4mbps.mp4'
+    with open( settingsJsonFilePath, 'w' ) as settingsFile:
+        json.dump( settingsToSave, settingsFile )
+
+    if not len(goodInstances):
+        logger.error( 'no good instances were recruited')
+    else:
+        g_nFramesWanted = len( g_framesToDo )
+        logOperation( 'parallelRender',
+            {'blendFilePath': args.blendFilePath, 'nInstances': len(goodInstances),
+                'nFramesReq': g_nFramesWanted },
+            '<master>' )
+        with futures.ThreadPoolExecutor( max_workers=len(goodInstances) ) as executor:
+            parIter = executor.map( renderFramesOnInstance, goodInstances )
+            parResultList = list( parIter )
 
     if args.launch:
         logger.info( 'terminating %d instances', len( g_releasedInstances) )
+        iids = [inst['instanceId'] for inst in g_releasedInstances]
+        logOperation( 'terminateFinal', iids, '<master>' )
         runDistributedBlender.terminateThese( args.authToken, g_releasedInstances )
     else:
         with open( dataDirPath + '/survivingInstances.json','w' ) as outFile:
