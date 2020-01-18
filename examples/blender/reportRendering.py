@@ -650,6 +650,33 @@ if __name__ == "__main__":
     #logger.info( 'finishedEvent %s', finishedEvent )
     endDateTime = interpretDateTimeField( finishedEvent['dateTime'] )
 
+    # as a fallback, use endDateTime as terminationDateTime (in case terminateFinal is missing)
+    terminationDateTime = endDateTime
+    # query for the terminateFinal operation, which occurs after all rendering has finished
+    terminationEvent = logsDb[rendererCollName].find_one(
+        {'args.terminateFinal': {'$exists':True}, 'instanceId': '<master>'}
+        )
+    if terminationEvent:
+        terminationDateTime = interpretDateTimeField( terminationEvent['dateTime'] )
+        logger.info( 'terminationDateTime %s', terminationDateTime )
+
+    startDateTime = interpretDateTimeField( startingEvent['dateTime'] )
+
+    # look for terminations due to failed workers
+    terminationCredit = 0
+    terminations = {}  # not really used, but could be
+    termEvents = logsDb[rendererCollName].find(
+        {'args.terminateFailedWorker': {'$exists':True}, 'instanceId': '<master>'}
+        )
+    for termEvent in termEvents:
+        iid = termEvent['args']['terminateFailedWorker']
+        tdt = dateutil.parser.parse( termEvent['dateTime'] )
+        logger.info( 'terminated %s at %s', iid, tdt )
+        terminations[ iid ] = tdt
+        terminationCredit += (terminationDateTime - tdt).total_seconds()
+    logger.info( 'terminationCredit: %.1f seconds (%.1f minutes)',
+        terminationCredit, terminationCredit/60 )
+
     # summarize renderer events into a table
     sumRecs = summarizeRenderingLog( instancesAllocated, rendererCollName, tag=args.tag )
     frameSummaries = pd.DataFrame( sumRecs )
@@ -755,8 +782,9 @@ if __name__ == "__main__":
             ((totWorkerTime/60) / frameStateCounts.get('retrieved', 0))
 
         renderingElapsedTime = (frameSummaries.endDateTime.max() - frameSummaries.endDateTime.min()).total_seconds()
+        totInstSecs = (renderingElapsedTime*stateCounts['installed']) - terminationCredit
         body += 'overall cost of rendering was %.1f worker-minutes per frame (including failures and idle time)\n' % \
-            ((renderingElapsedTime*stateCounts['installed']/60) / frameStateCounts.get('retrieved', 0))
+            ((totInstSecs/60) / frameStateCounts.get('retrieved', 0))
 
         body += '\nTiming Summary (durations in minutes)\n'
         eventTimings.append( eventTiming.eventTiming( 
