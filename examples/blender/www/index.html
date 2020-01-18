@@ -79,10 +79,8 @@
     <br>
     # of workers: <input id="nWorkers", class="margined" size=6 value = 10 />
     <br>
-    Width: <input id="width", class="margined" size=4 value=960 />
-    Height: <input id="height", class="margined" size=4 value=540 >
-    <br>
-    Frame # <input id="frame", class="margined" size=4 value=1 >
+    Start Frame # <input id="startFrame", class="margined" size=4 value=1 >
+    End Frame # <input id="endFrame", class="margined" size=4 value=1 >
     <br><br>
     Blender .blend file to render:
     <br>
@@ -123,7 +121,10 @@
             <option value="oceania" >Oceania</option>
             <option value="russia-ukraine-belarus" >Russia & Ukraine & Belarus</option>
         </select>
-  
+        <br>
+        Width: <input disabled id="width", class="margined" size=4 value=1920 />
+        Height: <input disabled id="height", class="margined" size=4 value=1080 >
+      
     </div>
 
     <br><br>
@@ -134,6 +135,9 @@
     <button id="statusBut" >Get Status</button>
 
     <div id="results">
+        <video id="outputVideo" width="640"hidden controls >
+            Your browser does not support the video tag
+        </video>
         <div id="plotDiv">
             <img id="plotImg" style="width: 100%; padding: 4px;" hidden src="favicon.ico" >
         </div>
@@ -206,6 +210,8 @@
 <script>
 var g_checkerTask = null;
 var g_availTask = null;
+var g_minDpr = 37;  //37 is normal, approx gs6; 47 is super-dpr for rendering
+
 
 function onStatusBut() {
     var jobId = $('#jobId').val();
@@ -232,25 +238,25 @@ function onStatusBut() {
             //console.log( $( '#stderr' )[0].scrollHeight  );
             $( "#stderr" ).scrollTop( $( '#stderr' )[0].scrollHeight );
             if( data["state"] == 'stopped' ) {
-                var imgUrl = urlPrefix + jobId + '/composite_seed_0.png'; // fallback
-                if( data["outputImgUrl"] ) {
-                    imgUrl = './' + data["outputImgUrl"];
-                    console.log( "outputImgUrl", imgUrl )
+                var imgUrl = urlPrefix + jobId + '/rendered.mp4'; // fallback
+                if( data["outputVidUrl"] ) {
+                    imgUrl = './' + data["outputVidUrl"];
+                    console.log( "outputVidUrl", imgUrl )
                 }
-                $('#plotImg').attr( "src", imgUrl );
-                var absUrlStr = new URL(imgUrl, window.location.href).href
-                $('#plotImg').attr( "alt", absUrlStr );
-                $('#plotImg').show();
+                $('#outputVideo').attr( "src", imgUrl );
+                //var absUrlStr = new URL(imgUrl, window.location.href).href
+                //$('#outputVideo').attr( "alt", absUrlStr );
+                $('#outputVideo').show();
             }
             else {
-                $('#plotImg').hide();
+                $('#outputVideo').hide();
             }
         }
         else {
             $('#state').empty()
             $('#stdout').empty()
             $('#stderr').text( data)
-            $('#plotImg').hide();
+            $('#outputVideo').hide();
         }
     })
     jx.fail(function( jqxhr, textStatus, error ) {
@@ -272,8 +278,12 @@ function onLaunchBut() {
     if (authToken.length <= 0) {
         return;
     }
-    var frame = $('#frame').val();
-    if (frame.length <= 0) {
+    var startFrame = $('#startFrame').val();
+    if (startFrame.length <= 0) {
+        return;
+    }
+    var endFrame = $('#endFrame').val();
+    if (endFrame.length <= 0) {
         return;
     }
     var width = $('#width').val();
@@ -308,9 +318,9 @@ function onLaunchBut() {
         blocks_user = 0;
     }
     var useCompositor = $('#useCompositor').prop( 'checked' );
-    var minDpr = 37;  //37 is normal, approx gs6
+    //var minDpr = 47;  //37 is normal, approx gs6; 47 is super-dpr for rendering
     var regions = $('#regions').val();
-    filterObj = {"regions": regions, "dpr": ">="+String(minDpr) };
+    filterObj = {"regions": regions, "dpr": ">="+String(g_minDpr) };
     var filterArg = JSON.stringify( filterObj )
     //console.log( 'filterArg', filterArg )
 
@@ -318,13 +328,12 @@ function onLaunchBut() {
 
     var url='./api/jobs/';
     var args = {
-        authToken: authToken, nWorkers: nWorkers,
-        width: width, height: height,
-        frame: frame, seed: seed,
-        fileType: fileType,
-        blocks_user: blocks_user,
-        useCompositor: useCompositor,
-        filter: filterArg
+        authToken: authToken,
+        filter: filterArg,
+        startFrame: startFrame,
+        endFrame: endFrame,
+        timeLimit: 1800,
+        nParFrames: nWorkers
     }
 
     // read the blend file locally
@@ -352,7 +361,7 @@ function onLaunchBut() {
 
         console.log( "posting" )
         var jx = $.post(url, argsStr);  // argsStr
-        console.log( "posting starting" )
+        //console.log( "posting starting" )
         jx.done(function( data, textStatus, jqxhr ) {
             console.log( "posting done" )
             var jobId = data.id
@@ -420,8 +429,8 @@ function checkAvail() {
 
     var regions = $('#regions').val();
     //var regionExpr = {"regions": regions }
-    var minDpr = 37;  //37 is normal, approx gs6
-    filterObj = {"regions": regions, "dpr": ">="+String(minDpr) };
+    //var minDpr = 37;  //37 is normal, approx gs6
+    filterObj = {"regions": regions, "dpr": ">="+String(g_minDpr) };
     var filterArg = JSON.stringify( filterObj )
 
     var queryParams = { "filter": filterArg }
@@ -456,7 +465,6 @@ function saveSettings() {
     if( $('#fileType').val() ) {
         localStorage.setItem("fileType", $('#fileType').val() );
     }
-    localStorage.setItem("frame", $('#frame').val() );
     localStorage.setItem("height", $('#height').val() );
     localStorage.setItem("jobId", $('#jobId').val() );
     localStorage.setItem("nWorkers", $('#nWorkers').val() );
@@ -464,6 +472,8 @@ function saveSettings() {
     if( $('#seed').val().length ) {
         localStorage.setItem("seed", $('#seed').val() );
     }
+    localStorage.setItem("startFrame", $('#startFrame').val() );
+    localStorage.setItem("endFrame", $('#endFrame').val() );
     localStorage.setItem("useCompositor", $('#useCompositor').prop('checked') );
     localStorage.setItem("width", $('#width').val() );
 }
@@ -473,9 +483,6 @@ function loadSettings() {
     $('#fileType').val( localStorage.getItem("fileType") );
     if( localStorage.getItem("nWorkers") ) {
         $('#nWorkers').val( localStorage.getItem("nWorkers") );
-    }
-    if( localStorage.getItem("frame") ) {
-        $('#frame').val( localStorage.getItem("frame") );
     }
     if( localStorage.getItem("regions") ) {
         $('#regions').val( localStorage.getItem("regions").split(",") );
@@ -488,6 +495,12 @@ function loadSettings() {
         $('#height').val( localStorage.getItem("height") );
     }
     $('#seed').val( localStorage.getItem("seed") );
+    if( localStorage.getItem("startFrame") ) {
+        $('#startFrame').val( localStorage.getItem("startFrame") );
+    }
+    if( localStorage.getItem("endFrame") ) {
+        $('#endFrame').val( localStorage.getItem("endFrame") );
+    }
     if( localStorage.getItem("useCompositor") == "false" ) {
         $('#useCompositor').prop('checked', false);
     }
