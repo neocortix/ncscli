@@ -419,7 +419,7 @@ def plotRenderTimes( framesDf, outFilePath ):
     devCounts = framesDf.devId.value_counts()
     devIds = sorted( list( devCounts.index ), reverse = True )
     nDevices = len( devIds )
-    fig = plt.figure()
+    _ = plt.figure()
     ax = plt.gca()
     rowHeight = 1
     yMargin = .25
@@ -501,6 +501,43 @@ def plotRenderTimes( framesDf, outFilePath ):
     else:
         plt.show()
 
+def plotTestHistory( testsDf, plotOutFilePath ):
+    import matplotlib.pyplot as plt
+    def prettify():
+        plt.subplots_adjust(bottom=0.40)
+        ax = plt.gca()
+        ax.set_ylim( bottom=0 )
+        box = ax.get_position()
+        ax.set_position([box.x0, box.y0, box.width * 0.7, box.height])
+        plt.legend(bbox_to_anchor=(1.0, 0.5), loc='center left')
+
+    figsize = (8.5, 4.8)
+    fontsize = 9
+    ticks = list(range(0,len(testsDf)+1))
+
+    # plot the main counting metrics as line graphs
+    _ax = testsDf.plot.line(x='tag', rot=90, style=':o', xticks=ticks,
+                    title='historic rendering metrics', fontsize=fontsize, figsize=figsize,
+                    y=['nInstancesReq', 'nInstallerTimeout', 'nInstalled', 
+                    'nInstallerException', 'nInstallerFailed', 'nRendering'] )
+    prettify()
+    plt.savefig( plotOutFilePath, dpi=150 )
+
+    # additional plots disabled for now
+    '''
+    testsDf['installRate'] = testsDf.nInstalled / testsDf.nInstancesReq
+    testsDf['timeoutRate'] = testsDf.nInstallerTimeout / testsDf.nInstancesReq
+    testsDf['successRate'] = testsDf.nRendering / testsDf.nInstancesReq
+
+    testsDf.plot.line( x='tag', rot=90, style=':o', xticks=ticks, fontsize=fontsize, figsize=figsize,
+                    y=[ 'installRate', 'timeoutRate', 'successRate'])
+    prettify()
+
+    testsDf.plot.line( x='tag', rot=90, style=':o', xticks=ticks, fontsize=fontsize, figsize=figsize,
+        y='installerMeanDurGood' )
+    prettify()
+    '''
+
 
 if __name__ == "__main__":
     logging.basicConfig(format='%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s', datefmt='%Y/%m/%d %H:%M:%S')
@@ -537,6 +574,9 @@ if __name__ == "__main__":
         installerCollName = 'installerLog_' + args.tag
         rendererCollName = 'rendererLog_' + args.tag
     else:
+        testSummariesFilePath = args.outDir + '/testSummaries.csv'
+        testSummariesPngFilePath = args.outDir + '/testHistory.png'
+
         # analyze everything listed in the 'officialTests' collection
         officialColl = logsDb[ 'officialTests' ]
         tests = list( officialColl.find() )
@@ -545,6 +585,14 @@ if __name__ == "__main__":
         logger.info( 'all official tests: %s', [test['tag'] for test in tests] )
         testsDf = pd.DataFrame( tests )
         testsDf.sort_values( 'dateTime', inplace=True )
+        testsDf.set_index( '_id', inplace=True )  # _id is same as tag; change this if not
+        testsDf['nInstancesReq'] = None
+        testsDf['nInstancesLaunched'] = None
+        testsDf['nInstalled'] = None
+        testsDf['nInstallerException'] = None
+        testsDf['nInstallerFailed'] = None
+        testsDf['nInstallerTimeout'] = None
+        testsDf['nRendering'] = None
         logger.info( 'testsDf: %s', testsDf.info() )
         logger.info( 'found %d official tests, latest at %s', len(testsDf), testsDf.dateTime.max() )
         #latestTest = testsDf.iloc[-1]  # the last row
@@ -560,7 +608,7 @@ if __name__ == "__main__":
             # replace this TEMPORARY code with instAttempts-gathering code
             instancesAllocated = {}
             launchedColl = logsDb[row.launchedInstances]
-            inRecs = launchedColl.find()
+            inRecs = list( launchedColl.find() ) # fully iterates the cursor, getting all records
             for inRec in inRecs:
                 if 'instanceId' not in inRec:
                     logger.warning( 'no instance ID in input record')
@@ -573,18 +621,47 @@ if __name__ == "__main__":
                     )
                 inRec['dpr'] = dpr
                 instancesAllocated[ iid ] = inRec
+            instancesLaunched = [inst for inst in inRecs if inst['state'] == 'started']
+            testsDf.loc[ row.tag, 'nInstancesReq'] = len(inRecs)
+            testsDf.loc[ row.tag, 'nInstancesLaunched'] = len(instancesLaunched)
             
             # get events by instance from the installer log
             (eventsByInstance, badIids) = demuxResults( logsDb[row.installerLog] )
             installerSumRecs = summarizeInstallerLog( eventsByInstance, instancesAllocated, row.installerLog )
             allInstallerSummaries = allInstallerSummaries.append( installerSumRecs )
+            installerSummaries = pd.DataFrame( installerSumRecs )
+            installerStateCounts = installerSummaries.state.value_counts()
+            testsDf.loc[ row.tag, 'nInstalled'] = installerStateCounts['installed']
+            if 'installerException' in installerStateCounts:
+                testsDf.loc[ row.tag, 'nInstallerException'] = installerStateCounts['installerException']
+            else:
+                testsDf.loc[ row.tag, 'nInstallerException'] = 0
+            testsDf.loc[ row.tag, 'nInstallerFailed'] = installerStateCounts.get('installerFailed', 0)
+            testsDf.loc[ row.tag, 'nInstallerTimeout'] = installerStateCounts['installerTimeout']
+            testsDf.loc[ row.tag, 'installerMeanDurGood'] = \
+                installerSummaries[installerSummaries.state=='installed'].dur.mean()
+
 
             allInstancesById.update( instancesAllocated )
             frameSummaryRecs = summarizeRenderingLog( instancesAllocated, row.rendererLog, row.tag )
+            frameSummaries = pd.DataFrame( frameSummaryRecs )
             logger.info( 'frameSummaryRecs %d', len(frameSummaryRecs) )
             allFrameSummaries = allFrameSummaries.append( frameSummaryRecs )
+
+            workerIids = frameSummaries.instanceId.unique()
+            sumRecs = summarizeWorkers( workerIids, instancesAllocated, frameSummaries )
+            workerSummaries = pd.DataFrame( sumRecs )
+            nWorking = len(workerSummaries[workerSummaries.nGood > 0] )
+            testsDf.loc[ row.tag, 'nRendering'] = nWorking
+
         #print( allFrameSummaries.info() )
         allInstallerSummaries.to_csv( installerSummariesFilePath, index=False, date_format=isoFormat )
+        print( testsDf.info() )
+        print( testsDf )
+        testsDf.to_csv( testSummariesFilePath, index=False, date_format=isoFormat )
+        plotTestHistory( testsDf, testSummariesPngFilePath )
+
+        allFrameSummaries.to_csv( frameSummariesFilePath, index=False, date_format=isoFormat )
         allFrameSummaries.to_csv( frameSummariesFilePath, index=False, date_format=isoFormat )
         workerIids = allFrameSummaries.instanceId.unique()
         sumRecs = summarizeWorkers( workerIids, allInstancesById, allFrameSummaries )
