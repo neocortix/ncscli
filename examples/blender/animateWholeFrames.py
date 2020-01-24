@@ -49,6 +49,7 @@ global resultsLogFile
 # possible place for globals is this class's attributes
 class g_:
     signaled = False
+g_deadline = None
 g_releasedInstances = collections.deque()
 g_releasedInstancesLock = threading.Lock()
 g_progressFileLock = threading.Lock()
@@ -293,7 +294,7 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted ):
             recycleInstances( goodInstances )
     return goodInstances
 
-def rsyncToRemote( srcFilePath, destFileName, inst, timeLimit=60 ):
+def rsyncToRemote( srcFilePath, destFileName, inst, timeLimit ):
     sshSpecs = inst['ssh']
     host = sshSpecs['host']
     port = sshSpecs['port']
@@ -361,6 +362,9 @@ def saveProgress():
     # lock it to avoid race conditions
     with g_progressFileLock:
         nFinished = len( g_framesFinished)
+        if not nFinished:
+            # kluge: take credit for a fraction of a frame, assuming installaton is finished
+            nFinished = 0.1  
         struc = {
             'nFramesFinished': nFinished,
             'nFramesWanted': g_nFramesWanted
@@ -369,7 +373,8 @@ def saveProgress():
             json.dump( struc, progressFile )
 
 
-def renderFramesOnInstance( inst, timeLimit=1800 ):
+def renderFramesOnInstance( inst ):
+    timeLimit=args.frameTimeLimit
     iid = inst['instanceId']
     abbrevIid = iid[0:16]
     logger.info( 'would render frames on instance %s', abbrevIid )
@@ -377,7 +382,8 @@ def renderFramesOnInstance( inst, timeLimit=1800 ):
     # rsync the blend file, with standardized dest file name
     logFrameState( -1, 'rsyncing', iid, 0 )
     blendFileName = 'render.blend'  # was SpinningCube_002_c.blend 'cube0c.blend'
-    (rc, stderr) = rsyncToRemote( args.blendFilePath, blendFileName, inst, timeLimit=240 )
+    rsyncTimeLimit = 240  # have used 1800 for big files
+    (rc, stderr) = rsyncToRemote( args.blendFilePath, blendFileName, inst, timeLimit=rsyncTimeLimit )
     if rc == 0:
         logFrameState( -1, 'rsynced', iid )
     else:
@@ -415,6 +421,10 @@ def renderFramesOnInstance( inst, timeLimit=1800 ):
                 logStdout( line.rstrip(), iid )
     nFailures = 0    
     while len( g_framesFinished) < g_nFramesWanted:
+        if time.time() >= g_deadline:
+            logger.warning( 'exiting thread because global deadline has passed' )
+            break
+
         if nFailures > 1:
             logger.warning( 'exiting thread because instance has encountered %d failures', nFailures )
             logOperation( 'terminateFailedWorker', iid, '<master>')
@@ -430,9 +440,15 @@ def renderFramesOnInstance( inst, timeLimit=1800 ):
         #outFilePattern = 'rendered_frame_######_seed_%d.%s'%(args.seed,fileExt)
         outFileName = g_outFilePattern.replace( '######', '%06d' % frameNum )
         returnCode = None
+        pyExpr = ''
+        if args.width > 0 and args.height > 0:
+            pyExpr = '--python-expr "import bpy; scene=bpy.context.scene; '\
+                'scene.render.resolution_x=%d; scene.render.resolution_y=%d; '\
+                'scene.render.resolution_percentage=100"' % (args.width, args.height)
         #cmd = 'blender -b -noaudio --version'
-        cmd = 'blender -b -noaudio %s -o %s -f %d' % \
-            (blendFileName, g_outFilePattern, frameNum)
+        cmd = 'blender -b -noaudio --enable-autoexec %s %s -o %s -f %d' % \
+            (blendFileName, pyExpr, g_outFilePattern, frameNum)
+
         logger.info( 'commanding %s', cmd )
         sshSpecs = inst['ssh']
 
@@ -447,7 +463,7 @@ def renderFramesOnInstance( inst, timeLimit=1800 ):
                             stdout=subprocess.PIPE,  # subprocess.PIPE subprocess.DEVNULL
                             stderr=subprocess.PIPE) as proc:
             frameProgress = 0
-            deadline = time.time() + timeLimit
+            deadline = min( g_deadline, time.time() + timeLimit )
             stdoutThr = threading.Thread(target=trackStdout, args=(proc,))
             stdoutThr.start()
             stderrThr = threading.Thread(target=trackStderr, args=(proc,))
@@ -543,6 +559,7 @@ if __name__ == "__main__":
     ap.add_argument( '--authToken', required=True, help='the NCS authorization token to use' )
     ap.add_argument( '--dataDir', help='output data darectory', default='./aniData/' )
     ap.add_argument( '--filter', help='json to filter instances for launch' )
+    ap.add_argument( '--frameTimeLimit', type=int, default=1800, help='amount of time (in seconds) allowed for each frame' )
     ap.add_argument( '--instTimeLimit', type=int, default=900, help='amount of time (in seconds) installer is allowed to take on instances' )
     ap.add_argument( '--jobId', help='to identify this job' )
     ap.add_argument( '--launch', type=boolArg, default=True, help='to launch and terminate instances' )
@@ -555,10 +572,10 @@ if __name__ == "__main__":
         default=24*60*60 )
     #ap.add_argument( '--useCompositor', type=boolArg, default=True, help='whether or not to use blender compositor' )
     # dtr-specific args
-    #ap.add_argument( '--width', type=int, help='the width (in pixels) of the output',
-    #    default=960 )
-    #ap.add_argument( '--height', type=int, help='the height (in pixels) of the output',
-    #    default=540 )
+    ap.add_argument( '--width', type=int, help='the width (in pixels) of the output',
+        default=0 )
+    ap.add_argument( '--height', type=int, help='the height (in pixels) of the output',
+        default=0 )
     ap.add_argument( '--fileType', choices=['PNG', 'OPEN_EXR'], help='the type of output file',
         default='PNG' )
     ap.add_argument( '--startFrame', type=int, help='the first frame number to render',
@@ -595,6 +612,8 @@ if __name__ == "__main__":
     logOperation( 'starting', argsToSave, '<master>')
 
     startTime = time.time()
+    g_deadline = startTime + args.timeLimit
+
     extensions = {'PNG': 'png', 'OPEN_EXR': 'exr'}
     g_outFilePattern = 'rendered_frame_######_seed_%d.%s'%(args.seed,extensions[args.fileType])
 
