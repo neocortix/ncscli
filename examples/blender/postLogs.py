@@ -83,6 +83,15 @@ if __name__ == "__main__":
 
     if args.official:
         # get info about the test from the renderer log collection
+
+        # use the parallelRender operation to get nFramesReq
+        mquery = {'type': 'operation', 'instanceId': '<master>', 'args.parallelRender': {'$exists':True} }
+        parallelRenderEvent = coll.find_one( mquery )
+        nFramesReq = parallelRenderEvent['args']['parallelRender'].get( 'nFramesReq', 0 )
+        record['nFramesReq'] = nFramesReq
+        logger.info( 'parallelRenderEvent nFramesReq %d', nFramesReq)
+
+        # use the earliest operation to get the starting dateTime and other details
         query = {'type': 'operation'}
         firstOp = coll.find_one( query, hint=[('dateTime', pymongo.ASCENDING)] )
         record['dateTime'] = firstOp['dateTime']
@@ -90,12 +99,14 @@ if __name__ == "__main__":
         startingArgs = opArgs.get( 'starting' )
         if startingArgs:
             record['blendFilePath'] = startingArgs.get('blendFilePath')
-            startFrame = startingArgs.get('startFrame', 0)
-            endFrame = startingArgs.get('endFrame')
-            frameStep = startingArgs.get('frameStep')
-            if endFrame and frameStep:
-                nFrames = len( range( startFrame, endFrame+1, frameStep) )
-                record['nFramesReq'] = nFrames
+            if not nFramesReq:
+                startFrame = startingArgs.get('startFrame', 0)
+                endFrame = startingArgs.get('endFrame')
+                frameStep = startingArgs.get('frameStep')
+                if endFrame and frameStep:
+                    nFrames = len( range( startFrame, endFrame+1, frameStep) )
+                    record['nFramesReq'] = nFrames
+
         logger.info( 'storing officially as %s', record['_id'] )
         officialColl = logsDb['officialTests']
         result = officialColl.replace_one( {'_id': record['_id']}, record, upsert=True )
