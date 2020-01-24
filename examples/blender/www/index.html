@@ -135,7 +135,7 @@
     <button id="statusBut" >Get Status</button>
 
     <div id="results">
-        <video id="outputVideo" width="640"hidden controls >
+        <video id="outputVideo" width="640" hidden controls >
             Your browser does not support the video tag
         </video>
         <div id="plotDiv">
@@ -143,6 +143,7 @@
         </div>
         <h4>state</h4>
         <pre id="state">(no query done)</pre>
+        <progress id="progress" max="100" style="width: 100%;" hidden ></progress>
         <h4>stdout</h4>
         <pre id="stdout"></pre>
         <h4>stderr log</h4>
@@ -210,7 +211,7 @@
 <script>
 var g_checkerTask = null;
 var g_availTask = null;
-var g_minDpr = 37;  //37 is normal, approx gs6; 47 is super-dpr for rendering
+var g_minDpr = 47;  //37 is "high", (Samsung GS6-class)); 47 is super-dpr
 
 
 function onStatusBut() {
@@ -233,8 +234,24 @@ function onStatusBut() {
         //console.log( "jx responseJSON", jqxhr.responseJSON );
         if( typeof data === 'object' && data !== null && data.hasOwnProperty("state") ) {
             $('#state').text( data["state"])
-            $('#stdout').text( data["stdout"])
-            $('#stderr').text( data["stderr"])
+            //$('#stdout').text( data["stdout"])
+            var nFramesFinished = 0;
+            var nFramesWanted = 0;
+            if( data.hasOwnProperty("progress") ) {
+                $('#stdout').text( JSON.stringify( data["progress"] ) )
+                var progress = data["progress"];
+                nFramesFinished = progress["nFramesFinished"];
+                nFramesWanted = progress["nFramesWanted"];
+                if( nFramesWanted > 0 ) {
+                    $('#progress').attr( "max", nFramesWanted );
+                    $('#progress').attr( "value", nFramesFinished );
+                }
+            }
+            if( (data["state"] == 'stopped') && (nFramesWanted<=0) ) {
+                $('#progress').attr( "value", 0 );  // makes sure it is not "indeterminate"
+            }
+            var someLines = data["stderr"].split("\n").slice(-100).join("\n")
+            $('#stderr').text( someLines )
             //console.log( $( '#stderr' )[0].scrollHeight  );
             $( "#stderr" ).scrollTop( $( '#stderr' )[0].scrollHeight );
             if( data["state"] == 'stopped' ) {
@@ -243,10 +260,12 @@ function onStatusBut() {
                     imgUrl = './' + data["outputVidUrl"];
                     console.log( "outputVidUrl", imgUrl )
                 }
-                $('#outputVideo').attr( "src", imgUrl );
-                //var absUrlStr = new URL(imgUrl, window.location.href).href
-                //$('#outputVideo').attr( "alt", absUrlStr );
-                $('#outputVideo').show();
+                if( nFramesFinished > 0 ) {
+                    $('#outputVideo').attr( "src", imgUrl );
+                    //var absUrlStr = new URL(imgUrl, window.location.href).href
+                    //$('#outputVideo').attr( "alt", absUrlStr );
+                    $('#outputVideo').show();
+                }
             }
             else {
                 $('#outputVideo').hide();
@@ -324,7 +343,11 @@ function onLaunchBut() {
     var filterArg = JSON.stringify( filterObj )
     //console.log( 'filterArg', filterArg )
 
-
+    // reset the output elements
+    $('#progress').attr( "value", 0 );  // makes sure it has the attribute, before removing it
+    $('#stderr').empty("");
+    $('#stdout').empty("");
+    $('#outputVideo').hide();
 
     var url='./api/jobs/';
     var args = {
@@ -332,7 +355,6 @@ function onLaunchBut() {
         filter: filterArg,
         startFrame: startFrame,
         endFrame: endFrame,
-        timeLimit: 1800,
         nParFrames: nWorkers
     }
 
@@ -371,6 +393,9 @@ function onLaunchBut() {
             setTimeout( onStatusBut, 1000 );
             //setTimeout( onStatusBut, 2000 );
             g_checkerTask = setInterval( checkJob, 2000 )
+            // show the progress bar in "indeterminate" state
+            $('#progress').removeAttr( "value" );
+            $('#progress').show();
         })
         jx.fail(function( jqxhr, textStatus, error ) {
             console.log( "onLaunchBut .fail()" );
@@ -381,6 +406,7 @@ function onLaunchBut() {
             console.log( "jx responseJSON", jqxhr.responseText );
             $('#state').text( 'launch failure: ' + error )
             $('#stderr').text( jqxhr.responseText )
+            $('#progress').attr( "value", 0 );
             })
     });
 }
