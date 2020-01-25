@@ -69,7 +69,7 @@ def demuxResults( collection ):
             logger.info( 'exception %s for %s', decoded['exception'], iid )
             badOnes.add( iid )
         if 'timeout' in decoded:
-            logger.info( 'timeout %s for %s', decoded['timeout'], iid )
+            #logger.info( 'timeout %s for %s', decoded['timeout'], iid )
             badOnes.add( iid )
     logger.info( 'topLevelKeys %s', topLevelKeys )
     return byInstance, badOnes
@@ -105,8 +105,8 @@ def instanceDpr( inst ):
     
     dpr = devicePerformance.devicePerformanceRating( cpuarch, cpunumcores, cpuspeeds, cpufamily )
     #print( 'device', inst['device-id'], 'dpr', dpr )
-    if dpr < 37:
-        logger.info( 'unhappy dpr for dev %d with cpu %s', inst['device-id'], inst['cpu'] )
+    #if dpr < 37:
+    #    logger.info( 'unhappy dpr for dev %d with cpu %s', inst['device-id'], inst['cpu'] )
     return dpr
 
 def interpretDateTimeField( field ):
@@ -497,7 +497,7 @@ def plotRenderTimes( framesDf, outFilePath ):
     plt.gca().grid( True, axis='x')
     plt.tight_layout()
     if outFilePath:
-        plt.savefig( outFilePath )
+        plt.savefig( outFilePath, dpi=150 )
     else:
         plt.show()
 
@@ -696,7 +696,7 @@ if __name__ == "__main__":
     
     # get events by instance from the installer log
     (eventsByInstance, badIids) = demuxResults( logsDb[installerCollName] )
-    logger.info( 'badIids (%d) %s', len(badIids), badIids )
+    #logger.info( 'badIids (%d) %s', len(badIids), badIids )
 
     # summarize jlog into array of dicts, with side-effect of modifying instance records
     installerSumRecs = summarizeInstallerLog( eventsByInstance, instancesAllocated, installerCollName )
@@ -748,7 +748,7 @@ if __name__ == "__main__":
     for termEvent in termEvents:
         iid = termEvent['args']['terminateFailedWorker']
         tdt = dateutil.parser.parse( termEvent['dateTime'] )
-        logger.info( 'terminated %s at %s', iid, tdt )
+        #logger.info( 'terminated %s at %s', iid, tdt )
         terminations[ iid ] = tdt
         terminationCredit += (terminationDateTime - tdt).total_seconds()
     logger.info( 'terminationCredit: %.1f seconds (%.1f minutes)',
@@ -782,11 +782,13 @@ if __name__ == "__main__":
         meanDurGood = successes.dur.mean()
         if math.isnan( meanDurGood ):
             meanDurGood = 0  # force nans to zero
-        logger.info( '%s dev %d, %d attempts, %d good, %d renderFailed, %d other, %.1f meanDurGood',
+        '''
+        logger.debug( '%s dev %d, %d attempts, %d good, %d renderFailed, %d other, %.1f meanDurGood',
             iid[0:16], devId, nAttempts, len(successes),
             nRenderFailed, nRetrieveFailed+nRsyncFailed,
             meanDurGood
             )
+        '''
         sumRec = { 'instanceId': iid, 'devId': devId, 'dpr': dpr,
             'blendFilePath': blendFilePath,
             'nAttempts': nAttempts, 'nGood': len(successes), 'nRenderFailed': nRenderFailed,
