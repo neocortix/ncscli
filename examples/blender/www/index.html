@@ -89,24 +89,25 @@
     <br>
     <a href="#parameters" data-toggle="collapse"><span class="glyphicon glyphicon-cog"></span> Settings</a>
     <div id="parameters" class ="collapse" >
-        <label for="fileType" >
+        Width: <input id="width", class="margined" size=4 value=0 /> (zero for default)
+        <br>
+        Height: <input id="height", class="margined" size=4 value=0 > (zero for default)
+        <br>
+        <label for="fileType" hidden >
             Output File Type:
         </label>
-        <select id="fileType" size=2 >
-            <option selected="selected" value="PNG" >png (portable network graphics)</option>
-            <option value="OPEN_EXR" >exr (OpenEXR)</option>
+        <select id="fileType" hidden size=2 >
+            <option selected="selected" value="MP4" >h.264 in mp4 container</option>
+            <option value="other" >coming soon</option>
         </select>
-        <br>
-        Seed value: <input id="seed", size=6 value=0 >
-        blocks_user: <input id="blocks_user", size=6 value=0 >
-        <br>
-        <div class="checkbox">
+        <input id="seed" hidden size=6 value=0 >
+        <div class="checkbox" hidden>
             <label for="useCompositor" >
-                <input id="useCompositor" type="checkbox" checked >Use Compositor
+                <input id="useCompositor" type="checkbox" checked disabled >Use Compositor
             </label>
         </div>
-        <br>
-     
+        Minimum device performance: <input id="minDpr", class="margined" size=4 value=0 > (zero for default)
+        <br><br>
   
         <label for="regions" >
             Choose one or more regions (or select none, to allow all regions):
@@ -121,9 +122,6 @@
             <option value="oceania" >Oceania</option>
             <option value="russia-ukraine-belarus" >Russia & Ukraine & Belarus</option>
         </select>
-        <br>
-        Width: <input disabled id="width", class="margined" size=4 value=1920 />
-        Height: <input disabled id="height", class="margined" size=4 value=1080 >
       
     </div>
 
@@ -211,7 +209,8 @@
 <script>
 var g_checkerTask = null;
 var g_availTask = null;
-var g_minDpr = 47;  //37 is "high", (Samsung GS6-class)); 47 is super-dpr
+var g_minDpr = 0;  //37 is "high", (Samsung GS6-class)); 47 is super-dpr
+var g_defaultDpr = 47;  //37 is "high", (Samsung GS6-class)); 47 is super-dpr
 
 
 function onStatusBut() {
@@ -329,17 +328,14 @@ function onLaunchBut() {
         alert( 'please choose a Blender .blend file');
         return;
     }
-    var blocks_user = $('#blocks_user').val();
-    if (blocks_user.length > 0) {
-        blocks_user = blocks_user.trim();
-    }
-    else {
-        blocks_user = 0;
-    }
     var useCompositor = $('#useCompositor').prop( 'checked' );
-    //var minDpr = 47;  //37 is normal, approx gs6; 47 is super-dpr for rendering
+    // get the minimum dpr and do a sanity check on it
+    var minDpr = g_minDpr;
+    if ( minDpr <= 0 ) {
+        minDpr = g_defaultDpr;
+    }
     var regions = $('#regions').val();
-    filterObj = {"regions": regions, "dpr": ">="+String(g_minDpr) };
+    filterObj = {"regions": regions, "dpr": ">="+String(minDpr) };
     var filterArg = JSON.stringify( filterObj )
     //console.log( 'filterArg', filterArg )
 
@@ -355,6 +351,8 @@ function onLaunchBut() {
         filter: filterArg,
         startFrame: startFrame,
         endFrame: endFrame,
+        height: height,
+        width: width,
         nParFrames: nWorkers
     }
 
@@ -416,6 +414,20 @@ function onRegionsChanged() {
     checkAvail()
 }
 
+function onDprChanged() {
+    console.log( "onDprChanged()" );
+    var dpr = $('#minDpr').val();
+    if( dpr > 0 ) {
+        g_minDpr = dpr;
+    }
+    else {
+        g_minDpr = g_defaultDpr;
+    }
+    console.log( "onDprChanged()", dpr );
+    console.log( "onDprChanged()", g_minDpr );
+    checkAvail()
+}
+
 function onStopBut() {
     console.log( "onStopBut()" );
     var jobId = $('#jobId').val();
@@ -454,9 +466,12 @@ function checkAvail() {
     var url='./api/instances/available';
 
     var regions = $('#regions').val();
-    //var regionExpr = {"regions": regions }
-    //var minDpr = 37;  //37 is normal, approx gs6
-    filterObj = {"regions": regions, "dpr": ">="+String(g_minDpr) };
+    // get the minimum dpr and do a sanity check on it
+    var minDpr = g_minDpr;
+    if ( minDpr <= 0 ) {
+        minDpr = g_defaultDpr;
+    }
+    filterObj = {"regions": regions, "dpr": ">="+String(minDpr) };
     var filterArg = JSON.stringify( filterObj )
 
     var queryParams = { "filter": filterArg }
@@ -566,6 +581,7 @@ function on_ready() {
     $('#statusBut').click(onStatusBut);
     $('#stopBut').click(onStopBut);
     $('#regions').change(onRegionsChanged);
+    $('#minDpr').change(onDprChanged);
     loadSettings();
     checkAvail();
     g_availTask = setInterval( checkAvail, 15 * 1000 )
