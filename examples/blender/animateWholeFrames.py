@@ -576,7 +576,7 @@ if __name__ == "__main__":
         default=0 )
     ap.add_argument( '--height', type=int, help='the height (in pixels) of the output',
         default=0 )
-    ap.add_argument( '--fileType', choices=['PNG', 'OPEN_EXR'], help='the type of output file',
+    ap.add_argument( '--frameFileType', choices=['PNG', 'OPEN_EXR'], help='the type of frame output file',
         default='PNG' )
     ap.add_argument( '--startFrame', type=int, help='the first frame number to render',
         default=0 )
@@ -615,7 +615,7 @@ if __name__ == "__main__":
     g_deadline = startTime + args.timeLimit
 
     extensions = {'PNG': 'png', 'OPEN_EXR': 'exr'}
-    g_outFilePattern = 'rendered_frame_######_seed_%d.%s'%(args.seed,extensions[args.fileType])
+    g_outFilePattern = 'rendered_frame_######_seed_%d.%s'%(args.seed,extensions[args.frameFileType])
 
 
     if args.nParFrames:
@@ -665,7 +665,7 @@ if __name__ == "__main__":
             json.dump( list(g_releasedInstances), outFile )
 
     if len(g_framesFinished):
-        encodeTo264( dataDirPath, args.seed, extensions[args.fileType] )
+        encodeTo264( dataDirPath, args.seed, extensions[args.frameFileType] )
 
     elapsed = time.time() - startTime
     logger.info( 'rendered %d frames using %d "good" instances', len(g_framesFinished), len(goodInstances) )
