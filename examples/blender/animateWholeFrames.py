@@ -38,7 +38,7 @@ except ImportError:
     os.environ["PATH"] += os.pathsep + ncscliPath
     import ncs
 import jsonToKnownHosts
-import runDistributedBlender
+#import runDistributedBlender
 import tellInstances
 
 logger = logging.getLogger(__name__)
@@ -51,6 +51,7 @@ class g_:
     signaled = False
 g_deadline = None
 g_releasedInstances = collections.deque()
+g_workingInstances = collections.deque()
 g_releasedInstancesLock = threading.Lock()
 g_progressFileLock = threading.Lock()
 
@@ -139,60 +140,53 @@ def scriptDirPath():
     '''returns the absolute path to the directory containing this script'''
     return os.path.dirname(os.path.realpath(__file__))
 
-def allocateInstances( nWorkersWanted, launchedJsonFilePath ):
-    # see if there are enough released ones to reuse
-    toReuse = []
-    with g_releasedInstancesLock:
-        if len( g_releasedInstances ) >= nWorkersWanted:
-            for _ in range( 0, nWorkersWanted ):
-                toReuse.append( g_releasedInstances.popleft() )
-    if toReuse:
-        logger.info( 'REUSING instances')
-        with open( launchedJsonFilePath,'w' ) as outFile:
-            json.dump( toReuse, outFile )
-        return toReuse
+def loadSshPubKey():
+    '''returns the contents of current user public ssh client key'''
+    pubKeyFilePath = os.path.expanduser( '~/.ssh/id_rsa.pub' )
+    with open( pubKeyFilePath ) as inFile:
+        contents = inFile.read()
+    return contents
 
-    nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
-    if nWorkersWanted > (nAvail + 0):
-        logger.error( 'not enough devices available (%d requested)', nWorkersWanted )
-        raise ValueError( 'not enough devices available')
-    if args.sshClientKeyName:
-        sshClientKeyName = args.sshClientKeyName
-    else:
-        keyContents = runDistributedBlender.loadSshPubKey()
-        randomPart = str( uuid.uuid4() )[0:13]
-        keyContents += ' #' + randomPart
-        sshClientKeyName = 'bfr_%s' % (randomPart)
-        respCode = ncs.uploadSshClientKey( args.authToken, sshClientKeyName, keyContents )
-        if respCode < 200 or respCode >= 300:
-            logger.warning( 'ncs.uploadSshClientKey returned %s', respCode )
-            sys.exit( 'could not upload SSH client key')
-    #logResult( 'launchInstances', nWorkersWanted, 'allocateInstances' )
-    logOperation( 'launchInstances', nWorkersWanted, '<allocateInstances>' )
-    rc = runDistributedBlender.launchInstances( args.authToken, nWorkersWanted,
-        sshClientKeyName, launchedJsonFilePath, filtersJson=args.filter )
-    if rc:
-        logger.debug( 'launchInstances returned %d', rc )
-    # delete sshClientKey only if we just uploaded it
-    if sshClientKeyName != args.sshClientKeyName:
-        logger.info( 'deleting sshClientKey %s', sshClientKeyName)
-        ncs.deleteSshClientKey( args.authToken, sshClientKeyName )
- 
-    # get instances from the launched json file
-    launchedInstances = []
-    with open( launchedJsonFilePath, 'r') as jsonInFile:
-        try:
-            launchedInstances = json.load(jsonInFile)  # an array
-        except Exception as exc:
-            logger.warning( 'could not load json (%s) %s', type(exc), exc )
-    if len( launchedInstances ) < nWorkersWanted:
-        logger.warning( 'could not launch as many instances as wanted (%d vs %d)',
-            len( launchedInstances ), nWorkersWanted )
-
-    if True:  #launchWanted:
-        with open( os.path.expanduser('~/.ssh/known_hosts'), 'a' ) as khFile:
-            jsonToKnownHosts.jsonToKnownHosts( launchedInstances, khFile )
-    return launchedInstances
+def launchInstances( authToken, nInstances, sshClientKeyName, launchedJsonFilepath,
+        filtersJson=None, encryptFiles=True ):
+    returnCode = 13
+    # prepare command-line for ncs launch
+    cmd = [
+        'ncs.py', 'sc', '--authToken', authToken, 'launch',
+        '--encryptFiles', str(encryptFiles),
+        '--count', str(nInstances), # filtersArg,
+        '--sshClientKeyName', sshClientKeyName, '--json'
+    ]
+    if filtersJson:
+        cmd.extend( ['--filter',  filtersJson] )
+    # this is complicated because we want to be able to kill while waiting for launch
+    try:
+        # truncate the intermediate output file
+        outFile = open( launchedJsonFilepath,'w' )
+        # start ncs asynchronously, then poll for status
+        proc = subprocess.Popen( cmd, stdout=outFile )
+        while True:
+            proc.poll() # sets proc.returncode
+            if proc.returncode != None:
+                break
+            if sigtermSignaled():
+                logger.info( 'signaling ncs')
+                proc.send_signal( signal.SIGTERM )
+                try:
+                    logger.info( 'waiting ncs')
+                    proc.wait(timeout=60)
+                    if proc.returncode:
+                        logger.warning( 'ncs return code %d', proc.returncode )
+                except subprocess.TimeoutExpired:
+                    logger.warning( 'ncs launch did not terminate in time' )
+            time.sleep( 1 )
+        returnCode = proc.returncode
+        if outFile:
+            outFile.close()
+    except Exception as exc: 
+        logger.error( 'exception while launching instances (%s) %s', type(exc), exc, exc_info=True )
+        returnCode = 99
+    return returnCode
 
 def recycleInstances( instances ):
     iids = [inst['instanceId'] for inst in instances]
@@ -213,7 +207,7 @@ def triage( statuses ):
     return (goodOnes, badOnes)
 
 def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted ):
-    '''fancy function to preallocate instances with good blender installation'''
+    '''launch instances and install blender on them; terminate those that could not install'''
     logger.info( 'recruiting up to %d instances', nWorkersWanted )
     goodInstances = []
     if launchWanted:
@@ -226,7 +220,7 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted ):
         if args.sshClientKeyName:
             sshClientKeyName = args.sshClientKeyName
         else:
-            keyContents = runDistributedBlender.loadSshPubKey()
+            keyContents = loadSshPubKey()
             randomPart = str( uuid.uuid4() )[0:13]
             keyContents += ' #' + randomPart
             sshClientKeyName = 'bfr_%s' % (randomPart)
@@ -237,7 +231,7 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted ):
         #launch
         #logResult( 'operation', {'launchInstances': nWorkersWanted}, '<recruitInstances>' )
         logOperation( 'launchInstances', nWorkersWanted, '<recruitInstances>' )
-        rc = runDistributedBlender.launchInstances( args.authToken, nWorkersWanted,
+        rc = launchInstances( args.authToken, nWorkersWanted,
             sshClientKeyName, launchedJsonFilePath, filtersJson=args.filter )
         if rc:
             logger.debug( 'launchInstances returned %d', rc )
@@ -377,6 +371,7 @@ def renderFramesOnInstance( inst ):
     timeLimit=args.frameTimeLimit
     iid = inst['instanceId']
     abbrevIid = iid[0:16]
+    g_workingInstances.append( iid )
     logger.info( 'would render frames on instance %s', abbrevIid )
 
     # rsync the blend file, with standardized dest file name
@@ -392,6 +387,7 @@ def renderFramesOnInstance( inst ):
         logger.warning( 'rc from rsync was %d', rc )
         logOperation( 'terminateFailedWorker', iid, '<master>')
         ncs.terminateInstances( args.authToken, [iid] )
+        g_workingInstances.remove( iid )
         return -1  # go no further if we can't rsync to the worker
 
     def trackStderr( proc ):
@@ -436,6 +432,16 @@ def renderFramesOnInstance( inst ):
         except IndexError:
             #logger.info( 'empty g_framesToDo' )
             time.sleep(10)
+            overageFactor = 3
+            nUnfinished = g_nFramesWanted - len(g_framesFinished)
+            nWorkers = len( g_workingInstances )
+            if nWorkers > (nUnfinished * overageFactor):
+                logger.warning( 'exiting thread because not many left to do (%d unfinished, %d workers)',
+                    nUnfinished, nWorkers )
+                logOperation( 'terminateExcessWorker', iid, '<master>')
+                g_workingInstances.remove( iid )
+                ncs.terminateInstances( args.authToken, [iid] )
+                break
             continue
         #outFilePattern = 'rendered_frame_######_seed_%d.%s'%(args.seed,fileExt)
         outFileName = g_outFilePattern.replace( '######', '%06d' % frameNum )
@@ -525,6 +531,8 @@ def renderFramesOnInstance( inst ):
                 g_framesToDo.append( frameNum )
         if returnCode:
             nFailures += 1
+    if iid in g_workingInstances:
+        g_workingInstances.remove( iid )
     return 0
 
 def encodeTo264( destDirPath, seed=0, frameFileType='png' ):
@@ -548,7 +556,7 @@ if __name__ == "__main__":
     formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
     logging.basicConfig(format=logFmt, datefmt=logDateFmt)
     ncs.logger.setLevel(logging.INFO)
-    runDistributedBlender.logger.setLevel(logging.INFO)
+    #runDistributedBlender.logger.setLevel(logging.INFO)
     logger.setLevel(logging.INFO)
     tellInstances.logger.setLevel(logging.INFO)
     logger.debug('the logger is configured')
@@ -558,6 +566,7 @@ if __name__ == "__main__":
     ap.add_argument( 'blendFilePath', help='the .blend file to render' )
     ap.add_argument( '--authToken', required=True, help='the NCS authorization token to use' )
     ap.add_argument( '--dataDir', help='output data darectory', default='./aniData/' )
+    ap.add_argument( '--encryptFiles', type=boolArg, default=True, help='whether to encrypt files on launched instances' )
     ap.add_argument( '--filter', help='json to filter instances for launch' )
     ap.add_argument( '--frameTimeLimit', type=int, default=1800, help='amount of time (in seconds) allowed for each frame' )
     ap.add_argument( '--instTimeLimit', type=int, default=900, help='amount of time (in seconds) installer is allowed to take on instances' )
@@ -659,7 +668,8 @@ if __name__ == "__main__":
         logger.info( 'terminating %d instances', len( g_releasedInstances) )
         iids = [inst['instanceId'] for inst in g_releasedInstances]
         logOperation( 'terminateFinal', iids, '<master>' )
-        runDistributedBlender.terminateThese( args.authToken, g_releasedInstances )
+        #runDistributedBlender.terminateThese( args.authToken, g_releasedInstances )
+        ncs.terminateInstances( args.authToken, iids )
     else:
         with open( dataDirPath + '/survivingInstances.json','w' ) as outFile:
             json.dump( list(g_releasedInstances), outFile )
