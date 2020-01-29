@@ -78,11 +78,13 @@ def loadSshPubKey():
         contents = inFile.read()
     return contents
 
-def launchInstances( authToken, nInstances, sshClientKeyName, launchedJsonFilepath, filtersJson=None ):
+def launchInstances( authToken, nInstances, sshClientKeyName, launchedJsonFilepath,
+        filtersJson=None, encryptFiles=True ):
     returnCode = 13
     # call ncs launch via command-line
     cmd = [
         'ncs.py', 'sc', '--authToken', authToken, 'launch',
+        '--encryptFiles', str(encryptFiles),
         '--count', str(nInstances), # filtersArg,
         '--sshClientKeyName', sshClientKeyName, '--json'
     ]
