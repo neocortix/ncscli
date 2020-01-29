@@ -405,7 +405,7 @@ def summarizeWorkers( _workerIids, instances, frameSummaries ):
         sumRecs.append( sumRec )
     return sumRecs
 
-def plotRenderTimes( framesDf, outFilePath ):
+def plotRenderTimes( framesDf, terminationOps, outFilePath ):
     '''plots rendering job timings based on frame summaries'''
     import matplotlib.pyplot as plt
     import matplotlib as mpl
@@ -416,6 +416,9 @@ def plotRenderTimes( framesDf, outFilePath ):
         if isinstance( pdTime, pd.Timestamp ):
             return pdTime.to_pydatetime().timestamp()
         return 0
+
+    terminationsByDev = {v['devId'] : v for k, v in terminationOps.items()}
+
     devCounts = framesDf.devId.value_counts()
     devIds = sorted( list( devCounts.index ), reverse = True )
     nDevices = len( devIds )
@@ -454,8 +457,10 @@ def plotRenderTimes( framesDf, outFilePath ):
     jiggers = { 'renderFailed': .1, 'rsyncFailed': .1, 'retrieveFailed': .1 }
   
     jobColor0 = mpl.colors.to_rgb( 'gray' )
+    fontsize = 8
    
     jobBottom = yMargin
+    boxHeight = rowHeight*.7
     for devId in devIds:
         jobs = framesDf[framesDf.devId==devId]
         # plot some things for each frame assigned to this device (including rsync)
@@ -467,7 +472,6 @@ def plotRenderTimes( framesDf, outFilePath ):
                 durSeconds = 10
             color = jobColors.get( job.frameState, jobColor0 )
             jigger = jiggers.get( job.frameState, 0 )
-            boxHeight = rowHeight*.7
             ax.add_patch(
                 patches.Rectangle(
                     (startSeconds, jobBottom-jigger),   # (x,y)
@@ -491,7 +495,25 @@ def plotRenderTimes( framesDf, outFilePath ):
             if job.frameNum >= 0:
                 label = str(job.frameNum)
                 y = jobBottom+.1
-                ax.annotate( label, xy=(startSeconds+.4, y) )
+                ax.annotate( label, xy=(startSeconds+.4, y), fontsize=fontsize )
+        # plot termination op, if any
+        if devId not in terminationsByDev:
+            logger.warning( 'no early termination for dev %d', devId )
+        else:
+            termOp = terminationsByDev[ devId ]
+            dateTime = termOp['dateTime']
+            ts = pd.Timestamp( dateTime )
+            seconds = pdTimeToSeconds( ts ) - xMin
+            ax.add_patch(
+                patches.Ellipse(
+                    (seconds, jobBottom+boxHeight/2),   # (x,y)
+                    60,          # width
+                    boxHeight,          # height
+                    facecolor=jobColor0, edgecolor='k', linewidth=0.5,
+                    alpha=alpha
+                    )
+                )
+
         jobBottom += rowHeight
 
     plt.gca().grid( True, axis='x')
@@ -739,20 +761,39 @@ if __name__ == "__main__":
 
     startDateTime = interpretDateTimeField( startingEvent['dateTime'] )
 
-    # look for terminations due to failed workers
     terminationCredit = 0
-    terminations = {}  # not really used, but could be
+    terminations = {}  # collects termination operations by iid
+
+    # look for terminations due to failed workers
     termEvents = logsDb[rendererCollName].find(
         {'args.terminateFailedWorker': {'$exists':True}, 'instanceId': '<master>'}
         )
     for termEvent in termEvents:
         iid = termEvent['args']['terminateFailedWorker']
-        tdt = dateutil.parser.parse( termEvent['dateTime'] )
+        tdt = universalizeDateTime( dateutil.parser.parse( termEvent['dateTime'], ignoretz=False ) )
         #logger.info( 'terminated %s at %s', iid, tdt )
-        terminations[ iid ] = tdt
+        terminations[ iid ] = { 'opType': 'terminateFailedWorker',
+            'dateTime': tdt, 'devId': instancesAllocated[iid].get( 'device-id' )  }
         terminationCredit += (terminationDateTime - tdt).total_seconds()
     logger.info( 'terminationCredit: %.1f seconds (%.1f minutes)',
         terminationCredit, terminationCredit/60 )
+
+    # look for terminations due to excess workers
+    termEvents = logsDb[rendererCollName].find(
+        {'args.terminateExcessWorker': {'$exists':True}, 'instanceId': '<master>'}
+        )
+    for termEvent in termEvents:
+        iid = termEvent['args']['terminateExcessWorker']
+        tdt = universalizeDateTime( dateutil.parser.parse( termEvent['dateTime'], ignoretz=False ) )
+        #logger.info( 'terminateExcessWorker %s at %s (%s)', iid, tdt, termEvent['dateTime'] )
+        if iid in terminations:
+            logger.warning( 'terminateExcessWorker already had a termination %s', terminations[iid] )
+        terminations[ iid ] = { 'opType': 'terminateExcessWorker',
+            'dateTime': tdt, 'devId': instancesAllocated[iid].get( 'device-id' ) }
+        terminationCredit += (terminationDateTime - tdt).total_seconds()
+    logger.info( 'terminationCredit: %.1f seconds (%.1f minutes)',
+        terminationCredit, terminationCredit/60 )
+    logger.info( 'early terminations (%d) %s', len(terminations), terminations )
 
     # summarize renderer events into a table
     sumRecs = summarizeRenderingLog( instancesAllocated, rendererCollName, tag=args.tag )
@@ -799,7 +840,7 @@ if __name__ == "__main__":
     workerSummaries = pd.DataFrame( sumRecs )
     if workerSummariesFilePath:
         workerSummaries.to_csv( workerSummariesFilePath, index=False )
-    plotRenderTimes( frameSummaries, rendererTimingPlotFilePath )
+    plotRenderTimes( frameSummaries, terminations, rendererTimingPlotFilePath )
 
     logger.info( '%d worker instances', len(workerSummaries))
     logger.info( '%d good instances', len(workerSummaries[workerSummaries.nGood > 0] ) )
