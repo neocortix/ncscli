@@ -293,7 +293,8 @@ def launchJob( args ):
 
         argsStr = ' '.join(args)
     argsStr += ' --instTimeLimit 1800'
-    argsStr += ' --frameTimeLimit 2700'
+    if 'frameTimeLimit' not in argsStr:
+        argsStr += ' --frameTimeLimit 2700'
     argsStr += ' --jobId ' + jobId
     argsStr += ' --dataDir ' + dataDirPath( jobId )
     cmd = 'cd  %s && LANG=en_US.UTF-8 PYTHONPATH=%s %s/animateWholeFrames.py %s' \
