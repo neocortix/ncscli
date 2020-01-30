@@ -9,6 +9,7 @@ import datetime
 import json
 import logging
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -70,7 +71,30 @@ def logResult( key, value, instanceId ):
         print( json.dumps( toLog, sort_keys=True ), file=resultsLogFile )
         resultsLogFile.flush()
 
-async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.', dlFileName=None ):
+def sigtermHandler():
+    ''' stops the currently running event loop, if any'''
+    logger.warning( 'SIGTERM signal received; will try to stop gracefully' )
+    terminate()
+
+def terminate():
+    ''' stops the currently running event loop, if any'''
+    loop = asyncio.get_event_loop()
+    if loop.is_running():
+        logger.info( 'canceling tasks' )
+        for task in asyncio.Task.all_tasks():
+            if task is not asyncio.tasks.Task.current_task():
+                task.cancel()
+        '''
+        # not sure if this code ever made sense
+        logger.info( 'stopping the eventloop' )
+        try:
+            loop.stop()
+        except Exception as exc:
+            logger.info( 'ignoring exception %s', exc )
+        '''
+
+async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.', 
+        dlFileName=None, knownHostsOnly=False ):
     #logger.info( 'inst %s', inst)
     sshSpecs = inst['ssh']
     #logger.info( 'iid %s, ssh: %s', inst['instanceId'], inst['ssh'])
@@ -83,7 +107,10 @@ async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.
     password = sshSpecs.get('password', None )
 
     try:
-        known_hosts = None
+        if knownHostsOnly:
+            known_hosts = os.path.expanduser( '~/.ssh/known_hosts' )
+        else:
+            known_hosts = None
         if False:  # 'returnedPubKey' in inst:
             keyStr = inst['returnedPubKey']
             logger.info( 'importing %s', keyStr)
@@ -91,9 +118,11 @@ async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.
             logger.info( 'imported %s', key.export_public_key() )
             #known_hosts = key # nope
             known_hosts = asyncssh.import_known_hosts(keyStr)
+        logResult( 'operation', ['connect', host, port], iid )
         #sshAgent = os.getenv( 'SSH_AUTH_SOCK' )
         #async with asyncssh.connect(host, port=port, username=user, password=password, known_hosts=None) as conn:
         async with asyncssh.connect(host, port=port, username=user,
+            keepalive_interval=10, keepalive_count_max=3,
             known_hosts=known_hosts, agent_path=sshAgent ) as conn:
             serverHostKey = conn.get_server_host_key()
             #logger.info( 'got serverHostKey (%s) %s', type(serverHostKey), serverHostKey )
@@ -179,12 +208,15 @@ async def run_client_simple(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDir
 
 async def run_multiple_clients( instances, cmd, timeLimit=None, sshAgent=None,
     scpSrcFilePath=None,
-    dlDirPath='.', dlFileName=None
+    dlDirPath='.', dlFileName=None,
+    knownHostsOnly=False
     ):
     # run cmd on all the given instances
     #logger.info( 'instances %s', instances )
 
-    tasks = (asyncio.wait_for(run_client(inst, cmd, sshAgent=sshAgent, scpSrcFilePath=scpSrcFilePath, dlDirPath=dlDirPath, dlFileName=dlFileName),
+    tasks = (asyncio.wait_for(run_client(inst, cmd, sshAgent=sshAgent,
+                scpSrcFilePath=scpSrcFilePath, dlDirPath=dlDirPath, dlFileName=dlFileName,
+                knownHostsOnly=knownHostsOnly),
         timeout=timeLimit)
         for inst in instances )
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -222,7 +254,11 @@ async def run_multiple_clients( instances, cmd, timeLimit=None, sshAgent=None,
             nExceptions += 1
             logger.warning('connection refused for %s', abbrevIid )
             inst['commandState'] = 'unreachable'
-        elif isinstance(result, Exception):
+        elif isinstance(result, asyncio.CancelledError):  # another type of Exception (sort of)
+            nExceptions += 1
+            logger.warning('task cancelled for %s', abbrevIid )
+            inst['commandState'] = 'cancelled'
+        elif isinstance(result, Exception):  # miscellaneous exception
             nExceptions += 1
             logger.warning('exception (%s) "%s" for %s', type(result), result, abbrevIid )
             inst['commandState'] = 'exception'
@@ -237,7 +273,7 @@ async def run_multiple_clients( instances, cmd, timeLimit=None, sshAgent=None,
     return statuses
 
 def tellInstances( instancesSpec, command, resultsLogFilePath, download, downloadDestDir,
-    jsonOut, sshAgent, timeLimit, upload ):
+    jsonOut, sshAgent, timeLimit, upload, knownHostsOnly=False ):
     '''tellInstances to upload, execute, and/or download, things'''
     args = locals().copy()
 
@@ -293,7 +329,12 @@ def tellInstances( instancesSpec, command, resultsLogFilePath, download, downloa
         resultsLogFile = open( resultsLogFilePath, "w", encoding="utf8" )
     else:
         resultsLogFile = None
-    logResult( 'operation', ['tellInstances', {'args': args} ], '<master>')
+
+    # save args, but avoid saving too much
+    argsToSave = args.copy()
+    del argsToSave['instancesSpec']
+    argsToSave['instanceIds'] = [inst['instanceId'] for inst in startedInstances]
+    logResult( 'operation', ['tellInstances', {'args': argsToSave} ], '<master>')
     
     #installed = set()
     #failed = set()
@@ -312,12 +353,17 @@ def tellInstances( instancesSpec, command, resultsLogFilePath, download, downloa
     # the main loop
     eventLoop = asyncio.get_event_loop()
     eventLoop.set_debug(True)
-    statuses = eventLoop.run_until_complete(run_multiple_clients( 
-        startedInstances, program, scpSrcFilePath=upload,
-        dlFileName=download, dlDirPath=downloadDestDir,
-        sshAgent=sshAgent,
-        timeLimit=timeLimit
-        ))
+    #eventLoop.add_signal_handler(signal.SIGTERM, sigtermHandler)
+    try:
+        statuses = eventLoop.run_until_complete(run_multiple_clients(
+            startedInstances, program, scpSrcFilePath=upload,
+            dlFileName=download, dlDirPath=downloadDestDir,
+            sshAgent=sshAgent,
+            timeLimit=timeLimit, knownHostsOnly=knownHostsOnly
+            ))
+    except Exception as exc:
+        logger.warning( 'run_until_complete gave exception (%s) %s', type(exc), exc )
+        statuses = []
     #json.dump( statuses, sys.stdout, default=repr, indent=2 )
 
     mainTiming.finish()
@@ -363,11 +409,12 @@ if __name__ == "__main__":
     ap.add_argument('--sshAgent', type=boolArg, default=False, help='whether or not to use ssh agent')
     ap.add_argument('--timeLimit', type=float, help='maximum time (in seconds) to take (default=none (unlimited)')
     ap.add_argument('--upload', help='optional fileName to upload to all targets')
+    ap.add_argument('--knownHostsOnly', type=boolArg, default=False, help='whether to use only known_hosts, or just any hosts')
     args = ap.parse_args()
     logger.info( "args: %s", str(args) )
     
     tellInstances( args.launchedJsonFilePath, args.command, args.resultsLog,
         args.download, args.downloadDestDir, args.jsonOut, args.sshAgent,
-        args.timeLimit, args.upload
+        args.timeLimit, args.upload, args.knownHostsOnly
         )
     logger.info( 'finished' )

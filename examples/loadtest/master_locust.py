@@ -1,4 +1,5 @@
 import datetime
+import json
 import os
 import six
 import sys
@@ -29,7 +30,13 @@ def genStatsPage():
     return html
 
 g_statsOutFile = None
+g_jlogFile = None
 g_stopping = False
+
+def openJLogFile( dataFilePath ):
+    global g_jlogFile
+    g_jlogFile = open( dataFilePath, 'w' )
+    g_jlogFile.flush()
 
 def openStatsOutFile( dataFilePath ):
     global g_statsOutFile
@@ -72,7 +79,6 @@ def on_slave_report(client_id, data):
         if len( data['stats']):
             console_logger.info( 'on_slave_report DROPPING because g_stopping len(stats): %d', len( data['stats']) )
         return
-
     if len( data['stats']):
         #if len(data['stats']) != 1:
         #    console_logger.info( '%d stats objects' % len(data['stats']) )
@@ -130,6 +136,11 @@ def on_slave_report(client_id, data):
                 else:
                     workerName = client_id
 
+        if g_jlogFile:
+            json.dump( [workerName, data], g_jlogFile )
+            print( "", file=g_jlogFile )
+            g_jlogFile.flush()
+
         numFails = stats['num_failures']
 
         #console_logger.info( '%s worker: %s; reqs: %d RPS: %.1f (%.1f-%.1f); response time: %.1f (%.1f-%.1f)' % \
@@ -184,6 +195,7 @@ if True:
     if os.path.exists( dataFilePath ):
         os.remove( dataFilePath )
     openStatsOutFile( dataFilePath )
+    openJLogFile( dataDirPath+'/locustStats.jlog' )
 
 
 events.slave_report += on_slave_report

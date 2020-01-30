@@ -34,6 +34,14 @@ def sigtermSignaled():
     return g_.signaled
 
 
+def boolArg( v ):
+    if v.lower() == 'true':
+        return True
+    elif v.lower() == 'false':
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 def ncscReqHeaders( authToken ):
     return {
         "Content-Type": "application/json",
@@ -45,6 +53,9 @@ def ncscReqHeaders( authToken ):
 def queryNcsSc( urlTail, authToken, reqParams=None, maxRetries=5 ):
     #if random.random() > .75:
     #    raise requests.exceptions.RequestException( 'simulated exception' )
+    # set long timeouts for requests.get() as a tuple (connection timeout, read timeout) in seconds
+    timeouts = (30, 120)
+    #timeouts = (1, 2)
     headers = ncscReqHeaders( authToken )
     url = 'https://cloud.neocortix.com/cloud-api/sc/' + urlTail
     # jsonize the reqParams, but only if it's not a string (to avoid jsonizing if already json)
@@ -54,7 +65,7 @@ def queryNcsSc( urlTail, authToken, reqParams=None, maxRetries=5 ):
         logger.info( 'querying url <%s> with data <%s> and headers <%s>', 
             url, reqParams, headers )
     try:
-        resp = requests.get( url, headers=headers, data=reqParams )
+        resp = requests.get( url, headers=headers, data=reqParams, timeout=timeouts )
     except requests.ConnectionError as exc:
         logger.warning( 'exception (%s) %s', type(exc), exc )
         if maxRetries > 0:
@@ -96,10 +107,11 @@ def _updateFromJson( dataDict, jsonStr ):
                     raise TypeError('json in arg is not a dict')
                 dataDict.update( jx )
 
-def getAvailableDeviceCount( authToken, filtersJson=None ):
-    reqParams = {}
+def getAvailableDeviceCount( authToken, filtersJson=None, encryptFiles=True ):
+    reqParams = { 'encrypt_files': encryptFiles }
     if filtersJson:
         _updateFromJson( reqParams, filtersJson )
+    
     response = queryNcsSc( 'instances', authToken, reqParams )
     respContent = response['content']
     nAvail = respContent.get('available', 0)
@@ -137,7 +149,7 @@ def deleteSshClientKey( authToken, keyName, maxRetries=1 ):
             return deleteSshClientKey( authToken, keyName, maxRetries-1 )
     return resp.status_code
 
-def launchNcscInstances( authToken, numReq=1,
+def launchNcscInstances( authToken, encryptFiles, numReq=1,
         regions=[], abis=[], sshClientKeyName=None, jsonFilter=None, jobId=None ):
     appVersions = getAppVersions( authToken )
     if not appVersions:
@@ -158,6 +170,7 @@ def launchNcscInstances( authToken, numReq=1,
         #"user":"hacky.sack@gmail.com",
         #'mobile-app-versions': [minAppVersion, latestVersion],
         'abis': abis,
+        'encrypt_files': encryptFiles,
         'id': reqId,
         'regions': regions,
         'ssh_key': sshClientKeyName,
@@ -234,74 +247,6 @@ def launchNcscInstances( authToken, numReq=1,
                 time.sleep( 5 )
     return resp.json()
 
-def launchNcscInstancesOld( authToken, numReq=1,
-        regions=[], abis=[], sshClientKeyName=None, jsonFilter=None ):
-    appVersions = getAppVersions( authToken )
-    if not appVersions:
-        # something is very wrong
-        logger.error( 'could got get AppVersions from server')
-        return {}
-    minAppVersion = 1623
-    latestVersion = max( appVersions )
-
-    headers = ncscReqHeaders( authToken )
-
-    reqId = str( uuid.uuid4() )
-
-    reqData = {
-        #"user":"hacky.sack@gmail.com",
-        #'mobile-app-versions': [minAppVersion, latestVersion],
-        'abis': abis,
-        'job': reqId,
-        'regions': regions,
-        'ssh_key': sshClientKeyName,
-        'count': numReq
-        }
-    if jsonFilter:
-        try:
-            filters = json.loads( jsonFilter )
-        except Exception:
-            logger.error( 'invalid json in filter "%s"', jsonFilter )
-            raise
-        else:
-            if filters:
-                if not isinstance( filters, dict ):
-                    logger.error( 'json in filter is not a dict "%s"', jsonFilter )
-                    raise TypeError('json in filter is not a dict')
-                reqData.update( filters )
-    reqDataStr = json.dumps( reqData )
-
-    logger.info( 'reqData: %s', reqDataStr )
-    url = 'https://cloud.neocortix.com/cloud-api/sc/instances'
-    #logger.info( 'posting with auth %s', authToken )
-    resp = requests.post( url, headers=headers, data=reqDataStr )
-    logger.info( 'response code %s', resp.status_code )
-    if (resp.status_code < 200) or (resp.status_code >= 300):
-        logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
-        # try recovering by retrieving list of instances that match job id
-        logger.info( 'attempting recovery from launch error' )
-        time.sleep( 120 )
-        listReqData = {
-            'job': reqId,
-            }
-        try:
-            resp2 = queryNcsSc( 'instances', authToken, maxRetries=20,
-                reqParams=json.dumps(listReqData))
-        except Exception as exc:
-            logger.error( 'exception getting list of instances (%s) "%s"',
-                type(exc), exc )
-            # in case of excption, return the original error code
-            return {'serverError': resp.status_code, 'reqId': reqId}
-        else:
-            if (resp2['statusCode'] < 200) or (resp2['statusCode'] >= 300):
-                # in case of persistent error, return the last error code
-                logger.info( 'returning server error')
-                return {'serverError': resp2['statusCode'], 'reqId': reqId}
-            else:
-                logger.info( 'returning resp2 content %s', resp2['content'].keys() )
-                return resp2['content']['my']
-    return resp.json()
-
 def terminateNcscInstance( authToken, iid ):
     headers = ncscReqHeaders( authToken )
     url = 'https://cloud.neocortix.com/cloud-api/sc/instances/' + iid
@@ -342,7 +287,7 @@ def doCmdLaunch( args ):
 
     instances = []
     try:
-        infos = launchNcscInstances( authToken, args.count, 
+        infos = launchNcscInstances( authToken, args.encryptFiles, args.count,
             sshClientKeyName=args.sshClientKeyName,
             regions=args.region, abis=instanceAbis, jsonFilter=args.filter,
             jobId=args.jobId )
@@ -466,6 +411,23 @@ def doCmdLaunch( args ):
     logger.info( 'finished')
     return 0 # no err
 
+def listNcsScInstances( authToken ):
+    try:
+        response = queryNcsSc( 'instances', authToken)
+    except Exception as exc:
+        logger.error( 'exception getting list of instances (%s) "%s"',
+            type(exc), exc )
+        raise
+    instancesJson = response['content']
+    logger.debug( 'response %s', instancesJson )
+    if 'running' in instancesJson:
+        runningInstances = instancesJson['my'] # 'running'
+    else:
+        runningInstances = []
+    logger.info( 'found %d allocated instances', len( runningInstances ) )
+    iids = [inst['id'] for inst in runningInstances]
+    return iids
+
 def doCmdList( args ):
     authToken = args.authToken
 
@@ -577,6 +539,9 @@ def doCmdTerminate( args ):
             return
         logger.info( 'response content %s', response['content'].keys() )
         instancesJson, respCode = (response['content'], response['statusCode'] )
+        if (respCode < 200) or (respCode >= 300):
+            logger.error( 'could not terminate instances')
+            return
 
         runningInstances = instancesJson['my']  # 'running'
         #logger.info( 'runningInstances %s', runningInstances )
@@ -617,6 +582,7 @@ if __name__ == "__main__":
     #ap.add_argument('--verbose', '-v', action='count', default=0)
     ap.add_argument( '--count', type=int, default=1, help='the number of instances required (default=1)' )
     ap.add_argument( '--instanceId', type=str, nargs='+', help='one or more instance IDs (or ALL to terminate all)' )
+    ap.add_argument( '--encryptFiles', type=boolArg, default=None, help='whether to encrypt files on launched instances' )
     ap.add_argument( '--filter', help='json to filter instances for launch' )
     ap.add_argument( '--json', action='store_true', help='for json-format output' )
     ap.add_argument( '--jobId', help='unique job id for launch or terminate' )
@@ -643,6 +609,8 @@ if __name__ == "__main__":
         sys.exit( 'sc is the only available subcommand')
 
     if args.action == 'launch':
+        if args.encryptFiles == None:
+            sys.exit( os.path.basename(sys.argv[0]) + ': error: no encryptFiles arg passed for launch' )
         exitCode = doCmdLaunch( args )
         if exitCode > 400:
             exitCode -= 400

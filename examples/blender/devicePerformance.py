@@ -28,12 +28,14 @@ cpuRatings = [
               ['Cortex-A7',1.0],  # nominal reference processor, 32-bit, 50% better than A8
               ['Cortex-A72',1.5], # better than A53, not clear by how much, guess 1.25X better
               ['Cortex-A73',3.25], # 64-bit, used in Galaxy Note 8 in top 4 cores.  guess same as Exynos-M2
-              ['Cortex-A75',1.5], # replaces A73
+              ['Cortex-A75',3.75], # replaces A73 (only 1.5 if not aarch64)
+              ['Cortex-A76',5.0], # from Dmitry's table (only 1.5 if not aarch64)
               ['Cortex-A9',1.25],  # same capability of A53 but lower power
               ['Denver',2.0],      # guess, 2014 technology from Nvidia
               ['Exynos-M1',2.5],   # guess similar to A9
               ['Exynos-M2',3.25],   # guess similar to A53
               ['Exynos-M3',3.75],   # guess similar to A57
+              ['Exynos-M4',3.75],   # from Dmitry's table
               ['Krait',1.25],        # successor to Scorpion.  Guess similar to A9
               ['Kryo',3.4],          # 64-bit successor to Krait.  Similar to A53, good FP (was 1.25, created problem for domestic GS7)
               ['Scorpion',1.0]]     # early Qualcomm, pre-2012.  Guess similar to A7 

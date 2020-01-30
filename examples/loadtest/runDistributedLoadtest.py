@@ -135,7 +135,8 @@ def launchInstances_old( authToken, nInstances, sshClientKeyName, filtersJson=No
         results['instancesAllocated'] = []
     return results
 
-def launchInstances( authToken, nInstances, sshClientKeyName, filtersJson=None ):
+def launchInstances( authToken, nInstances, sshClientKeyName,
+    filtersJson=None, encryptFiles=True ):
     returnCode = 13
     # call ncs launch via command-line
     #filtersArg = "--filter '" + filtersJson + "'" if filtersJson else " "
@@ -144,6 +145,7 @@ def launchInstances( authToken, nInstances, sshClientKeyName, filtersJson=None )
 
     cmd = [
         'ncs.py', 'sc', '--authToken', authToken, 'launch',
+        '--encryptFiles', str(encryptFiles),
         '--count', str(nInstances), # filtersArg,
         '--sshClientKeyName', sshClientKeyName, '--json'
     ]
@@ -269,6 +271,31 @@ def stopMaster( specs ):
     thread = specs.get('thread')
     if thread:
         thread.join()
+
+def genXmlReport( wasGood ):
+    '''preliminary version generates "fake" junit-style xml'''
+    templateProlog = '''<?xml version="1.0" ?>
+<testsuites>
+    <testsuite tests="1" errors="0" failures="%d" name="loadtests" >
+        <testcase classname="com.neocortix.loadtest" name="loadtest" time="1.0">
+    '''
+    templateFail = '''
+        <failure message="response time too high">Assertion failed</failure>
+    '''
+    templateEpilog = '''
+        </testcase>
+    </testsuite>
+</testsuites>
+    '''
+    if wasGood:
+        return (templateProlog % 0) + templateEpilog
+    else:
+        return (templateProlog % 1) + templateFail + templateEpilog
+
+def testsPass( args, loadTestStats ):
+    if loadTestStats.get('nReqsSatisfied', 0) <= 0:
+        return False
+    return loadTestStats.get('meanResponseTimeMs30', 99999) <= args.reqMsprMean
 
 def conductLoadtest( masterUrl, nWorkersWanted, usersPerWorker,
     startTimeLimit, susTime, stopWanted, nReqInstances, rampUpRate
@@ -448,6 +475,22 @@ def executeLoadtest( targetHostUrl, htmlOutFileName='ltStats.html' ):
                 except Exception as exc:
                     logger.warning( 'got exception from integrating plotting stats (%s) %s',
                         type(exc), exc, exc_info=False )
+                # extended plotting using the boss's code
+                try:
+                    cmd = [
+                        scriptDirPath()+'/plotLocustAnalysis.py',
+                        '--launchedFilePath', launchedJsonFilePath,
+                        '--mapFilePath', scriptDirPath()+'/WorldCountryBoundaries.csv',
+                        '--outDirPath', dataDirPath,
+                        '--statsFilePath', dataDirPath+'/locustStats.csv'
+                    ]
+                    plottingRc = subprocess.call( cmd, stdout=sys.stderr, stderr=subprocess.STDOUT )
+                    if plottingRc:
+                        logger.warning( 'plotLocustAnalysis returned RC %d', plottingRc )
+                except Exception as exc:
+                    logger.warning( 'got exception from extended plotting (%s) %s',
+                        type(exc), exc, exc_info=False )
+                
 
     except KeyboardInterrupt:
         logger.warning( '(ctrl-c) received, will shutdown gracefully' )
@@ -491,8 +534,12 @@ if __name__ == "__main__":
     ap.add_argument( '--usersPerWorker', type=int, default=35, help='# of simulated users per worker' )
     ap.add_argument( '--startTimeLimit', type=int, default=30, help='time to wait for startup of workers (in seconds)' )
     ap.add_argument( '--susTime', type=int, default=10, help='time to sustain the test after startup (in seconds)' )
+    ap.add_argument( '--reqMsprMean', type=float, default=1000, help='required ms per response' )
     ap.add_argument( '--testId', help='to identify this test' )
     args = ap.parse_args()
+    argsToSave = vars(args).copy()
+    del argsToSave['authToken']
+
 
     signal.signal( signal.SIGTERM, sigtermHandler )
 
@@ -500,6 +547,19 @@ if __name__ == "__main__":
 
     dataDirPath = 'data'
     launchedJsonFilePath = 'launched.json'
+
+    argsFilePath = os.path.join( dataDirPath, 'runDistributedLoadtest_args.json' )
+    with open( argsFilePath, 'w' ) as argsFile:
+        json.dump( argsToSave, argsFile, indent=2 )
+
+    xmlReportFilePath = dataDirPath + '/testResults.xml'
+    if os.path.isfile( xmlReportFilePath ):
+        try:
+            # delete old file
+            os.remove( xmlReportFilePath )
+        except Exception as exc:
+            logger.warning( 'exception while deleting old xml report file (%s) %s', type(exc), exc, exc_info=False )
+
     launchWanted = args.launch
 
     rampUpRate = args.rampUpRate
@@ -573,8 +633,10 @@ if __name__ == "__main__":
             if sshClientKeyName != args.sshClientKeyName:
                 logger.info( 'deleting sshClientKey %s', sshClientKeyName)
                 ncs.deleteSshClientKey( args.authToken, sshClientKeyName )
+            if rc:
+                logger.warning( 'launchInstances returned %d', rc )
         wellInstalled = []
-        if not sigtermSignaled():
+        if rc == 0 and not sigtermSignaled():
             wellInstalled = installPrereqs()
             logger.info( 'installPrereqs succeeded on %d instances', len( wellInstalled ))
 
@@ -587,6 +649,9 @@ if __name__ == "__main__":
             # do all the steps of the actual loadtest (the first of 2 if doing a comparison)
             loadTestStats = executeLoadtest( args.victimHostUrl )
             logger.info ( 'loadTestStatsA: %s', loadTestStats )
+            xml = genXmlReport( testsPass( args, loadTestStats ) )
+            with open( xmlReportFilePath, 'w' ) as outFile:
+                outFile.write( xml )
             if args.altTargetHostUrl:
                 # rename output files for the primary target
                 srcFilePath = os.path.join( dataDirPath, 'ltStats.html' )
@@ -663,7 +728,7 @@ if __name__ == "__main__":
                 subprocess.check_call( cmd, shell=True )
             except Exception as exc:
                 logger.error( 'purgeKnownHosts threw exception (%s) %s',type(exc), exc )
-    if loadTestStats and loadTestStats.get('nReqsSatisfied', 0) > 0:
+    if loadTestStats and loadTestStats.get('nReqsSatisfied', 0) > 0 and testsPass( args, loadTestStats ):
         rc = 0
     else:
         rc=1
