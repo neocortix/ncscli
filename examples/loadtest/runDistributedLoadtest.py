@@ -135,7 +135,8 @@ def launchInstances_old( authToken, nInstances, sshClientKeyName, filtersJson=No
         results['instancesAllocated'] = []
     return results
 
-def launchInstances( authToken, nInstances, sshClientKeyName, filtersJson=None ):
+def launchInstances( authToken, nInstances, sshClientKeyName,
+    filtersJson=None, encryptFiles=True ):
     returnCode = 13
     # call ncs launch via command-line
     #filtersArg = "--filter '" + filtersJson + "'" if filtersJson else " "
@@ -144,6 +145,7 @@ def launchInstances( authToken, nInstances, sshClientKeyName, filtersJson=None )
 
     cmd = [
         'ncs.py', 'sc', '--authToken', authToken, 'launch',
+        '--encryptFiles', str(encryptFiles),
         '--count', str(nInstances), # filtersArg,
         '--sshClientKeyName', sshClientKeyName, '--json'
     ]
@@ -631,8 +633,10 @@ if __name__ == "__main__":
             if sshClientKeyName != args.sshClientKeyName:
                 logger.info( 'deleting sshClientKey %s', sshClientKeyName)
                 ncs.deleteSshClientKey( args.authToken, sshClientKeyName )
+            if rc:
+                logger.warning( 'launchInstances returned %d', rc )
         wellInstalled = []
-        if not sigtermSignaled():
+        if rc == 0 and not sigtermSignaled():
             wellInstalled = installPrereqs()
             logger.info( 'installPrereqs succeeded on %d instances', len( wellInstalled ))
 
