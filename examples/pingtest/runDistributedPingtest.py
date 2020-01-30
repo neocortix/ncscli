@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-does distributed load testing using Locust on NCS instances
+does ping-based telemetry test using NCS instances
 """
 
 # standard library modules
@@ -67,7 +67,8 @@ def loadSshPubKey():
         contents = inFile.read()
     return contents
 
-def launchInstances( authToken, launchedJsonFilePath, nInstances, sshClientKeyName, filtersJson=None ):
+def launchInstances( authToken, launchedJsonFilePath, nInstances, sshClientKeyName,
+    filtersJson=None, encryptFiles=True ):
     returnCode = 13
     # call ncs launch via command-line
     #filtersArg = "--filter '" + filtersJson + "'" if filtersJson else " "
@@ -76,6 +77,7 @@ def launchInstances( authToken, launchedJsonFilePath, nInstances, sshClientKeyNa
 
     cmd = [
         'ncs.py', 'sc', '--authToken', authToken, 'launch',
+        '--encryptFiles', str(encryptFiles),
         '--count', str(nInstances), # filtersArg,
         '--sshClientKeyName', sshClientKeyName, '--json'
     ]
@@ -159,8 +161,8 @@ if __name__ == "__main__":
  
     ap.add_argument('--nPings', type=int, default=10, help='# of ping packets to send per instance')
     ap.add_argument('--interval', type=float, default=1, help='time (in seconds) between pings by an instance')
-    ap.add_argument('--timeLimit', type=float, default=10, help='maximum time (in seconds) to take (default=none (unlimited)')
-    ap.add_argument('--extraTime', type=float, help='extra (in seconds) for master to wait for results')
+    ap.add_argument('--timeLimit', type=float, default=10, help='maximum time (in seconds) to take per instance' )
+    ap.add_argument('--extraTime', type=float, help='extra time (in seconds) for master to wait for results')
     ap.add_argument('--fullDetails', type=boolArg, default=False, help='true for full details, false for summaries only')
     args = ap.parse_args()
     #logger.debug( 'args %s', args )
