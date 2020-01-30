@@ -89,9 +89,9 @@
     <br>
     <a href="#parameters" data-toggle="collapse"><span class="glyphicon glyphicon-cog"></span> Settings</a>
     <div id="parameters" class ="collapse" >
-        Width: <input id="width", class="margined" size=4 value=0 /> (zero for default)
+        Width: <input id="width", class="margined" size=4 value=0 /> (zero for .blend-file default)
         <br>
-        Height: <input id="height", class="margined" size=4 value=0 > (zero for default)
+        Height: <input id="height", class="margined" size=4 value=0 > (zero for .blend-file default)
         <br>
         <label for="fileType" hidden >
             Output File Type:
@@ -106,7 +106,21 @@
                 <input id="useCompositor" type="checkbox" checked disabled >Use Compositor
             </label>
         </div>
-        Minimum device performance: <input id="minDpr", class="margined" size=4 value=0 > (zero for default)
+        <div>
+            Minimum device performance: <input id="minDpr", class="margined" size=4 value=0 >
+            (zero for default)
+        </div>
+        <br>
+        <div>
+            Job Time Limit: 
+            <input id="jobTimeLimit" class="margined" size=3 >
+            (minutes)
+        </div>
+        <div>
+            Frame Time Limit: 
+            <input id="frameTimeLimit" class="margined" size=3 >
+            (minutes)
+        </div>
         <br><br>
   
         <label for="regions" >
@@ -207,11 +221,20 @@
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
 
 <script>
+//"use strict";
 var g_checkerTask = null;
 var g_availTask = null;
-var g_minDpr = 0;  //37 is "high", (Samsung GS6-class)); 47 is super-dpr
+var g_minDpr = 0;
 var g_defaultDpr = 47;  //37 is "high", (Samsung GS6-class)); 47 is super-dpr
 
+function getMinDpr() {
+    // get the global minimum dpr, return it or a default if zero
+    var minDpr = g_minDpr;
+    if ( minDpr <= 0 ) {
+        minDpr = g_defaultDpr;
+    }
+    return minDpr;
+}
 
 function onStatusBut() {
     var jobId = $('#jobId').val();
@@ -328,14 +351,40 @@ function onLaunchBut() {
         alert( 'please choose a Blender .blend file');
         return;
     }
-    var useCompositor = $('#useCompositor').prop( 'checked' );
-    // get the minimum dpr and do a sanity check on it
-    var minDpr = g_minDpr;
-    if ( minDpr <= 0 ) {
-        minDpr = g_defaultDpr;
+    var frameTimeLimit = $('#frameTimeLimit').val();
+    if (frameTimeLimit.length > 0) {
+        frameTimeLimit = frameTimeLimit.trim();
     }
+    else {
+        frameTimeLimit = 0;
+    }
+    if( isNaN(frameTimeLimit) ) {
+        frameTimeLimit = 0;
+    }
+    else {
+        frameTimeLimit = frameTimeLimit * 60;  // converts minutes to seconds
+    }
+    console.log( "frameTimeLimit", frameTimeLimit, "seconds" )
+
+    var jobTimeLimit = $('#jobTimeLimit').val();
+    if (jobTimeLimit.length > 0) {
+        jobTimeLimit = jobTimeLimit.trim();
+    }
+    else {
+        jobTimeLimit = 0;
+    }
+    if( isNaN(jobTimeLimit) ) {
+        jobTimeLimit = 0;
+    }
+    else {
+        jobTimeLimit = jobTimeLimit * 60;  // converts minutes to seconds
+    }
+    console.log( "jobTimeLimit", jobTimeLimit, "seconds" )
+
+    var useCompositor = $('#useCompositor').prop( 'checked' );
+    var minDpr = getMinDpr();
     var regions = $('#regions').val();
-    filterObj = {"regions": regions, "dpr": ">="+String(minDpr) };
+    var filterObj = {"regions": regions, "dpr": ">="+String(minDpr) };
     var filterArg = JSON.stringify( filterObj )
     //console.log( 'filterArg', filterArg )
 
@@ -355,6 +404,12 @@ function onLaunchBut() {
         width: width,
         nParFrames: nWorkers
     }
+    if (frameTimeLimit > 0) {
+        args.frameTimeLimit = frameTimeLimit;
+    }
+    if (jobTimeLimit > 0) {
+        args.timeLimit = jobTimeLimit;
+    }
 
     // read the blend file locally
     var deferred = jQuery.Deferred();
@@ -370,7 +425,7 @@ function onLaunchBut() {
     console.log( blendFile )
     
     reader.readAsDataURL(blendFile);
-    prom = deferred.promise();
+    var prom = deferred.promise();
 
 
     prom.done(function (encoded) {
@@ -417,14 +472,20 @@ function onRegionsChanged() {
 function onDprChanged() {
     console.log( "onDprChanged()" );
     var dpr = $('#minDpr').val();
-    if( dpr > 0 ) {
+    if (dpr.length > 0) {
+        dpr = dpr.trim();
+    }
+    // don't allow negative numbers or non-numbers
+    if( isNaN( dpr )) {
+        g_minDpr = 0;
+    }
+    else if( dpr >= 0 ) {
         g_minDpr = dpr;
     }
     else {
-        g_minDpr = g_defaultDpr;
+        g_minDpr = 0;
     }
-    console.log( "onDprChanged()", dpr );
-    console.log( "onDprChanged()", g_minDpr );
+    console.log( "onDprChanged()", dpr, g_minDpr );
     checkAvail()
 }
 
@@ -466,12 +527,8 @@ function checkAvail() {
     var url='./api/instances/available';
 
     var regions = $('#regions').val();
-    // get the minimum dpr and do a sanity check on it
-    var minDpr = g_minDpr;
-    if ( minDpr <= 0 ) {
-        minDpr = g_defaultDpr;
-    }
-    filterObj = {"regions": regions, "dpr": ">="+String(minDpr) };
+    var minDpr = getMinDpr();
+    var filterObj = {"regions": regions, "dpr": ">="+String(minDpr) };
     var filterArg = JSON.stringify( filterObj )
 
     var queryParams = { "filter": filterArg }
@@ -506,8 +563,11 @@ function saveSettings() {
     if( $('#fileType').val() ) {
         localStorage.setItem("fileType", $('#fileType').val() );
     }
+    localStorage.setItem("frameTimeLimit", $('#frameTimeLimit').val() );
     localStorage.setItem("height", $('#height').val() );
     localStorage.setItem("jobId", $('#jobId').val() );
+    localStorage.setItem("jobTimeLimit", $('#jobTimeLimit').val() );
+    localStorage.setItem("minDpr", $('#minDpr').val() );
     localStorage.setItem("nWorkers", $('#nWorkers').val() );
     localStorage.setItem("regions", $('#regions').val() );
     if( $('#seed').val().length ) {
@@ -522,6 +582,12 @@ function saveSettings() {
 function loadSettings() {
     $('#authToken').val( localStorage.getItem("authToken") );
     $('#fileType').val( localStorage.getItem("fileType") );
+    if( localStorage.getItem("frameTimeLimit") !== null )
+        $('#frameTimeLimit').val( localStorage.getItem("frameTimeLimit") );
+    if( localStorage.getItem("jobTimeLimit") !== null )
+        $('#jobTimeLimit').val( localStorage.getItem("jobTimeLimit") );
+    if( localStorage.getItem("minDpr") )
+        $('#minDpr').val( localStorage.getItem("minDpr") );
     if( localStorage.getItem("nWorkers") ) {
         $('#nWorkers').val( localStorage.getItem("nWorkers") );
     }
@@ -583,7 +649,7 @@ function on_ready() {
     $('#regions').change(onRegionsChanged);
     $('#minDpr').change(onDprChanged);
     loadSettings();
-    checkAvail();
+    onDprChanged();  // should only need checkAvail();
     g_availTask = setInterval( checkAvail, 15 * 1000 )
 }
 
