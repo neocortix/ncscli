@@ -458,7 +458,7 @@ if __name__ == "__main__":
     ap.add_argument('--fullDetails', type=boolArg, default=False, help='true for full details, false for summaries only')
     ap.add_argument('--interval', type=float, default=1, help='time (in seconds) between pings by an instance')
     ap.add_argument('--nPings', type=int, default=10, help='# of ping packets to send per instance')
-    ap.add_argument('--timeLimit', type=float, default=10, help='maximum time (in seconds) to take (default=none (unlimited)')
+    ap.add_argument('--timeLimit', type=float, default=10, help='maximum time (in seconds) to take per instance' )
     ap.add_argument('--targetHost', help='the hostname or ip addr to ping (default is this host)' )
     args = ap.parse_args()
     logger.info( "args: %s", str(args) )
