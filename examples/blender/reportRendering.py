@@ -659,7 +659,7 @@ if __name__ == "__main__":
             else:
                 testsDf.loc[ row.tag, 'nInstallerException'] = 0
             testsDf.loc[ row.tag, 'nInstallerFailed'] = installerStateCounts.get('installerFailed', 0)
-            testsDf.loc[ row.tag, 'nInstallerTimeout'] = installerStateCounts['installerTimeout']
+            testsDf.loc[ row.tag, 'nInstallerTimeout'] = installerStateCounts.get('installerTimeout', 0)
             testsDf.loc[ row.tag, 'installerMeanDurGood'] = \
                 installerSummaries[installerSummaries.state=='installed'].dur.mean()
 
@@ -873,8 +873,8 @@ if __name__ == "__main__":
         body += '%d instances requested\n' % nRequested
         stateCounts = installerSummaries.state.value_counts()
         #logger.info( 'instCodes %s', stateCounts )
-        body += '%d installed Blender\n' % (stateCounts['installed'])
-        body += '%d installerTimeout\n' % (stateCounts['installerTimeout'])
+        body += '%d installed Blender\n' % (stateCounts.get('installed', 0))
+        body += '%d installerTimeout\n' % (stateCounts.get('installerTimeout', 0))
         body += '%d installerFailed\n' % (stateCounts.get('installerFailed', 0))
         body += '%d installerException\n' % (stateCounts.get('installerException', 0))
         body += '\n'
