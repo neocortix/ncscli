@@ -306,7 +306,7 @@ function onStatusBut() {
         //console.log( "jx text", textStatus );
         //console.log( "jqxhr", jqxhr );
         //console.log( "jx responseJSON", jqxhr.responseJSON );
-        $('#state').text( 'could not get status from rendering master')
+        $('#state').text( 'could not get status from rendering master');
         })
 }
 
@@ -435,8 +435,9 @@ function onLaunchBut() {
         argsStr = JSON.stringify( args );
 
         console.log( "posting" )
+        $('#state').text( 'uploading')
         var jx = $.post(url, argsStr);  // argsStr
-        //console.log( "posting starting" )
+        console.log( "posting starting" )
         jx.done(function( data, textStatus, jqxhr ) {
             console.log( "posting done" )
             var jobId = data.id
