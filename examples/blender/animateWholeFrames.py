@@ -179,7 +179,7 @@ def launchInstances( authToken, nInstances, sshClientKeyName, launchedJsonFilepa
                         logger.warning( 'ncs return code %d', proc.returncode )
                 except subprocess.TimeoutExpired:
                     logger.warning( 'ncs launch did not terminate in time' )
-            time.sleep( 1 )
+            time.sleep( 2 )
         returnCode = proc.returncode
         if outFile:
             outFile.close()
@@ -310,7 +310,7 @@ def rsyncToRemote( srcFilePath, destFileName, inst, timeLimit ):
             stderr = stderr.decode('utf8')
             returnCode = proc.returncode
         except subprocess.TimeoutExpired:
-            proc.kill()
+            proc.kill()  #TODO need another timeout here
             returnCode = 124
             proc.communicate()  # ignoring any additional outputs
         except Exception as exc:
@@ -320,7 +320,7 @@ def rsyncToRemote( srcFilePath, destFileName, inst, timeLimit ):
         logger.warning( 'rsync returnCode %d', returnCode )
     return returnCode, stderr
 
-def scpFromRemote( srcFileName, destFilePath, inst, timeLimit=60 ):
+def scpFromRemote( srcFileName, destFilePath, inst, timeLimit=120 ):
     sshSpecs = inst['ssh']
     host = sshSpecs['host']
     port = sshSpecs['port']
@@ -358,10 +358,12 @@ def saveProgress():
         nFinished = len( g_framesFinished)
         if not nFinished:
             # kluge: take credit for a fraction of a frame, assuming installaton is finished
-            nFinished = 0.1  
+            nFinished = 0.1
+        nWorkersWorking = len( g_workingInstances )
         struc = {
             'nFramesFinished': nFinished,
-            'nFramesWanted': g_nFramesWanted
+            'nFramesWanted': g_nFramesWanted,
+            'nWorkersWorking': nWorkersWorking
         }
         with open( progressFilePath, 'w' ) as progressFile:
             json.dump( struc, progressFile )
@@ -369,15 +371,16 @@ def saveProgress():
 
 def renderFramesOnInstance( inst ):
     timeLimit=args.frameTimeLimit
+    rsyncTimeLimit = 1800  # was 240; have used 1800 for big files
     iid = inst['instanceId']
     abbrevIid = iid[0:16]
     g_workingInstances.append( iid )
+    saveProgress()
     logger.info( 'would render frames on instance %s', abbrevIid )
 
     # rsync the blend file, with standardized dest file name
     logFrameState( -1, 'rsyncing', iid, 0 )
     blendFileName = 'render.blend'  # was SpinningCube_002_c.blend 'cube0c.blend'
-    rsyncTimeLimit = 240  # have used 1800 for big files
     (rc, stderr) = rsyncToRemote( args.blendFilePath, blendFileName, inst, timeLimit=rsyncTimeLimit )
     if rc == 0:
         logFrameState( -1, 'rsynced', iid )
@@ -388,6 +391,7 @@ def renderFramesOnInstance( inst ):
         logOperation( 'terminateFailedWorker', iid, '<master>')
         ncs.terminateInstances( args.authToken, [iid] )
         g_workingInstances.remove( iid )
+        saveProgress()
         return -1  # go no further if we can't rsync to the worker
 
     def trackStderr( proc ):
@@ -426,7 +430,7 @@ def renderFramesOnInstance( inst ):
             logOperation( 'terminateFailedWorker', iid, '<master>')
             ncs.terminateInstances( args.authToken, [iid] )
             break
-        logger.info( '%s would claim a frame; %d done so far', abbrevIid, len( g_framesFinished) )
+        #logger.info( '%s would claim a frame; %d done so far', abbrevIid, len( g_framesFinished) )
         try:
             frameNum = g_framesToDo.popleft()
         except IndexError:
@@ -452,8 +456,8 @@ def renderFramesOnInstance( inst ):
                 'scene.render.resolution_x=%d; scene.render.resolution_y=%d; '\
                 'scene.render.resolution_percentage=100"' % (args.width, args.height)
         #cmd = 'blender -b -noaudio --version'
-        cmd = 'blender -b -noaudio --enable-autoexec %s %s -o %s -f %d' % \
-            (blendFileName, pyExpr, g_outFilePattern, frameNum)
+        cmd = 'blender -b -noaudio --enable-autoexec %s %s -o %s --render-format %s -f %d' % \
+            (blendFileName, pyExpr, g_outFilePattern, args.frameFileType, frameNum)
 
         logger.info( 'commanding %s', cmd )
         sshSpecs = inst['ssh']
@@ -469,6 +473,7 @@ def renderFramesOnInstance( inst ):
                             stdout=subprocess.PIPE,  # subprocess.PIPE subprocess.DEVNULL
                             stderr=subprocess.PIPE) as proc:
             frameProgress = 0
+            frameProgressReported = 0
             deadline = min( g_deadline, time.time() + timeLimit )
             stdoutThr = threading.Thread(target=trackStdout, args=(proc,))
             stdoutThr.start()
@@ -477,6 +482,9 @@ def renderFramesOnInstance( inst ):
             while time.time() < deadline:
                 proc.poll() # sets proc.returncode
                 if proc.returncode == None:
+                    if frameProgress > (frameProgressReported + .01):
+                        logger.info( 'frame %d on %s is %.1f %% done', frameNum, abbrevIid, frameProgress*100 )
+                        frameProgressReported = frameProgress
                     if (frameProgress < 0.01) or (frameProgress > 0.9):
                         logger.info( '%s is %.1f %% done', abbrevIid, frameProgress*100 )
                     if ((deadline - time.time() < timeLimit/2)) and frameProgress < .5:
@@ -489,7 +497,7 @@ def renderFramesOnInstance( inst ):
                     else:
                         logger.warning( 'remote %s gave returnCode %d', abbrevIid, proc.returncode )
                     break
-                time.sleep(1)
+                time.sleep(10)
             returnCode = proc.returncode if proc.returncode != None else 124
             if returnCode:
                 logger.warning( 'renderFailed for frame %d on %s', frameNum, iid )
@@ -533,10 +541,11 @@ def renderFramesOnInstance( inst ):
             nFailures += 1
     if iid in g_workingInstances:
         g_workingInstances.remove( iid )
+        saveProgress()
     return 0
 
-def encodeTo264( destDirPath, seed=0, frameFileType='png' ):
-    cmd = [ 'ffmpeg', '-y', '-framerate', '30',
+def encodeTo264( destDirPath, frameRate, seed=0, frameFileType='png' ):
+    cmd = [ 'ffmpeg', '-y', '-framerate', str(frameRate),
         '-i', destDirPath + '/rendered_frame_%%06d_seed_%d.%s'%(seed,frameFileType),
         '-c:v', 'libx264', '-preset', 'fast', '-pix_fmt', 'yuv420p', 
         '-b:v', '4000k',
@@ -566,8 +575,9 @@ if __name__ == "__main__":
     ap.add_argument( 'blendFilePath', help='the .blend file to render' )
     ap.add_argument( '--authToken', required=True, help='the NCS authorization token to use' )
     ap.add_argument( '--dataDir', help='output data darectory', default='./aniData/' )
-    ap.add_argument( '--encryptFiles', type=boolArg, default=True, help='whether to encrypt files on launched instances' )
+    ap.add_argument( '--encryptFiles', type=boolArg, default=False, help='whether to encrypt files on launched instances' )
     ap.add_argument( '--filter', help='json to filter instances for launch' )
+    ap.add_argument( '--frameRate', type=int, default=24, help='the frame rate (frames per second)' )
     ap.add_argument( '--frameTimeLimit', type=int, default=1800, help='amount of time (in seconds) allowed for each frame' )
     ap.add_argument( '--instTimeLimit', type=int, default=900, help='amount of time (in seconds) installer is allowed to take on instances' )
     ap.add_argument( '--jobId', help='to identify this job' )
@@ -674,15 +684,21 @@ if __name__ == "__main__":
         with open( dataDirPath + '/survivingInstances.json','w' ) as outFile:
             json.dump( list(g_releasedInstances), outFile )
 
-    if len(g_framesFinished):
-        encodeTo264( dataDirPath, args.seed, extensions[args.frameFileType] )
+    nFramesFinished = len(g_framesFinished)
+    if nFramesFinished:
+        encodeTo264( dataDirPath, args.frameRate, args.seed, extensions[args.frameFileType] )
 
     elapsed = time.time() - startTime
     logger.info( 'rendered %d frames using %d "good" instances', len(g_framesFinished), len(goodInstances) )
     logger.info( 'finished; elapsed time %.1f seconds (%.1f minutes)', elapsed, elapsed/60 )
     logOperation( 'finished',
         {'nInstancesRecruited': len(goodInstances),
-            'nInstancesSurviving': len(g_releasedInstances)
+            'nInstancesSurviving': len(g_releasedInstances),
+            'nFramesFinished': nFramesFinished
         },
         '<master>'
         )
+    if nFramesFinished == g_nFramesWanted:
+        sys.exit()
+    else:
+        sys.exit( 1 )
