@@ -663,12 +663,15 @@ if __name__ == "__main__":
             testsDf.loc[ row.tag, 'installerMeanDurGood'] = \
                 installerSummaries[installerSummaries.state=='installed'].dur.mean()
 
-
             allInstancesById.update( instancesAllocated )
+
             frameSummaryRecs = summarizeRenderingLog( instancesAllocated, row.rendererLog, row.tag )
             frameSummaries = pd.DataFrame( frameSummaryRecs )
             logger.info( 'frameSummaryRecs %d', len(frameSummaryRecs) )
             allFrameSummaries = allFrameSummaries.append( frameSummaryRecs )
+
+            nFramesFinished = len( frameSummaries[frameSummaries.frameState == 'retrieved'] )
+            testsDf.loc[ row.tag, 'nFramesFinished'] = nFramesFinished
 
             workerIids = frameSummaries.instanceId.unique()
             sumRecs = summarizeWorkers( workerIids, instancesAllocated, frameSummaries )
@@ -743,6 +746,14 @@ if __name__ == "__main__":
         {'instanceId': '<master>'}, hint=[('dateTime', pymongo.ASCENDING)] 
         )
     startDateTime = interpretDateTimeField( startingEvent['dateTime'] )
+
+    # get the parallelRender operation event
+    prEvent = logsDb[rendererCollName].find_one( 
+        {'args.parallelRender': {'$exists':True}, 'instanceId': '<master>'} 
+        )
+    prOp = prEvent['args']['parallelRender']
+    nFramesReq = prOp['nFramesReq']
+
     finishedEvent = logsDb[rendererCollName].find_one( 
         {'args.finished': {'$exists':True}, 'instanceId': '<master>'} 
         )
@@ -882,12 +893,15 @@ if __name__ == "__main__":
         nWorking = len(workerSummaries[workerSummaries.nGood > 0] )
         frameStateCounts = frameSummaries.frameState.value_counts()
         failureTypeCounts = frameSummaries[frameSummaries.frameState == 'renderFailed'].rc.value_counts()
+        nFramesFinished = len( frameSummaries[frameSummaries.frameState == 'retrieved'] )
         #logger.info( 'frameStateCounts %s', frameStateCounts )
         body += '%d did some rendering (%.1f %% of requested instances)\n' % \
             (nWorking, nWorking*100/nRequested )
         body += '\n'
-        body += '%d frame(s) rendered from %s\n' % \
-            (len(frameSummaries[frameSummaries.frameState == 'retrieved'] ), blendFilePath )
+        body += '%d frame(s) requested\n' % nFramesReq
+        body += '%d frame(s) rendered from %s\n' % (nFramesFinished, blendFilePath )
+        if nFramesFinished < nFramesReq:
+            body += '%d frame(s) were not finished\n' % (nFramesReq - nFramesFinished)
         body += '%d frame-render failure(s)\n' % frameStateCounts.get('renderFailed', 0)
         body += '(including %d timeout and %d ssh)\n' % (failureTypeCounts.get(124, 0), failureTypeCounts.get(255, 0))
         body += '%d frame-retrieve failure(s)\n' % frameStateCounts.get('retrieveFailed', 0)
@@ -898,13 +912,15 @@ if __name__ == "__main__":
         body += 'mean duration of good frame-render was %.1f minutes\n' % (meanDurGood/60)
 
         totWorkerTime = frameSummaries.dur.sum()
-        body += 'overall cost of rendering was %.1f worker-minutes per frame (including failures but not idle time)\n' % \
-            ((totWorkerTime/60) / frameStateCounts.get('retrieved', 0))
+        if frameStateCounts.get('retrieved', 0):
+            body += 'overall cost of rendering was %.1f worker-minutes per frame (including failures but not idle time)\n' % \
+                ((totWorkerTime/60) / frameStateCounts.get('retrieved', 0))
 
         renderingElapsedTime = (frameSummaries.endDateTime.max() - frameSummaries.endDateTime.min()).total_seconds()
         totInstSecs = (renderingElapsedTime*stateCounts['installed']) - terminationCredit
-        body += 'overall cost of rendering was %.1f worker-minutes per frame (including failures and idle time)\n' % \
-            ((totInstSecs/60) / frameStateCounts.get('retrieved', 0))
+        if frameStateCounts.get('retrieved', 0):
+            body += 'overall cost of rendering was %.1f worker-minutes per frame (including failures and idle time)\n' % \
+                ((totInstSecs/60) / frameStateCounts.get('retrieved', 0))
 
         body += '\nTiming Summary (durations in minutes)\n'
         eventTimings.append( eventTiming.eventTiming( 
