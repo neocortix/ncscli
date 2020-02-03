@@ -227,7 +227,7 @@ def getJobInfo( jobId ):
         with open( settingsFilePath, encoding='utf8' ) as settingsFile:
             settings = json.load( settingsFile )
             outFileName = settings.get( 'outVideoFileName' )
-            logger.info( 'outFileName %s', outFileName )
+            #logger.info( 'outFileName %s', outFileName )
             if outFileName:
                 outFilePath = dataDirPath( jobId ) + '/' + outFileName
                 found = os.path.isfile( outFilePath )
