@@ -265,13 +265,17 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted ):
         stepStatuses = tellInstances.tellInstances( startedInstances, installerCmd,
             resultsLogFilePath=dataDirPath+'/recruitInstances.jlog',
             download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
-            timeLimit=min(args.instTimeLimit, args.timeLimit), upload=None,
+            timeLimit=min(args.instTimeLimit, args.timeLimit), upload=None, stopOnSigterm=True,
             knownHostsOnly=True
             )
         # restore our handler because tellInstances may have overridden it
         signal.signal( signal.SIGTERM, sigtermHandler )
         if not stepStatuses:
             logger.warning( 'no statuses returned from installer')
+            startedIids = [inst['instanceId'] for inst in startedInstances]
+            logOperation( 'terminateBad', startedIids, '<recruitInstances>' )
+            ncs.terminateInstances( args.authToken, startedIids )
+            return []
         (goodOnes, badOnes) = triage( stepStatuses )
         #stepTiming.finish()
         #eventTimings.append(stepTiming)
@@ -421,6 +425,8 @@ def renderFramesOnInstance( inst ):
                 logStdout( line.rstrip(), iid )
     nFailures = 0    
     while len( g_framesFinished) < g_nFramesWanted:
+        if sigtermSignaled():
+            break
         if time.time() >= g_deadline:
             logger.warning( 'exiting thread because global deadline has passed' )
             break
@@ -496,6 +502,8 @@ def renderFramesOnInstance( inst ):
                         curFrameRendered = True
                     else:
                         logger.warning( 'remote %s gave returnCode %d', abbrevIid, proc.returncode )
+                    break
+                if sigtermSignaled():
                     break
                 time.sleep(10)
             returnCode = proc.returncode if proc.returncode != None else 124
