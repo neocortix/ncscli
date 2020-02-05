@@ -273,7 +273,7 @@ async def run_multiple_clients( instances, cmd, timeLimit=None, sshAgent=None,
     return statuses
 
 def tellInstances( instancesSpec, command, resultsLogFilePath, download, downloadDestDir,
-    jsonOut, sshAgent, timeLimit, upload, knownHostsOnly=False ):
+    jsonOut, sshAgent, timeLimit, upload, knownHostsOnly=False, stopOnSigterm=False ):
     '''tellInstances to upload, execute, and/or download, things'''
     args = locals().copy()
 
@@ -353,7 +353,8 @@ def tellInstances( instancesSpec, command, resultsLogFilePath, download, downloa
     # the main loop
     eventLoop = asyncio.get_event_loop()
     eventLoop.set_debug(True)
-    #eventLoop.add_signal_handler(signal.SIGTERM, sigtermHandler)
+    if stopOnSigterm:
+        eventLoop.add_signal_handler(signal.SIGTERM, sigtermHandler)
     try:
         statuses = eventLoop.run_until_complete(run_multiple_clients(
             startedInstances, program, scpSrcFilePath=upload,
