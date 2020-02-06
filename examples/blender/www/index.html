@@ -81,6 +81,8 @@
     <br>
     Start Frame # <input id="startFrame", class="margined" size=4 value=1 >
     End Frame # <input id="endFrame", class="margined" size=4 value=1 >
+    <br>
+    Frame Rate <input id="frameRate", class="margined" size=3 value=30 > (frames per second)
     <br><br>
     Blender .blend file to render:
     <br>
@@ -101,11 +103,6 @@
             <option value="other" >coming soon</option>
         </select>
         <input id="seed" hidden size=6 value=0 >
-        <div class="checkbox" hidden>
-            <label for="useCompositor" >
-                <input id="useCompositor" type="checkbox" checked disabled >Use Compositor
-            </label>
-        </div>
         <div>
             Minimum device performance: <input id="minDpr", class="margined" size=4 value=0 >
             (zero for default)
@@ -327,6 +324,10 @@ function onLaunchBut() {
     if (endFrame.length <= 0) {
         return;
     }
+    var frameRate = $('#frameRate').val();
+    if (frameRate.length <= 0) {
+        return;
+    }
     var width = $('#width').val();
     if (width.length <= 0) {
         return;
@@ -381,7 +382,6 @@ function onLaunchBut() {
     }
     console.log( "jobTimeLimit", jobTimeLimit, "seconds" )
 
-    var useCompositor = $('#useCompositor').prop( 'checked' );
     var minDpr = getMinDpr();
     var regions = $('#regions').val();
     var filterObj = {"regions": regions, "dpr": ">="+String(minDpr) };
@@ -400,6 +400,7 @@ function onLaunchBut() {
         filter: filterArg,
         startFrame: startFrame,
         endFrame: endFrame,
+        frameRate: frameRate,
         height: height,
         width: width,
         nParFrames: nWorkers
@@ -576,7 +577,7 @@ function saveSettings() {
     }
     localStorage.setItem("startFrame", $('#startFrame').val() );
     localStorage.setItem("endFrame", $('#endFrame').val() );
-    localStorage.setItem("useCompositor", $('#useCompositor').prop('checked') );
+    localStorage.setItem("frameRate", $('#frameRate').val() );
     localStorage.setItem("width", $('#width').val() );
 }
 
@@ -609,12 +610,8 @@ function loadSettings() {
     if( localStorage.getItem("endFrame") ) {
         $('#endFrame').val( localStorage.getItem("endFrame") );
     }
-    if( localStorage.getItem("useCompositor") == "false" ) {
-        $('#useCompositor').prop('checked', false);
-    }
-    else {
-        $('#useCompositor').prop('checked', true);
-    }
+    if( localStorage.getItem("frameRate") !== null )
+        $('#frameRate').val( localStorage.getItem("frameRate") );
 }
 
 function isUrlValid( arg ){
