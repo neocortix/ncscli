@@ -144,11 +144,12 @@
     <button id="statusBut" >Get Status</button>
 
     <div id="results">
-        <video id="outputVideo" width="640" hidden controls >
-            Your browser does not support the video tag
-        </video>
-        <div id="plotDiv">
-            <img id="plotImg" style="width: 100%; padding: 4px;" hidden src="favicon.ico" >
+        <div id="outputDiv" hidden >
+            <video id="outputVideo" width="640" controls >
+                Your browser does not support the video tag
+            </video>
+            <br>
+            <a id="zippedFramesBut" href="" ><span class="glyphicon glyphicon-download-alt"></span> Download zipped frames</a>
         </div>
         <h4>state</h4>
         <pre id="state">(no query done)</pre>
@@ -279,22 +280,27 @@ function onStatusBut() {
                     imgUrl = './' + data["outputVidUrl"];
                     console.log( "outputVidUrl", imgUrl )
                 }
+                var outputZipUrl = urlPrefix + jobId + '/rendered_frames.zip'; // fallback
+                if( data["outputZipUrl"] ) {
+                    imgUrl = './' + data["outputZipUrl"];
+                    console.log( "outputZipUrl", outputZipUrl )
+                }
                 if( nFramesFinished > 0 ) {
                     $('#outputVideo').attr( "src", imgUrl );
-                    //var absUrlStr = new URL(imgUrl, window.location.href).href
-                    //$('#outputVideo').attr( "alt", absUrlStr );
-                    $('#outputVideo').show();
+                    var absUrlStr = new URL(outputZipUrl, window.location.href).href
+                    $('#zippedFramesBut').attr( "href", absUrlStr );
+                    $('#outputDiv').show();
                 }
             }
             else {
-                $('#outputVideo').hide();
+                $('#outputDiv').hide();
             }
         }
         else {
             $('#state').empty()
             $('#stdout').empty()
             $('#stderr').text( data)
-            $('#outputVideo').hide();
+            $('#outputDiv').hide();
         }
     })
     jx.fail(function( jqxhr, textStatus, error ) {
@@ -390,9 +396,10 @@ function onLaunchBut() {
 
     // reset the output elements
     $('#progress').attr( "value", 0 );  // makes sure it has the attribute, before removing it
+    $('#jobId').empty("");
     $('#stderr').empty("");
     $('#stdout').empty("");
-    $('#outputVideo').hide();
+    $('#outputDiv').hide();
 
     var url='./api/jobs/';
     var args = {
