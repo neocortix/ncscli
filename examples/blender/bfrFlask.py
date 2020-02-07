@@ -1,6 +1,7 @@
 import base64
 import datetime
 import enum
+import glob
 import json
 import logging
 import os
@@ -10,6 +11,7 @@ import sys
 import time
 import subprocess
 import uuid
+import zipfile
 
 # third-party imports
 import dateutil.parser
@@ -74,9 +76,27 @@ def jobHandler( jobId ):
         returns = stopJob( jobId )
         return returns
 
+def zipThese( fileList, archivePath ):
+    '''zips listed files into an archive (with 'w' mode)'''
+    # files in the list should all come from the same directory, or otherwise avid basename conflicts
+    with zipfile.ZipFile( archivePath, 'w', \
+        compression=zipfile.ZIP_DEFLATED ) as zipper:
+        for inFilePath in fileList:
+            arcName = os.path.basename( inFilePath )
+            zipper.write( inFilePath, arcname=arcName )
+
 @app.route('/api/jobs/<jobId>/<fileName>' )
 def jobFileHandler( jobId, fileName ):
-    logger.info( 'handling a request %s ', flask.request )
+    logger.info( 'would retrieve file "%s"', fileName )
+    if fileName == 'rendered_frames.zip':
+        try:
+            pngFiles = glob.glob( os.path.join( dataDirPath( jobId ), 'rendered_frame_*.png') )
+            archivePath = os.path.join( dataDirPath( jobId ), fileName )
+            zipThese( pngFiles, archivePath )
+        except Exception as exc:
+            logger.warning( 'exception creating zip (%s) %s ', type(exc), exc )
+            return jsonify('could not write zip file'), 404
+
     return flask.send_from_directory( dataDirPath( jobId ), fileName )
 
 
