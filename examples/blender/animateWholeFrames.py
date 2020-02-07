@@ -50,9 +50,7 @@ global resultsLogFile
 class g_:
     signaled = False
 g_deadline = None
-g_releasedInstances = collections.deque()
 g_workingInstances = collections.deque()
-g_releasedInstancesLock = threading.Lock()
 g_progressFileLock = threading.Lock()
 
 g_framesToDo = collections.deque()
@@ -136,10 +134,6 @@ def boolArg( v ):
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
-def scriptDirPath():
-    '''returns the absolute path to the directory containing this script'''
-    return os.path.dirname(os.path.realpath(__file__))
-
 def loadSshPubKey():
     '''returns the contents of current user public ssh client key'''
     pubKeyFilePath = os.path.expanduser( '~/.ssh/id_rsa.pub' )
@@ -188,12 +182,6 @@ def launchInstances( authToken, nInstances, sshClientKeyName, launchedJsonFilepa
         returnCode = 99
     return returnCode
 
-def recycleInstances( instances ):
-    iids = [inst['instanceId'] for inst in instances]
-    logOperation( 'recycleInstances', iids, '<master>' )
-    with g_releasedInstancesLock:
-        g_releasedInstances.extend( instances )
-
 def triage( statuses ):
     ''' separates good tellInstances statuses from bad ones'''
     goodOnes = []
@@ -232,7 +220,9 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted ):
         #logResult( 'operation', {'launchInstances': nWorkersWanted}, '<recruitInstances>' )
         logOperation( 'launchInstances', nWorkersWanted, '<recruitInstances>' )
         rc = launchInstances( args.authToken, nWorkersWanted,
-            sshClientKeyName, launchedJsonFilePath, filtersJson=args.filter )
+            sshClientKeyName, launchedJsonFilePath, filtersJson=args.filter,
+            encryptFiles = args.encryptFiles
+            )
         if rc:
             logger.debug( 'launchInstances returned %d', rc )
         # delete sshClientKey only if we just uploaded it
@@ -288,8 +278,8 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted ):
         if badIids:
             logOperation( 'terminateBad', badIids, '<recruitInstances>' )
             ncs.terminateInstances( args.authToken, badIids )
-        if goodInstances:
-            recycleInstances( goodInstances )
+        #if goodInstances:
+        #    recycleInstances( goodInstances )
     return goodInstances
 
 def rsyncToRemote( srcFilePath, destFileName, inst, timeLimit ):
@@ -301,15 +291,14 @@ def rsyncToRemote( srcFilePath, destFileName, inst, timeLimit ):
     srcFilePathFull = os.path.realpath(os.path.abspath( srcFilePath ))
     remote_filename = user + '@' + host + ':~/' + destFileName
     cmd = ' '.join(['rsync -acq', '-e', '"ssh -p %d"' % port, srcFilePathFull, remote_filename])
-    # just for testing
-    #cmd += '; >&2 echo "humbug"; exit 101'
-    logger.info( 'rsyncing %s', cmd )
+    logger.info( 'rsyncing to %s', inst['instanceId'] )
+    #logger.debug( 'rsyncing %s', cmd )  # would spill the full path
     returnCode = None
     stderr=''
     with subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE )as proc:
         try:
             (stdout, stderr) = proc.communicate( timeout=timeLimit )
-            logger.info( 'stdout %s, stderr %s', stdout, stderr )
+            #logger.info( 'stdout %s, stderr %s', stdout, stderr )
             stdout = stdout.decode('utf8')
             stderr = stderr.decode('utf8')
             returnCode = proc.returncode
@@ -334,7 +323,8 @@ def scpFromRemote( srcFileName, destFilePath, inst, timeLimit=120 ):
     cmd = [ 'scp', '-P', str(port), user+'@'+host+':~/'+srcFileName,
         destFilePathFull
     ]
-    logger.info( 'SCPing %s', cmd )
+    logger.info( 'SCPing from %s', inst['instanceId'] )
+    #logger.debug( 'SCPing %s', cmd )  # would spill the full path
     returnCode = None
     stderr=''
     with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE )as proc:
@@ -375,7 +365,7 @@ def saveProgress():
 
 def renderFramesOnInstance( inst ):
     timeLimit=args.frameTimeLimit
-    rsyncTimeLimit = 1800  # was 240; have used 1800 for big files
+    rsyncTimeLimit = 18000  # was 240; have used 1800 for big files
     iid = inst['instanceId']
     abbrevIid = iid[0:16]
     g_workingInstances.append( iid )
@@ -488,20 +478,18 @@ def renderFramesOnInstance( inst ):
             while time.time() < deadline:
                 proc.poll() # sets proc.returncode
                 if proc.returncode == None:
-                    if frameProgress > (frameProgressReported + .01):
+                    if frameProgress > min( .99, frameProgressReported + .01 ):
                         logger.info( 'frame %d on %s is %.1f %% done', frameNum, abbrevIid, frameProgress*100 )
                         frameProgressReported = frameProgress
-                    if (frameProgress < 0.01) or (frameProgress > 0.9):
-                        logger.info( '%s is %.1f %% done', abbrevIid, frameProgress*100 )
                     if ((deadline - time.time() < timeLimit/2)) and frameProgress < .5:
-                        logger.warning( '%s SEEMS SLOW for frame %d', abbrevIid, frameNum )
+                        logger.warning( 'frame %d on %s seems slow', frameNum, abbrevIid )
                         logFrameState( frameNum, 'seemsSlow', iid, frameProgress )
                 else:
                     if proc.returncode == 0:
-                        logger.info( 'remote %s succeeded on frame %d', abbrevIid, frameNum )
+                        logger.info( 'frame %d on %s succeeded', frameNum, abbrevIid )
                         curFrameRendered = True
                     else:
-                        logger.warning( 'remote %s gave returnCode %d', abbrevIid, proc.returncode )
+                        logger.warning( 'instance %s gave returnCode %d', abbrevIid, proc.returncode )
                     break
                 if sigtermSignaled():
                     break
@@ -528,8 +516,6 @@ def renderFramesOnInstance( inst ):
         # may not need this logging here
         if returnCode != 0:
             logger.warning( 'blender returnCode %d for %s', returnCode, abbrevIid )
-        else:
-            logger.info( 'ok' )
         if curFrameRendered:
             logFrameState( frameNum, 'retrieving', iid )
             (returnCode, stderr) = scpFromRemote( 
@@ -552,12 +538,13 @@ def renderFramesOnInstance( inst ):
         saveProgress()
     return 0
 
-def encodeTo264( destDirPath, frameRate, seed=0, frameFileType='png' ):
+def encodeTo264( destDirPath, destFileName, frameRate, kbps=30000, seed=0, frameFileType='png' ):
+    kbpsParam = str(kbps)+'k'
     cmd = [ 'ffmpeg', '-y', '-framerate', str(frameRate),
         '-i', destDirPath + '/rendered_frame_%%06d_seed_%d.%s'%(seed,frameFileType),
         '-c:v', 'libx264', '-preset', 'fast', '-pix_fmt', 'yuv420p', 
-        '-b:v', '4000k',
-        destDirPath + '/rendered_4mbps.mp4'
+        '-b:v', kbpsParam,
+        os.path.join( destDirPath, destFileName )
     ]
     try:
         subprocess.check_call( cmd,
@@ -625,6 +612,7 @@ if __name__ == "__main__":
     signal.signal( signal.SIGTERM, sigtermHandler )
     myPid = os.getpid()
     logger.info('procID: %s', myPid)
+    logger.info('jobID: %s', args.jobId)
 
     progressFilePath = dataDirPath + '/progress.json'
     settingsJsonFilePath = dataDirPath + '/settings.json'
@@ -665,7 +653,7 @@ if __name__ == "__main__":
     logger.info( 'g_framesToDo %s', g_framesToDo )
 
     settingsToSave = argsToSave.copy()
-    settingsToSave['outVideoFileName'] = 'rendered_4mbps.mp4'
+    settingsToSave['outVideoFileName'] = 'rendered_preview.mp4'
     with open( settingsJsonFilePath, 'w' ) as settingsFile:
         json.dump( settingsToSave, settingsFile )
 
@@ -683,25 +671,27 @@ if __name__ == "__main__":
             parResultList = list( parIter )
 
     if args.launch:
-        logger.info( 'terminating %d instances', len( g_releasedInstances) )
-        iids = [inst['instanceId'] for inst in g_releasedInstances]
-        logOperation( 'terminateFinal', iids, '<master>' )
-        #runDistributedBlender.terminateThese( args.authToken, g_releasedInstances )
-        ncs.terminateInstances( args.authToken, iids )
+        if not goodInstances:
+            logger.info( 'no good instances to terminate')
+        else:
+            logger.info( 'terminating %d instances', len( goodInstances) )
+            iids = [inst['instanceId'] for inst in goodInstances]
+            logOperation( 'terminateFinal', iids, '<master>' )
+            ncs.terminateInstances( args.authToken, iids )
     else:
         with open( dataDirPath + '/survivingInstances.json','w' ) as outFile:
-            json.dump( list(g_releasedInstances), outFile )
+            json.dump( list(goodInstances), outFile )
 
     nFramesFinished = len(g_framesFinished)
     if nFramesFinished:
-        encodeTo264( dataDirPath, args.frameRate, args.seed, extensions[args.frameFileType] )
+        encodeTo264( dataDirPath, settingsToSave['outVideoFileName'], 
+            args.frameRate, seed=args.seed, frameFileType=extensions[args.frameFileType] )
 
     elapsed = time.time() - startTime
     logger.info( 'rendered %d frames using %d "good" instances', len(g_framesFinished), len(goodInstances) )
     logger.info( 'finished; elapsed time %.1f seconds (%.1f minutes)', elapsed, elapsed/60 )
     logOperation( 'finished',
         {'nInstancesRecruited': len(goodInstances),
-            'nInstancesSurviving': len(g_releasedInstances),
             'nFramesFinished': nFramesFinished
         },
         '<master>'
