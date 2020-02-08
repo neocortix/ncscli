@@ -63,15 +63,15 @@ def demuxResults( collection ):
         if 'returncode' in decoded:
             rc = decoded['returncode']
             if rc:
-                logger.info( 'returncode %d for %s', rc, iid )
+                #logger.info( 'returncode %d for %s', rc, iid )
                 badOnes.add( iid )
         if 'exception' in decoded:
-            logger.info( 'exception %s for %s', decoded['exception'], iid )
+            #logger.info( 'exception %s for %s', decoded['exception'], iid )
             badOnes.add( iid )
         if 'timeout' in decoded:
             #logger.info( 'timeout %s for %s', decoded['timeout'], iid )
             badOnes.add( iid )
-    logger.info( 'topLevelKeys %s', topLevelKeys )
+    #logger.info( 'topLevelKeys %s', topLevelKeys )
     return byInstance, badOnes
 
 def getCountryCodeGoogle( lat, lon ):
@@ -134,7 +134,7 @@ def summarizeInstallerLog( eventsByInstance, instancesByIid, installerCollName )
                 tellInstancesDateTime = interpretDateTimeField( event['dateTime'] )
                 try:
                     launchedIids = event["operation"][1]["args"]["instanceIds"]
-                    logger.info( '%d instances were launched', len(launchedIids) )
+                    #logger.info( '%d instances were launched', len(launchedIids) )
                 except Exception as exc:
                     logger.info( 'exception ignored for tellInstances op (%s)', type(exc) )
             if 'operation' in event and 'connect' in event['operation']:
@@ -373,7 +373,12 @@ def summarizeWorkers( _workerIids, instances, frameSummaries ):
         #if len( iid ) > 1:
         #    logger.warning( 'more than one instanceId for device %d in frameSummaries', devId)
         iid = iid[0]
-        dpr = instances[iid].get('dpr')
+        inst = instances[iid]
+        dpr = inst.get('dpr')
+        if 'ram' in inst:
+            ramTotal = inst['ram'].get('total', 0) / 1000000
+        else:
+            ramTotal = 0
         blendFilePaths = subset.blendFilePath.unique()
         if len( blendFilePaths ) > 1:
             logger.warning( 'more than one blendFilePath in frameSummaries')
@@ -397,10 +402,12 @@ def summarizeWorkers( _workerIids, instances, frameSummaries ):
             meanDurGood
             )
         '''
-        sumRec = { 'devId': devId, 'dpr': dpr, 'blendFilePath': blendFilePath,
+        sumRec = { 'devId': devId, 'instanceId': iid, 'dpr': dpr,
+            'blendFilePath': blendFilePath,
             'nAttempts': nAttempts, 'nGood': len(successes), 'nRenderFailed': nRenderFailed,
             'nRetrieveFailed': nRetrieveFailed, 'nRsyncFailed': nRsyncFailed, 'nSlow': nSlow,
-            'meanDurGood': meanDurGood, 'earliest':earliest, 'latest':latest
+            'meanDurGood': meanDurGood, 'earliest':earliest, 'latest':latest,
+            'ramTotal': ramTotal
         }
         sumRecs.append( sumRec )
     return sumRecs
@@ -427,13 +434,6 @@ def plotRenderTimes( framesDf, terminationOps, outFilePath ):
     rowHeight = 1
     yMargin = .25
     yMax = nDevices*rowHeight + yMargin
-    ax.set_ylim( 0, yMax )
-    yTickLocs = np.arange( rowHeight/2, nDevices*rowHeight, rowHeight)
-    plt.yticks( yTickLocs, devIds )
-    tickLocator10 = mpl.ticker.MultipleLocator(60)
-    ax.xaxis.set_minor_locator( tickLocator10 )
-    ax.xaxis.set_major_locator( mpl.ticker.MultipleLocator(600) )
-    ax.xaxis.set_ticks_position( 'both' )
     alpha = .6
     
     # get the xMin and xMax from the union of all device time ranges
@@ -451,7 +451,15 @@ def plotRenderTimes( framesDf, terminationOps, outFilePath ):
     xMax = max( xMax, pdTimeToSeconds( allStartTimes.max() ) ) # + 40
     ax.set_xlim( xMin, xMax )
     ax.set_xlim( 0, xMax-xMin )
-    
+
+    ax.set_ylim( 0, yMax )
+    yTickLocs = np.arange( rowHeight/2, nDevices*rowHeight, rowHeight)
+    plt.yticks( yTickLocs, devIds )
+    tickLocator1 = mpl.ticker.MultipleLocator(600)
+    ax.xaxis.set_minor_locator( tickLocator1 )
+    ax.xaxis.set_major_locator( mpl.ticker.MultipleLocator(1800) )
+    ax.xaxis.set_ticks_position( 'both' )
+
     jobColors = { 'retrieved': 'tab:cyan', 'rsynced': 'tab:blue',
                  'renderFailed': 'tab:red', 'rsyncFailed': 'tab:orange', 'retrieveFailed': 'tab:pink' }
     jiggers = { 'renderFailed': .1, 'rsyncFailed': .1, 'retrieveFailed': .1 }
@@ -681,8 +689,8 @@ if __name__ == "__main__":
 
         #print( allFrameSummaries.info() )
         allInstallerSummaries.to_csv( installerSummariesFilePath, index=False, date_format=isoFormat )
-        print( testsDf.info() )
-        print( testsDf )
+        #print( testsDf.info() )
+        #print( testsDf )
         testsDf.to_csv( testSummariesFilePath, index=False, date_format=isoFormat )
         plotTestHistory( testsDf, testSummariesPngFilePath )
 
@@ -716,6 +724,8 @@ if __name__ == "__main__":
             logger.warning( 'no instance ID in input record')
             continue
         iid = inRec['instanceId']
+        dpr = instanceDpr( inRec )
+        inRec['dpr'] = dpr
         instancesAllocated[ iid ] = inRec
     logger.info( 'found %d instances in collection %s', len(instancesAllocated), launchedCollName )
     
@@ -804,7 +814,7 @@ if __name__ == "__main__":
         terminationCredit += (terminationDateTime - tdt).total_seconds()
     logger.info( 'terminationCredit: %.1f seconds (%.1f minutes)',
         terminationCredit, terminationCredit/60 )
-    logger.info( 'early terminations (%d) %s', len(terminations), terminations )
+    #logger.info( 'early terminations (%d) %s', len(terminations), terminations )
 
     # summarize renderer events into a table
     sumRecs = summarizeRenderingLog( instancesAllocated, rendererCollName, tag=args.tag )
@@ -819,35 +829,38 @@ if __name__ == "__main__":
     workerIids = list( frameSummaries.instanceId.unique() )
     #workerIids = [iid for iid in byInstance.keys() if '<' not in iid]
 
-    # traverse the workers and generate a summary table
-    sumRecs = []
-    for iid in sorted( workerIids ):
-        devId = instancesAllocated[iid].get( 'device-id' )
-        dpr = instancesAllocated[iid].get( 'dpr' )
-        subset = frameSummaries[ frameSummaries.instanceId == iid ]
-        #nAttempts = len( subset )
-        nAttempts = len( frameSummaries[ (frameSummaries.instanceId == iid) & (frameSummaries.frameNum >=0) ]  )
-        nRenderFailed = (subset.frameState=='renderFailed').sum()
-        nRetrieveFailed = (subset.frameState=='retrieveFailed').sum()
-        nRsyncFailed = (subset.frameState=='rsyncFailed').sum()
-        successes = subset[ subset.frameState == 'retrieved']
-        meanDurGood = successes.dur.mean()
-        if math.isnan( meanDurGood ):
-            meanDurGood = 0  # force nans to zero
-        '''
-        logger.debug( '%s dev %d, %d attempts, %d good, %d renderFailed, %d other, %.1f meanDurGood',
-            iid[0:16], devId, nAttempts, len(successes),
-            nRenderFailed, nRetrieveFailed+nRsyncFailed,
-            meanDurGood
-            )
-        '''
-        sumRec = { 'instanceId': iid, 'devId': devId, 'dpr': dpr,
-            'blendFilePath': blendFilePath,
-            'nAttempts': nAttempts, 'nGood': len(successes), 'nRenderFailed': nRenderFailed,
-            'nRetrieveFailed': nRetrieveFailed, 'nRsyncFailed': nRsyncFailed,
-            'meanDurGood': meanDurGood
-        }
-        sumRecs.append( sumRec )
+    if True:
+        sumRecs = summarizeWorkers( None, instancesAllocated, frameSummaries )
+    else:
+        # traverse the workers and generate a summary table
+        sumRecs = []
+        for iid in sorted( workerIids ):
+            devId = instancesAllocated[iid].get( 'device-id' )
+            dpr = instancesAllocated[iid].get( 'dpr' )
+            subset = frameSummaries[ frameSummaries.instanceId == iid ]
+            #nAttempts = len( subset )
+            nAttempts = len( frameSummaries[ (frameSummaries.instanceId == iid) & (frameSummaries.frameNum >=0) ]  )
+            nRenderFailed = (subset.frameState=='renderFailed').sum()
+            nRetrieveFailed = (subset.frameState=='retrieveFailed').sum()
+            nRsyncFailed = (subset.frameState=='rsyncFailed').sum()
+            successes = subset[ subset.frameState == 'retrieved']
+            meanDurGood = successes.dur.mean()
+            if math.isnan( meanDurGood ):
+                meanDurGood = 0  # force nans to zero
+            '''
+            logger.debug( '%s dev %d, %d attempts, %d good, %d renderFailed, %d other, %.1f meanDurGood',
+                iid[0:16], devId, nAttempts, len(successes),
+                nRenderFailed, nRetrieveFailed+nRsyncFailed,
+                meanDurGood
+                )
+            '''
+            sumRec = { 'instanceId': iid, 'devId': devId, 'dpr': dpr,
+                'blendFilePath': blendFilePath,
+                'nAttempts': nAttempts, 'nGood': len(successes), 'nRenderFailed': nRenderFailed,
+                'nRetrieveFailed': nRetrieveFailed, 'nRsyncFailed': nRsyncFailed,
+                'meanDurGood': meanDurGood
+            }
+            sumRecs.append( sumRec )
     workerSummaries = pd.DataFrame( sumRecs )
     if workerSummariesFilePath:
         workerSummaries.to_csv( workerSummariesFilePath, index=False )
