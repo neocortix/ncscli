@@ -36,6 +36,7 @@ jsonify = flask.json.jsonify  # handy alias
 g_workingDirPath = os.getcwd() + '/bfrData'
 #g_dataDirPath = os.getcwd() + '/data'
 g_minDpr = 37
+g_minRamMB = 4000
 g_engineScriptName = 'animateWholeFrames.py'
 
 @app.route('/')
@@ -95,7 +96,8 @@ def jobFileHandler( jobId, fileName ):
             zipThese( pngFiles, archivePath )
         except Exception as exc:
             logger.warning( 'exception creating zip (%s) %s ', type(exc), exc )
-            return jsonify('could not write zip file'), 404
+            # presuming the problem is temporary, return a 503 Service Unavailable
+            return ( jsonify('temporarily busy'), 503, {'Retry-After': 1} )
 
     return flask.send_from_directory( dataDirPath( jobId ), fileName )
 
@@ -124,6 +126,13 @@ def applyDprIfNone( filtersJson, minDpr ):
     filters = json.loads( filtersJson )
     if 'dpr' not in filters:
         filters['dpr'] = '>=%d' % minDpr
+    return json.dumps( filters )
+
+def applyMinRamIfNone( filtersJson, minRamMB ):
+    '''add a minimum ram specification to the filtersJson, if it doesn't have one already)'''
+    filters = json.loads( filtersJson )
+    if 'ram' not in filters:
+        filters['ram'] = '>=%d' % (minRamMB * 1000000)
     return json.dumps( filters )
 
 def findRunningScript( targets ):
@@ -202,6 +211,7 @@ def getInstancesAvailable( authToken, args ):
         return jsonify('no authToken provided'), 401
     filtersJson = args.get('filter', None)
     filtersJson = applyDprIfNone( filtersJson, g_minDpr )
+    filtersJson = applyMinRamIfNone( filtersJson, g_minRamMB )
     #if not filtersJson:
     #    return jsonify('missing filter arg'), 422
     callTime = time.time()
@@ -304,6 +314,7 @@ def launchJob( args ):
             if key != 'dataUri':
                 if key == 'filter':
                     val = applyDprIfNone( val, g_minDpr )
+                    val = applyMinRamIfNone( val, g_minRamMB )
                 argsStr += ' --' + key + " '" + str(val) + "'"
         logger.info( 'argsStr: %s', argsStr )
     else:
