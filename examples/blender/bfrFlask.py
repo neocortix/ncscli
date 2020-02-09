@@ -90,6 +90,7 @@ def zipThese( fileList, archivePath ):
 def jobFileHandler( jobId, fileName ):
     logger.info( 'would retrieve file "%s"', fileName )
     if fileName == 'rendered_frames.zip':
+        # create this on-demand each time because pre-creating it wastes space and caching is tricky
         try:
             pngFiles = glob.glob( os.path.join( dataDirPath( jobId ), 'rendered_frame_*.png') )
             archivePath = os.path.join( dataDirPath( jobId ), fileName )
@@ -98,7 +99,17 @@ def jobFileHandler( jobId, fileName ):
             logger.warning( 'exception creating zip (%s) %s ', type(exc), exc )
             # presuming the problem is temporary, return a 503 Service Unavailable
             return ( jsonify('temporarily busy'), 503, {'Retry-After': 1} )
+        else:
+            return flask.send_from_directory( dataDirPath( jobId ), fileName )
 
+    # screen by extension, to avoid exfiltrating sensitive data
+    allowedExtensions = [ '.exr', '.jpg', '.mp4', '.png']
+    ext = os.path.splitext( fileName )[1]
+    logger.info( 'ext: %s; fileName: %s', ext, fileName )
+
+    if ext not in allowedExtensions:
+        flask.abort( 404 )
+        #return jsonify('the requested resource is not available'), 404
     return flask.send_from_directory( dataDirPath( jobId ), fileName )
 
 
