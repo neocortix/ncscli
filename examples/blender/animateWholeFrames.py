@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-anaimates using distributed blender rendering (assigning whole frames to instances)
+animates using distributed blender rendering (assigning whole frames to instances)
 """
 
 # standard library modules
@@ -538,9 +538,11 @@ def renderFramesOnInstance( inst ):
         saveProgress()
     return 0
 
-def encodeTo264( destDirPath, destFileName, frameRate, kbps=30000, seed=0, frameFileType='png' ):
+def encodeTo264( destDirPath, destFileName, frameRate, kbps=30000, seed=0,
+    frameFileType='png', startFrame=0 ):
     kbpsParam = str(kbps)+'k'
     cmd = [ 'ffmpeg', '-y', '-framerate', str(frameRate),
+        '-start_number', str(startFrame),
         '-i', destDirPath + '/rendered_frame_%%06d_seed_%d.%s'%(seed,frameFileType),
         '-c:v', 'libx264', '-preset', 'fast', '-pix_fmt', 'yuv420p', 
         '-b:v', kbpsParam,
@@ -580,8 +582,8 @@ if __name__ == "__main__":
     #ap.add_argument( '--nWorkers', type=int, default=1, help='the # of worker instances to launch (or zero for all available)' )
     ap.add_argument( '--sshAgent', type=boolArg, default=False, help='whether or not to use ssh agent' )
     ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use (default is random)' )
-    ap.add_argument( '--nParFrames', type=int, help='how many frames to render in parallel',
-        default=1 )
+    ap.add_argument( '--nParFrames', type=int, help='to override the # of instances (default=0 for automatic)',
+        default=0 )
     ap.add_argument( '--timeLimit', type=int, help='time limit (in seconds) for the whole job',
         default=24*60*60 )
     #ap.add_argument( '--useCompositor', type=boolArg, default=True, help='whether or not to use blender compositor' )
@@ -633,23 +635,32 @@ if __name__ == "__main__":
     g_outFilePattern = 'rendered_frame_######_seed_%d.%s'%(args.seed,extensions[args.frameFileType])
 
 
-    if args.nParFrames:
-        nParFrames = args.nParFrames  # 30
-        nToRecruit = min( args.endFrame+1-args.startFrame, nParFrames)
-        nToRecruit = int( nToRecruit * 2 )
-    else:
+    if not args.nParFrames:
+        # regular case, where we pick a suitably large number to launch, based on # of frames
+        nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
+        nFrames = len( range(args.startFrame, args.endFrame+1, args.frameStep ) )
+        nToRecruit = min( nAvail, nFrames * 3 )
+    elif args.nParFrames > 0:
+        # an override for advanced users, specifying exactly how many instances to launch
+        nToRecruit = args.nParFrames
+    elif args.nParFrames == -1:
+        # traditional test-user override, to launch as many instances as possible
         nToRecruit = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
+    else:
+        msg = 'invalid nParFrames arg (%d, should be >= -1)' % args.nParFrames
+        logger.warning( msg )
+        sys.exit( msg )
 
     if args.launch:
         goodInstances= recruitInstances( nToRecruit, dataDirPath+'/recruitLaunched.json', True )
     else:
         goodInstances = recruitInstances( nToRecruit, dataDirPath+'/survivingInstances.json', False )
 
-    if args.nParFrames:
-        g_framesToDo.extend( range(args.startFrame, args.endFrame+1, args.frameStep ) )
-    else:
-        #TODO use startFreme, endFrame, and frameStep in this case, too, but limiting total number
+    if args.nParFrames == -1:
+        # for testing, do 3 frames for every well-installed instance
         g_framesToDo = collections.deque( range( 0, len(goodInstances) * 3) )
+    else:
+        g_framesToDo.extend( range(args.startFrame, args.endFrame+1, args.frameStep ) )
     logger.info( 'g_framesToDo %s', g_framesToDo )
 
     settingsToSave = argsToSave.copy()
@@ -685,7 +696,8 @@ if __name__ == "__main__":
     nFramesFinished = len(g_framesFinished)
     if nFramesFinished:
         encodeTo264( dataDirPath, settingsToSave['outVideoFileName'], 
-            args.frameRate, seed=args.seed, frameFileType=extensions[args.frameFileType] )
+            args.frameRate, seed=args.seed, startFrame=args.startFrame,
+            frameFileType=extensions[args.frameFileType] )
 
     elapsed = time.time() - startTime
     logger.info( 'rendered %d frames using %d "good" instances', len(g_framesFinished), len(goodInstances) )
