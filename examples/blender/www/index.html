@@ -77,8 +77,6 @@
     # of available devices: <span id="nAvail">x</span>
     <br>
     <br>
-    # of workers: <input id="nWorkers", class="margined" size=6 value = 0 />
-    <br>
     Start Frame # <input id="startFrame", class="margined" size=4 value=1 >
     End Frame # <input id="endFrame", class="margined" size=4 value=1 >
     <br>
@@ -115,11 +113,13 @@
         </div>
         <div>
             Frame Time Limit: 
-            <input id="frameTimeLimit" class="margined" size=3 >
+            <input id="frameTimeLimit" class="margined" size=3 value ="" >
             (minutes)
         </div>
+        <div hidden >
+            # of workers: <input id="nWorkers" class="margined" size=6 value = 0 />
+        </div>
         <br><br>
-  
         <label for="regions" >
             Choose one or more regions (or select none, to allow all regions):
         </label>
@@ -267,6 +267,9 @@ function onStatusBut() {
                     $('#progress').attr( "value", nFramesFinished );
                 }
             }
+            if( data["state"] == 'running' )
+                $('#stopBut').prop( 'disabled', false );
+
             if( (data["state"] == 'stopped') && (nFramesWanted<=0) ) {
                 $('#progress').attr( "value", 0 );  // makes sure it is not "indeterminate"
             }
@@ -559,8 +562,8 @@ function checkAvail() {
 function checkJob() {
     // this version stops when the status is no longer 'running'
     onStatusBut()
-    if( $('#state').text() != 'running' ) {
-        $('#stopBut').prop( 'disabled', true )
+    if( $('#state').text() == 'stopped' ) {
+        //$('#stopBut').prop( 'disabled', true );
         clearInterval( g_checkerTask )
         g_checkerTask = null;
     }
