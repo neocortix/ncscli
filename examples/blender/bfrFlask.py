@@ -303,23 +303,50 @@ def launchJob( args ):
     stdErrFilePath = stdFilePath('stderr', jobId)
     blenderFilePath = dataDirPath( jobId ) + '/render.blend'
 
+    if 'dataUri' not in args:
+        logger.warning( 'no blender file given')
+        return jsonify('no blender file given'), 400
+    # quick and dirty data-uri splitter; change this if needing other types of URLs
+    dataUri = args['dataUri']
+    logger.info( 'dataUri: %s...', dataUri[0:100] )
+    if ';base64,' not in dataUri:
+        return jsonify('given data is not in data-uri (base64) format'), 400
+    encoded = dataUri.split(',')[1]
+    decoded = base64.b64decode( encoded )
+    #logger.info ('decoded: %s', decoded )
+    
+    with open( blenderFilePath, 'wb' ) as outFile:
+        outFile.write( decoded )
+
     if True:
-        # newer
-        if 'dataUri' not in args:
-            logger.warning( 'no blender file given')
-            return jsonify('no blender file given'), 400
-        # quick and dirty data-uri splitter; change this if needing other types of URLs
-        dataUri = args['dataUri']
-        logger.info( 'dataUri: %s...', dataUri[0:100] )
-        if ';base64,' not in dataUri:
-            return jsonify('given data is not in data-uri (base64) format'), 400
-        encoded = dataUri.split(',')[1]
-        decoded = base64.b64decode( encoded )
-        #logger.info ('decoded: %s', decoded )
-        
-        with open( blenderFilePath, 'wb' ) as outFile:
-            outFile.write( decoded )
-        
+        # prepare to launch without shell
+        cmdArgs = [blenderFilePath]
+        for key,val in args.items():
+            if key != 'dataUri':
+                if key == 'filter':
+                    val = applyDprIfNone( val, g_minDpr )
+                    val = applyMinRamIfNone( val, g_minRamMB )
+                cmdArgs.extend( ['--' + key, str( val )] )
+        cmdArgs.extend( ['--instTimeLimit', '1800'] )
+        if '--frameTimeLimit' not in cmdArgs:
+            cmdArgs.extend( ['--frameTimeLimit', '2700'] )
+        cmdArgs.extend( ['--jobId', jobId] )
+        cmdArgs.extend( ['--dataDir', dataDirPath( jobId )] )
+
+        #logger.debug( 'cmdArgs: %s', cmdArgs )
+        binPath = os.path.expanduser( os.path.join( pyLibPath, g_engineScriptName ) )
+        cmd = [binPath] + cmdArgs
+        #logger.debug( 'starting cmd: %s', cmd )
+
+        with open( stdOutFilePath, 'wb' ) as stdoutFile:
+            with open( stdErrFilePath, 'wb' ) as stderrFile:
+                proc = subprocess.Popen( cmd, shell=False,
+                    cwd=wdPath, stdout=stdoutFile, stderr=stderrFile,
+                    env=dict( os.environ, LANG="en_US.UTF-8" )
+                )
+
+    else:
+        # this version launches via shell
         argsStr = blenderFilePath
         for key,val in args.items():
             if key != 'dataUri':
@@ -327,26 +354,19 @@ def launchJob( args ):
                     val = applyDprIfNone( val, g_minDpr )
                     val = applyMinRamIfNone( val, g_minRamMB )
                 argsStr += ' --' + key + " '" + str(val) + "'"
+        argsStr += ' --instTimeLimit 1800'
+        if 'frameTimeLimit' not in argsStr:
+            argsStr += ' --frameTimeLimit 2700'
+        argsStr += ' --jobId ' + jobId
+        argsStr += ' --dataDir ' + dataDirPath( jobId )
+
         logger.info( 'argsStr: %s', argsStr )
-    else:
-        # older
-        # enquote each arg
-        args = ["'" + arg + "'" for arg in args ]
+        cmd = 'cd  %s && LANG=en_US.UTF-8 PYTHONPATH=%s %s/animateWholeFrames.py %s' \
+            % (wdPath, pyLibPath, pyLibPath, argsStr)
+        cmd += ' > %s 2> %s' % (stdOutFilePath, stdErrFilePath)
 
-        argsStr = ' '.join(args)
-    argsStr += ' --instTimeLimit 1800'
-    if 'frameTimeLimit' not in argsStr:
-        argsStr += ' --frameTimeLimit 2700'
-    argsStr += ' --jobId ' + jobId
-    argsStr += ' --dataDir ' + dataDirPath( jobId )
-    cmd = 'cd  %s && LANG=en_US.UTF-8 PYTHONPATH=%s %s/animateWholeFrames.py %s' \
-        % (wdPath, pyLibPath, pyLibPath, argsStr)
-    #cmd += ' --filter \'{"regions":"north-america","dpr": ">=37"}\''
-
-    cmd += ' > %s 2> %s' % (stdOutFilePath, stdErrFilePath)
-
-    logger.info( 'starting cmd %s', cmd )
-    proc = subprocess.Popen( cmd, shell=True )
+        logger.info( 'starting cmd %s', cmd )
+        proc = subprocess.Popen( cmd, shell=True )
     return jsonify(info), 200
 
 def stopJob( jobId ):
