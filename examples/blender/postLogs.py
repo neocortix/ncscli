@@ -61,7 +61,7 @@ if __name__ == "__main__":
     mclient = pymongo.MongoClient(args.server, args.port)
     logsDb = mclient.renderingLogs
     collections = sorted(logsDb.list_collection_names())
-    logger.info( 'existing collections %s', collections )
+    #logger.info( 'existing collections %s', collections )
 
 
     record = {'tag': args.tag, '_id': args.tag }
@@ -98,7 +98,10 @@ if __name__ == "__main__":
         opArgs = firstOp['args']
         startingArgs = opArgs.get( 'starting' )
         if startingArgs:
-            record['blendFilePath'] = startingArgs.get('blendFilePath')
+            if startingArgs.get('origBlendFilePath'):
+                record['blendFilePath'] = startingArgs.get('origBlendFilePath')
+            else:
+                record['blendFilePath'] = startingArgs.get('blendFilePath')
             if not nFramesReq:
                 startFrame = startingArgs.get('startFrame', 0)
                 endFrame = startingArgs.get('endFrame')
