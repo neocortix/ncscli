@@ -300,7 +300,10 @@ def summarizeRenderingLog( instancesAllocated, rendererCollName, tag=None ):
                     logger.info( 'parallelRender %s', parallelRenderOp )
                     if blendFilePath != '<unknown>':
                         logger.warning( 'replacing blendFilePath %s' )
-                    blendFilePath = parallelRenderOp['blendFilePath']
+                    if 'origBlendFilePath' in parallelRenderOp:
+                        blendFilePath = parallelRenderOp['origBlendFilePath']
+                    else:
+                        blendFilePath = parallelRenderOp['blendFilePath']
                     logger.info( 'blendFilePath %s', blendFilePath )
                     prStartDateTime = interpretDateTimeField( event['dateTime'] )
             elif eventType == 'stderr':
