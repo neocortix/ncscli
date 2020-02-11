@@ -443,7 +443,6 @@ def renderFramesOnInstance( inst ):
                 ncs.terminateInstances( args.authToken, [iid] )
                 break
             continue
-        #outFilePattern = 'rendered_frame_######_seed_%d.%s'%(args.seed,fileExt)
         outFileName = g_outFilePattern.replace( '######', '%06d' % frameNum )
         returnCode = None
         pyExpr = ''
@@ -538,12 +537,12 @@ def renderFramesOnInstance( inst ):
         saveProgress()
     return 0
 
-def encodeTo264( destDirPath, destFileName, frameRate, kbps=30000, seed=0,
+def encodeTo264( destDirPath, destFileName, frameRate, kbps=30000,
     frameFileType='png', startFrame=0 ):
     kbpsParam = str(kbps)+'k'
     cmd = [ 'ffmpeg', '-y', '-framerate', str(frameRate),
         '-start_number', str(startFrame),
-        '-i', destDirPath + '/rendered_frame_%%06d_seed_%d.%s'%(seed,frameFileType),
+        '-i', destDirPath + '/rendered_frame_%%06d.%s'%(frameFileType),
         '-c:v', 'libx264', '-preset', 'fast', '-pix_fmt', 'yuv420p', 
         '-b:v', kbpsParam,
         os.path.join( destDirPath, destFileName )
@@ -601,8 +600,6 @@ if __name__ == "__main__":
         default=1 )
     ap.add_argument( '--frameStep', type=int, help='the frame number increment',
         default=1 )
-    ap.add_argument( '--seed', type=int, help='the blender cycles noise seed',
-        default=0 )
     args = ap.parse_args()
     #logger.debug('args: %s', args)
 
@@ -635,7 +632,7 @@ if __name__ == "__main__":
     g_deadline = startTime + args.timeLimit
 
     extensions = {'PNG': 'png', 'OPEN_EXR': 'exr'}
-    g_outFilePattern = 'rendered_frame_######_seed_%d.%s'%(args.seed,extensions[args.frameFileType])
+    g_outFilePattern = 'rendered_frame_######.%s'%(extensions[args.frameFileType])
 
 
     if not args.nParFrames:
@@ -700,7 +697,7 @@ if __name__ == "__main__":
     nFramesFinished = len(g_framesFinished)
     if nFramesFinished:
         encodeTo264( dataDirPath, settingsToSave['outVideoFileName'], 
-            args.frameRate, seed=args.seed, startFrame=args.startFrame,
+            args.frameRate, startFrame=args.startFrame,
             frameFileType=extensions[args.frameFileType] )
 
     elapsed = time.time() - startTime
