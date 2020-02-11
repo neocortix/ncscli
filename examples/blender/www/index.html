@@ -100,7 +100,6 @@
             <option selected="selected" value="MP4" >h.264 in mp4 container</option>
             <option value="other" >coming soon</option>
         </select>
-        <input id="seed" hidden size=6 value=0 >
         <div>
             Minimum device performance: <input id="minDpr", class="margined" size=4 value=0 >
             (zero for default)
@@ -347,13 +346,6 @@ function onLaunchBut() {
     if (height.length <= 0) {
         return;
     }
-    var seed = $('#seed').val();
-    if (seed.length > 0) {
-        seed = seed.trim();
-    }
-    if (seed.length <= 0) {
-        seed = 0;
-    }
     var fileType = $('#fileType').val();
     if (! fileType) {
         fileType = "PNG";
@@ -410,6 +402,7 @@ function onLaunchBut() {
     var args = {
         authToken: authToken,
         filter: filterArg,
+        origBlendFilePath: blendFile.name,
         startFrame: startFrame,
         endFrame: endFrame,
         frameRate: frameRate,
@@ -435,7 +428,6 @@ function onLaunchBut() {
         console.log( "onerror" )
         deferred.reject(e.target.error);
     }
-    console.log( blendFile )
     
     reader.readAsDataURL(blendFile);
     var prom = deferred.promise();
@@ -584,9 +576,6 @@ function saveSettings() {
     localStorage.setItem("minDpr", $('#minDpr').val() );
     localStorage.setItem("nWorkers", $('#nWorkers').val() );
     localStorage.setItem("regions", $('#regions').val() );
-    if( $('#seed').val().length ) {
-        localStorage.setItem("seed", $('#seed').val() );
-    }
     localStorage.setItem("startFrame", $('#startFrame').val() );
     localStorage.setItem("endFrame", $('#endFrame').val() );
     localStorage.setItem("frameRate", $('#frameRate').val() );
@@ -614,10 +603,6 @@ function loadSettings() {
     $('#jobId').val( localStorage.getItem("jobId") );
     if( localStorage.getItem("height") ) {
         $('#height').val( localStorage.getItem("height") );
-    }
-    $('#seed').val( localStorage.getItem("seed") );
-    if( localStorage.getItem("startFrame") ) {
-        $('#startFrame').val( localStorage.getItem("startFrame") );
     }
     if( localStorage.getItem("endFrame") ) {
         $('#endFrame').val( localStorage.getItem("endFrame") );
