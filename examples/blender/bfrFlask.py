@@ -235,7 +235,7 @@ def getJobs():
     #return ["1"]  # pretend busy
     found = anyJobsRunning()
     if found:
-        logger.info( 'script running "%s"', found )
+        #logger.debug( 'script running "%s"', found )  # careful not to leak info
         return ["1"]
     else:
         return []
