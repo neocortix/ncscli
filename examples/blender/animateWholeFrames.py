@@ -570,16 +570,17 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser( description=__doc__,
         fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( 'blendFilePath', help='the .blend file to render' )
-    ap.add_argument( '--authToken', required=True, help='the NCS authorization token to use' )
+    ap.add_argument( '--authToken', required=True, help='the NCS authorization token to use (required)' )
     ap.add_argument( '--dataDir', help='output data darectory', default='./aniData/' )
-    ap.add_argument( '--encryptFiles', type=boolArg, default=False, help='whether to encrypt files on launched instances' )
+    ap.add_argument( '--encryptFiles', type=boolArg, default=True, help='whether to encrypt files on launched instances' )
     ap.add_argument( '--filter', help='json to filter instances for launch' )
-    ap.add_argument( '--frameRate', type=int, default=24, help='the frame rate (frames per second)' )
-    ap.add_argument( '--frameTimeLimit', type=int, default=1800, help='amount of time (in seconds) allowed for each frame' )
+    ap.add_argument( '--frameRate', type=int, default=24, help='the frame rate (frames per second) for video output' )
+    ap.add_argument( '--frameTimeLimit', type=int, default=3600, help='amount of time (in seconds) allowed for each frame' )
     ap.add_argument( '--instTimeLimit', type=int, default=900, help='amount of time (in seconds) installer is allowed to take on instances' )
-    ap.add_argument( '--jobId', help='to identify this job' )
+    ap.add_argument( '--jobId', help='to identify this job in log' )
     ap.add_argument( '--launch', type=boolArg, default=True, help='to launch and terminate instances' )
     #ap.add_argument( '--nWorkers', type=int, default=1, help='the # of worker instances to launch (or zero for all available)' )
+    ap.add_argument( '--origBlendFilePath', help='for logging, set this if different from blendFilePath' )
     ap.add_argument( '--sshAgent', type=boolArg, default=False, help='whether or not to use ssh agent' )
     ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use (default is random)' )
     ap.add_argument( '--nParFrames', type=int, help='to override the # of instances (default=0 for automatic)',
@@ -588,14 +589,14 @@ if __name__ == "__main__":
         default=24*60*60 )
     #ap.add_argument( '--useCompositor', type=boolArg, default=True, help='whether or not to use blender compositor' )
     # dtr-specific args
-    ap.add_argument( '--width', type=int, help='the width (in pixels) of the output',
+    ap.add_argument( '--width', type=int, help='the width (in pixels) of the output (0 for .blend file default)',
         default=0 )
-    ap.add_argument( '--height', type=int, help='the height (in pixels) of the output',
+    ap.add_argument( '--height', type=int, help='the height (in pixels) of the output (0 for .blend file default)',
         default=0 )
     ap.add_argument( '--frameFileType', choices=['PNG', 'OPEN_EXR'], help='the type of frame output file',
         default='PNG' )
     ap.add_argument( '--startFrame', type=int, help='the first frame number to render',
-        default=0 )
+        default=1 )
     ap.add_argument( '--endFrame', type=int, help='the last frame number to render',
         default=1 )
     ap.add_argument( '--frameStep', type=int, help='the frame number increment',
@@ -607,7 +608,9 @@ if __name__ == "__main__":
 
     if not os.path.isfile( args.blendFilePath ):
         sys.exit( 'file not found: '+args.blendFilePath )
-    #dateTimeTag = datetime.datetime.now().strftime( '%Y-%m-%d_%H%M%S' )
+    if not args.origBlendFilePath:
+        args.origBlendFilePath = args.blendFilePath
+
     dataDirPath = args.dataDir
     os.makedirs( dataDirPath, exist_ok=True )
 
@@ -675,6 +678,7 @@ if __name__ == "__main__":
         saveProgress()
         logOperation( 'parallelRender',
             {'blendFilePath': args.blendFilePath, 'nInstances': len(goodInstances),
+                'origBlendFilePath': args.origBlendFilePath,
                 'nFramesReq': g_nFramesWanted },
             '<master>' )
         with futures.ThreadPoolExecutor( max_workers=len(goodInstances) ) as executor:
