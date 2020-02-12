@@ -14,7 +14,6 @@ import sys
 import dateutil
 import dateutil.parser
 #import dateutil.tz
-import geoip2.webservice  # maxmind geolocation service
 import jinja2
 import pandas as pd
 
@@ -264,11 +263,6 @@ def genHtmlTable( df ):
 def compileStats( dataDirPath, geoipId='xxx', geoipPwd='yyy' ):
     statsFileName = 'locustStats.csv'  # locustStats.csv locustStats_17devs.csv
     launchedJsonFilePath = 'launched.json'
-    global g_geoip2Client
-    g_geoip2Client = geoip2.webservice.Client( geoipId, geoipPwd )
-
-    #geoInfo = getGeoip2Info( '34.216.219.139', g_geoip2Client )
-    #print( geoInfo )
     
     #dataDirPath = 'data'  # '../../loadtest/data
     
@@ -289,6 +283,10 @@ def compileStats( dataDirPath, geoipId='xxx', geoipPwd='yyy' ):
     if True:  # if len( ipHostNames ):
         # geoip the workers, and fill in blank entries
         if usingMaxmind:
+            global g_geoip2Client
+            import geoip2.webservice  # maxmind geolocation service
+            g_geoip2Client = geoip2.webservice.Client( geoipId, geoipPwd )
+
             workerIPs = pd.Series( list(ipHostNames.keys()) )
             workerLocs = getHostLocationsMaxmind( workerIPs, g_geoip2Client )
         else:
