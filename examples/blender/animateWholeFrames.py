@@ -597,12 +597,11 @@ if __name__ == "__main__":
     ap.add_argument( '--origBlendFilePath', help='for logging, set this if different from blendFilePath' )
     ap.add_argument( '--sshAgent', type=boolArg, default=False, help='whether or not to use ssh agent' )
     ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use (default is random)' )
-    ap.add_argument( '--nParFrames', type=int, help='to override the # of instances (default=0 for automatic)',
+    ap.add_argument( '--nWorkers', type=int, help='to override the # of worker instances (default=0 for automatic)',
         default=0 )
     ap.add_argument( '--timeLimit', type=int, help='time limit (in seconds) for the whole job',
         default=24*60*60 )
     #ap.add_argument( '--useCompositor', type=boolArg, default=True, help='whether or not to use blender compositor' )
-    # dtr-specific args
     ap.add_argument( '--width', type=int, help='the width (in pixels) of the output (0 for .blend file default)',
         default=0 )
     ap.add_argument( '--height', type=int, help='the height (in pixels) of the output (0 for .blend file default)',
@@ -650,19 +649,19 @@ if __name__ == "__main__":
     g_outFilePattern = 'rendered_frame_######.%s'%(extensions[args.frameFileType])
 
 
-    if not args.nParFrames:
+    if not args.nWorkers:
         # regular case, where we pick a suitably large number to launch, based on # of frames
         nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
         nFrames = len( range(args.startFrame, args.endFrame+1, args.frameStep ) )
         nToRecruit = min( nAvail, nFrames * 3 )
-    elif args.nParFrames > 0:
+    elif args.nWorkers > 0:
         # an override for advanced users, specifying exactly how many instances to launch
-        nToRecruit = args.nParFrames
-    elif args.nParFrames == -1:
+        nToRecruit = args.nWorkers
+    elif args.nWorkers == -1:
         # traditional test-user override, to launch as many instances as possible
         nToRecruit = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
     else:
-        msg = 'invalid nParFrames arg (%d, should be >= -1)' % args.nParFrames
+        msg = 'invalid nWorkers arg (%d, should be >= -1)' % args.nWorkers
         logger.warning( msg )
         sys.exit( msg )
 
@@ -671,7 +670,7 @@ if __name__ == "__main__":
     else:
         goodInstances = recruitInstances( nToRecruit, dataDirPath+'/survivingInstances.json', False )
 
-    if args.nParFrames == -1:
+    if args.nWorkers == -1:
         # for testing, do 3 frames for every well-installed instance
         g_framesToDo = collections.deque( range( 0, len(goodInstances) * 3) )
     else:
