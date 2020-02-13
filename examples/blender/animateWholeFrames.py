@@ -70,6 +70,9 @@ def sigtermHandler( sig, frame ):
 def sigtermSignaled():
     return g_.signaled
 
+def sigtermNotSignaled():
+    return not sigtermSignaled()
+
 def logResult( key, value, instanceId ):
     if resultsLogFile:
         toLog = {key: value, 'instanceId': instanceId,
@@ -144,6 +147,17 @@ def loadSshPubKey():
 def launchInstances( authToken, nInstances, sshClientKeyName, launchedJsonFilepath,
         filtersJson=None, encryptFiles=True ):
     returnCode = 13
+    logger.info( 'launchedJsonFilepath %s', launchedJsonFilepath )
+    try:
+        with open( launchedJsonFilepath, 'w' ) as launchedJsonFile:
+            returnCode = ncs.launchScInstances( authToken, encryptFiles, numReq=nInstances,
+                sshClientKeyName=sshClientKeyName, jsonFilter=filtersJson,
+                okToContinueFunc=sigtermNotSignaled, jsonOutFile=launchedJsonFile )
+    except Exception as exc: 
+        logger.error( 'exception while launching instances (%s) %s', type(exc), exc, exc_info=True )
+        returnCode = 99
+    return returnCode
+    '''
     # prepare command-line for ncs launch
     cmd = [
         'ncs.py', 'sc', '--authToken', authToken, 'launch',
@@ -181,6 +195,7 @@ def launchInstances( authToken, nInstances, sshClientKeyName, launchedJsonFilepa
         logger.error( 'exception while launching instances (%s) %s', type(exc), exc, exc_info=True )
         returnCode = 99
     return returnCode
+    '''
 
 def triage( statuses ):
     ''' separates good tellInstances statuses from bad ones'''
