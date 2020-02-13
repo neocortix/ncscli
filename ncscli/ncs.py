@@ -33,6 +33,9 @@ def sigtermHandler( sig, frame ):
 def sigtermSignaled():
     return g_.signaled
 
+def sigtermNotSignaled():
+    return not sigtermSignaled()
+
 
 def boolArg( v ):
     if v.lower() == 'true':
@@ -149,8 +152,14 @@ def deleteSshClientKey( authToken, keyName, maxRetries=1 ):
             return deleteSshClientKey( authToken, keyName, maxRetries-1 )
     return resp.status_code
 
-def launchNcscInstances( authToken, encryptFiles, numReq=1,
-        regions=[], abis=[], sshClientKeyName=None, jsonFilter=None, jobId=None ):
+def launchScInstancesAsync( authToken, encryptFiles, numReq=1,
+        regions=[], abis=[], sshClientKeyName=None, jsonFilter=None,
+        jobId=None, okToContinueFunc=None ):
+    def shouldBreak():
+        if okToContinueFunc and not okToContinueFunc():
+            #logger.warning( 'not okToContinue')
+            return True
+        return False
     appVersions = getAppVersions( authToken )
     if not appVersions:
         # something is very wrong
@@ -234,8 +243,8 @@ def launchNcscInstances( authToken, encryptFiles, numReq=1,
                     return resp2['content']['instances']
                 nAllocated = len(resp2['content']['instances'])
                 logger.info( "resp2['content']['launching']: %s", resp2['content']['launching'] )
-                if sigtermSignaled() and nAllocated == 0:
-                    logger.info( 'breaking wait-allocate loop because sigterm and no instances' )
+                if shouldBreak() and nAllocated == 0:
+                    logger.info( 'breaking wait-allocate loop because not shouldBreak and no instances' )
                     return {'serverError': 404, 'reqId': jobId}
                 if time.time() >= deadline:
                     logger.info( 'breaking wait-allocate loop because of time limit' )
@@ -246,6 +255,139 @@ def launchNcscInstances( authToken, encryptFiles, numReq=1,
                 logger.info( 'waiting for server (%d instances allocated)', nAllocated )
                 time.sleep( 5 )
     return resp.json()
+
+def launchScInstances( authToken, encryptFiles, numReq=1,
+        regions=[], abis=[], sshClientKeyName=None, jsonFilter=None,
+        jsonOutFile=None, jobId=None, okToContinueFunc=None ):
+    def shouldBreak():
+        if okToContinueFunc and not okToContinueFunc():
+            logger.warning( 'not okToContinue')
+            return True
+        return False
+    instances = []
+    try:
+        infos = launchScInstancesAsync( authToken, encryptFiles, numReq,
+            sshClientKeyName=sshClientKeyName,
+            regions=regions, abis=abis, jsonFilter=jsonFilter,
+            jobId=jobId, okToContinueFunc=okToContinueFunc )
+        if 'serverError' in infos:
+            logger.error( 'got serverError %d', infos['serverError'])
+            if jsonOutFile:
+                print( '[]', file=jsonOutFile)
+            return infos['serverError']
+    except Exception as exc:
+        logger.error( 'exception launching instances (%s) "%s"',
+            type(exc), exc, exc_info=True )
+        return 13  # error 13
+    # regions=['russia-ukraine-belarus']  abis=['arm64-v8a']
+    for info in infos:
+        instances.append( info )
+
+    # collect the ID of the created instances
+    iids = []
+    for inst in instances:
+        iids.append( inst['id'] )
+        #logger.debug( 'created instance %s', inst['id'] )
+    logger.info( 'allocated %d instances', len(iids) )
+
+    reqParams = {"show-device-info":True}
+    startedInstances = {}
+    # wait while instances are still starting, but with a timeout
+    timeLimit = 600 # seconds
+    deadline = time.time() + timeLimit
+    startedSet = set()
+    failedSet = set()
+    try:
+        while True:
+            starting = False
+            launcherStates = collections.Counter()
+            for iid in iids:
+                if shouldBreak():
+                    logger.warning( 'incomplete launch due to okToContinueFunc' )
+                    break
+                if iid in startedSet:
+                    continue
+                if iid in failedSet:
+                    continue
+                try:
+                    details = queryNcsSc( 'instances/%s' % iid, authToken, reqParams )['content']
+                except Exception as exc:
+                    logger.warning( 'exception checking instance state (%s) "%s"',
+                        type(exc), exc )
+                    continue
+                if 'state' in details:
+                    iState = details['state']
+                else:
+                    iState = '<unknown>'
+                    logger.warning( 'no "state" in content of response (%s)', details )
+                launcherStates[ iState ] += 1
+                if iState == 'started':
+                    startedSet.add( iid )
+                    startedInstances[ iid ] = details
+                if iState in ['exhausted', 'ise', 'timedout']:
+                    failedSet.add( iid )
+                    logger.warning( 'instance state %s for %s', iState, iid )
+                if iState == 'initial':
+                    logger.debug( '%s %s', iState, iid )
+                #if iState in ['initial', 'starting']:
+                if iState != 'started':
+                    starting = True
+                    #logger.debug( '%s %s', iState, iid )
+            logger.info( '%d instance(s) launched so far; %s',
+                len( startedSet ), launcherStates )
+            if not starting:
+                break
+            if time.time() > deadline:
+                logger.warning( 'took too long for some instances to start' )
+                break
+            if shouldBreak():
+                logger.warning( 'incomplete launch due to okToContinueFunc' )
+                break
+            time.sleep( 5 )
+    except KeyboardInterrupt:
+        logger.info( 'caught SIGINT (ctrl-c), skipping ahead' )
+
+    #nStillStarting = len(iids) - (len(startedSet) + len(failedSet))
+    logger.info( 'started %d Instances; %s',
+        len(startedSet), launcherStates )
+
+    logger.info( 'querying for device-info')
+    # print details of created instances to a json output file
+    if jsonOutFile:
+        print( '[', file=jsonOutFile )
+        jsonFirstElem=True
+    for iid in iids:
+        try:
+            #reqParams = {"show-device-info":True}
+            if iid in startedInstances:
+                #logger.debug( 'reusing instance info')
+                details = startedInstances[iid]
+            else:
+                logger.info( 're-querying instance info for %s', iid )
+                details = queryNcsSc( 'instances/%s' % iid, authToken, reqParams )['content']
+        except Exception as exc:
+            logger.error( 'exception getting instance details (%s) "%s"',
+                type(exc), exc )
+            continue
+        except KeyboardInterrupt:
+            logger.info( 'caught SIGINT (ctrl-c), skipping ahead' )
+            break
+        #logger.debug( 'NCSC Inst details %s', details )
+        if jsonOutFile:
+            outRec = details.copy()
+            outRec['instanceId'] = iid
+            if jsonFirstElem:
+                jsonFirstElem = False
+            else:
+                print( ',', end=' ', file=jsonOutFile)
+            logger.info( 'printing to jsonOutFile' )
+            print( json.dumps( outRec ), file=jsonOutFile )
+        if shouldBreak():
+            break
+    if jsonOutFile:
+        print( ']', file=jsonOutFile)
+    logger.info( 'finished')
+    return 0 # no err
 
 def terminateNcscInstance( authToken, iid ):
     headers = ncscReqHeaders( authToken )
@@ -287,10 +429,10 @@ def doCmdLaunch( args ):
 
     instances = []
     try:
-        infos = launchNcscInstances( authToken, args.encryptFiles, args.count,
+        infos = launchScInstancesAsync( authToken, args.encryptFiles, args.count,
             sshClientKeyName=args.sshClientKeyName,
             regions=args.region, abis=instanceAbis, jsonFilter=args.filter,
-            jobId=args.jobId )
+            jobId=args.jobId, okToContinueFunc=sigtermNotSignaled )
         if 'serverError' in infos:
             logger.error( 'got serverError %d', infos['serverError'])
             if args.json:
