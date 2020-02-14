@@ -589,7 +589,7 @@ if __name__ == "__main__":
     ap.add_argument( '--encryptFiles', type=boolArg, default=True, help='whether to encrypt files on launched instances' )
     ap.add_argument( '--filter', help='json to filter instances for launch' )
     ap.add_argument( '--frameRate', type=int, default=24, help='the frame rate (frames per second) for video output' )
-    ap.add_argument( '--frameTimeLimit', type=int, default=3600, help='amount of time (in seconds) allowed for each frame' )
+    ap.add_argument( '--frameTimeLimit', type=int, default=8*60*60, help='amount of time (in seconds) allowed for each frame' )
     ap.add_argument( '--instTimeLimit', type=int, default=900, help='amount of time (in seconds) installer is allowed to take on instances' )
     ap.add_argument( '--jobId', help='to identify this job in log' )
     ap.add_argument( '--launch', type=boolArg, default=True, help='to launch and terminate instances' )
