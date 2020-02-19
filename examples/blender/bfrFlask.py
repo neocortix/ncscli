@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import signal
 import sys
 import time
@@ -63,7 +64,7 @@ def jobsHandler():
         #logger.debug( 'args %s', args )
         return jsonify( getJobs() )
 
-@app.route('/api/jobs/<jobId>', methods=['GET', 'PUT'])
+@app.route('/api/jobs/<jobId>', methods=['GET', 'PUT', 'DELETE'])
 def jobHandler( jobId ):
     logger.info( 'handling a request %s ', flask.request )
     if flask.request.method == 'GET':
@@ -75,6 +76,9 @@ def jobHandler( jobId ):
     elif flask.request.method == 'PUT':
         args = flask.request.get_json()
         returns = stopJob( jobId )
+        return returns
+    elif flask.request.method == 'DELETE':
+        returns = deleteJob( jobId )
         return returns
 
 def zipThese( fileList, archivePath ):
@@ -357,3 +361,30 @@ def stopJob( jobId ):
         return jsonify(info), 404
     foundProc.send_signal( signal.SIGTERM )
     return jsonify(info), 200
+
+def deleteJob( jobId ):
+    '''deletes the given job if it exists and is not running'''
+    info = {'id': jobId }
+    #logger.info( 'req delete job %s', jobId )
+
+    # check that the given jobId is a valid UUID
+    try:
+        _ = uuid.UUID( jobId )
+    except:
+        return jsonify(info), 404
+    # can't delete if it's currently running
+    foundProc = findRunningJob( jobId )
+    if foundProc:
+        # return service busy if the job is running
+        flask.abort( 503 )
+    dirPath = dataDirPath( jobId )
+    if os.path.isdir( dirPath ) and os.path.isfile( stdFilePath('stderr', jobId) ):
+        try:
+            shutil.rmtree( dirPath )
+            info['state'] = 'deleted'
+        except:
+            return jsonify('could not delete the specified job'), 500
+        return jsonify(info), 200
+
+
+    return jsonify(info), 404
