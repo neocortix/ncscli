@@ -781,7 +781,7 @@ if __name__ == "__main__":
         )
     if terminationEvent:
         terminationDateTime = interpretDateTimeField( terminationEvent['dateTime'] )
-        logger.info( 'terminationDateTime %s', terminationDateTime )
+        logger.info( 'terminateFinal %s', terminationDateTime )
 
     startDateTime = interpretDateTimeField( startingEvent['dateTime'] )
 
@@ -795,7 +795,7 @@ if __name__ == "__main__":
     for termEvent in termEvents:
         iid = termEvent['args']['terminateFailedWorker']
         tdt = universalizeDateTime( dateutil.parser.parse( termEvent['dateTime'], ignoretz=False ) )
-        #logger.info( 'terminated %s at %s', iid, tdt )
+        logger.info( 'terminateFailedWorker %s at %s', iid, tdt )
         terminations[ iid ] = { 'opType': 'terminateFailedWorker',
             'dateTime': tdt, 'devId': instancesAllocated[iid].get( 'device-id' )  }
         terminationCredit += (terminationDateTime - tdt).total_seconds()
@@ -932,7 +932,8 @@ if __name__ == "__main__":
             body += 'overall cost of rendering was %.1f worker-minutes per frame (including failures but not idle time)\n' % \
                 ((totWorkerTime/60) / frameStateCounts.get('retrieved', 0))
 
-        renderingElapsedTime = (frameSummaries.endDateTime.max() - frameSummaries.endDateTime.min()).total_seconds()
+        renderingElapsedTime = (frameSummaries.endDateTime.max() - frameSummaries.startDateTime.min()).total_seconds()
+        logger.info( 'renderingElapsedTime %d secs (%.1f minutes)', renderingElapsedTime, renderingElapsedTime/60)
         totInstSecs = (renderingElapsedTime*stateCounts['installed']) - terminationCredit
         if frameStateCounts.get('retrieved', 0):
             body += 'overall cost of rendering was %.1f worker-minutes per frame (including failures and idle time)\n' % \
