@@ -89,9 +89,9 @@
     <br>
     <a href="#parameters" data-toggle="collapse"><span class="glyphicon glyphicon-cog"></span> Settings</a>
     <div id="parameters" class ="collapse" >
-        Width: <input id="width", class="margined" size=4 value=0 /> (zero for .blend-file default)
+        Width: <input id="width", class="margined" size=4 value=0 />
         <br>
-        Height: <input id="height", class="margined" size=4 value=0 > (zero for .blend-file default)
+        Height: <input id="height", class="margined" size=4 value=0 >
         <br>
         <label for="fileType" hidden >
             Output File Type:
@@ -101,8 +101,7 @@
             <option value="other" >coming soon</option>
         </select>
         <div>
-            Minimum device performance: <input id="minDpr", class="margined" size=4 value=0 >
-            (zero for default)
+            Minimum Device Performance Rating: <input id="minDpr", class="margined" size=4 value=0 >
         </div>
         <br>
         <div>
@@ -118,12 +117,10 @@
         <div hidden >
             # of workers: <input id="nWorkers" class="margined" size=6 value = 0 />
         </div>
-        <br><br>
-        <label for="regions" >
+        <label for="regions" hidden>
             Choose one or more regions (or select none, to allow all regions):
         </label>
-        <br>
-        <select id="regions" multiple size=7 >
+        <select id="regions" hidden multiple size=7 >
             <option value="usa" >United States of America</option>
             <option value="asia" >Asia</option>
             <option value="europe" >Europe</option>
@@ -340,10 +337,20 @@ function onLaunchBut() {
     }
     var width = $('#width').val();
     if (width.length <= 0) {
-        return;
+        width = 0;
     }
     var height = $('#height').val();
     if (height.length <= 0) {
+        height = 0;
+    }
+    // check that width and height ar non-negative numbers
+    if( isNaN(width) || width<0 || isNaN(height) || height<0 ) {
+        alert( 'please enter both width and height as positive numbers (or leave both blank)');
+        return;
+    }
+    // check that both (or neither) of width and height were provided
+    if( (width==0) != (height==0) ) {
+        alert( 'please enter both width and height as positive numbers (or leave both blank)');
         return;
     }
     var fileType = $('#fileType').val();
@@ -597,11 +604,11 @@ function loadSettings() {
     if( localStorage.getItem("regions") ) {
         $('#regions').val( localStorage.getItem("regions").split(",") );
     }
-    if( localStorage.getItem("width") ) {
+    if( localStorage.getItem("width") !== null ) {
         $('#width').val( localStorage.getItem("width") );
     }
     $('#jobId').val( localStorage.getItem("jobId") );
-    if( localStorage.getItem("height") ) {
+    if( localStorage.getItem("height") !== null ) {
         $('#height').val( localStorage.getItem("height") );
     }
     if( localStorage.getItem("endFrame") ) {
