@@ -14,6 +14,7 @@
         .margined {
             margin: 2px;
         }
+        .table-condensed { font-size: 80%; }
         @media (min-width: 576px) {
             .container-fluid{
                 max-width: 576px;
@@ -150,6 +151,8 @@
         <h4>state</h4>
         <pre id="state">(no query done)</pre>
         <progress id="progress" max="100" style="width: 100%;" hidden ></progress>
+        <div id="progressTableDiv" ></div>
+
         <h4>stdout</h4>
         <pre id="stdout"></pre>
         <h4>stderr log</h4>
@@ -230,6 +233,34 @@ function getMinDpr() {
     return minDpr;
 }
 
+function createProgressTable( data, destDiv ) {
+    var table = $('<table>').addClass("table table-striped table-condensed").appendTo(destDiv);
+    var header = $('<thead />').appendTo(table);
+    $('<th />', { text: "Frame" }).appendTo(header);
+    $('<th />', { text: "Progress" }).appendTo(header);
+    $('<th />', { text: "Time (minutes)" }).appendTo(header);
+    $('<th />', { text: "Updated" }).appendTo(header);
+    var tBody = $('<tbody />').appendTo(table);
+
+    options = {
+        year: 'numeric', month: 'numeric', day: 'numeric',
+        hour: 'numeric', minute: 'numeric', second: 'numeric',
+        timeZoneName: 'short'
+    };
+    formatter = new Intl.DateTimeFormat(navigator.languages, options);
+
+    $.each( data, function( index, value ) {
+        var row = $('<tr />').appendTo(tBody);
+        $('<td />', { text: value.frameNum }).appendTo(row);
+        $('<td />', { text: value.progress.toFixed(3)*100 + '%' }).appendTo(row);
+        $('<td />', { text: (value.elapsedTime/60).toFixed(1)}).appendTo(row);
+        var dateTimeIso = value.lastDateTime;
+        var dateTime = new Date( dateTimeIso );
+        formatted = formatter.format( dateTime );
+        $('<td />', { text: formatted }).appendTo(row);
+    })
+  }
+
 function onStatusBut() {
     var jobId = $('#jobId').val();
     if (jobId.length <= 0) {
@@ -261,6 +292,15 @@ function onStatusBut() {
                 if( nFramesWanted > 0 ) {
                     $('#progress').attr( "max", nFramesWanted );
                     $('#progress').attr( "value", nFramesFinished );
+                }
+                $('#progressTableDiv').empty();
+                fakeFrameProgress = [
+                    {frameNum: 21, elapsedTime: 66, lastDateTime:"2020-02-14T22:03:57.123456+00:00", progress: 0.919},
+                    {frameNum: 22, elapsedTime: 150, lastDateTime:"2020-02-14T22:04:58.123456+00:00", progress: 0.9886}
+                ]
+                if( progress.hasOwnProperty("frameDetails") ) {
+                    var frameDetails = progress['frameDetails'];
+                    createProgressTable( frameDetails, '#progressTableDiv' );
                 }
             }
             if( data["state"] == 'running' )
