@@ -49,6 +49,7 @@ global resultsLogFile
 # possible place for globals is this class's attributes
 class g_:
     signaled = False
+    frameDetails = {}
 g_deadline = None
 g_workingInstances = collections.deque()
 g_progressFileLock = threading.Lock()
@@ -369,10 +370,12 @@ def saveProgress():
             # kluge: take credit for a fraction of a frame, assuming installaton is finished
             nFinished = 0.1
         nWorkersWorking = len( g_workingInstances )
+        frameDetails = list( g_.frameDetails.values() )
         struc = {
             'nFramesFinished': nFinished,
             'nFramesWanted': g_nFramesWanted,
-            'nWorkersWorking': nWorkersWorking
+            'nWorkersWorking': nWorkersWorking,
+            'frameDetails': frameDetails
         }
         with open( progressFilePath, 'w' ) as progressFile:
             json.dump( struc, progressFile )
@@ -419,8 +422,6 @@ def renderFramesOnInstance( inst ):
                 match = re.search( pat, line )
                 if match:
                     frameProgress = float( match.group(1) ) / float( match.group(2) )
-                    #if (frameProgress < 0.1) or (frameProgress > 0.9):
-                    #    logger.info( '%s is %.1f %% done', abbrevIid, frameProgress*100 )
             elif '| Updating ' in line:
                 pass
             elif '| Synchronizing object |' in line:
@@ -458,6 +459,11 @@ def renderFramesOnInstance( inst ):
                 ncs.terminateInstances( args.authToken, [iid] )
                 break
             continue
+
+        frameDetails = { 'frameNum': frameNum, 'elapsedTime': 0, 'progress': 0 }
+        frameDetails[ 'lastDateTime' ] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        g_.frameDetails[ frameNum ] = frameDetails
+
         outFileName = g_outFilePattern.replace( '######', '%06d' % frameNum )
         returnCode = None
         pyExpr = ''
@@ -474,6 +480,7 @@ def renderFramesOnInstance( inst ):
 
         curFrameRendered = False
         logFrameState( frameNum, 'starting', iid )
+        frameStartDateTime = datetime.datetime.now(datetime.timezone.utc)
         with subprocess.Popen(['ssh',
                             '-p', str(sshSpecs['port']),
                             '-o', 'ServerAliveInterval=360',
@@ -495,6 +502,11 @@ def renderFramesOnInstance( inst ):
                     if frameProgress > min( .99, frameProgressReported + .01 ):
                         logger.info( 'frame %d on %s is %.1f %% done', frameNum, abbrevIid, frameProgress*100 )
                         frameProgressReported = frameProgress
+                        rightNow = datetime.datetime.now(datetime.timezone.utc)
+                        frameDetails[ 'lastDateTime' ] = rightNow.isoformat()
+                        frameDetails[ 'elapsedTime' ] = (rightNow - frameStartDateTime).total_seconds()
+                        frameDetails[ 'progress' ] = frameProgress
+                        saveProgress()
                     if ((deadline - time.time() < timeLimit/2)) and frameProgress < .5:
                         logger.warning( 'frame %d on %s seems slow', frameNum, abbrevIid )
                         logFrameState( frameNum, 'seemsSlow', iid, frameProgress )
@@ -540,6 +552,10 @@ def renderFramesOnInstance( inst ):
                 logger.info( 'retrieved frame %d', frameNum )
                 logger.info( 'finished %d frames out of %d', len( g_framesFinished), g_nFramesWanted )
                 g_framesFinished.append( frameNum )
+                rightNow = datetime.datetime.now(datetime.timezone.utc)
+                frameDetails[ 'lastDateTime' ] = rightNow.isoformat()
+                frameDetails[ 'elapsedTime' ] = (rightNow - frameStartDateTime).total_seconds()
+                frameDetails[ 'progress' ] = 1.0
                 saveProgress()
             else:
                 logStderr( stderr.rstrip(), iid )
