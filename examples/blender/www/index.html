@@ -4,9 +4,9 @@
     <title>Neocortix Rendering with Blender</title>
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.0/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css">
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
-    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.0/js/bootstrap.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/js/bootstrap.min.js"></script>
 
     <link href="footer.css" rel="stylesheet" type="text/css">
     <style>
@@ -139,8 +139,9 @@
     <hr/>
     Job ID: <input id="jobId", size=37 /> 
     <button id="statusBut" >Get Status</button>
+    <br><br>
 
-    <div id="results">
+    <div id="resultsDiv" hidden >
         <div id="outputDiv" hidden >
             <video id="outputVideo" width="640" controls >
                 Your browser does not support the video tag
@@ -148,15 +149,13 @@
             <br>
             <a id="zippedFramesBut" href="" ><span class="glyphicon glyphicon-download-alt"></span> Download zipped frames</a>
         </div>
-        <h4>state</h4>
-        <pre id="state">(no query done)</pre>
+        <p id="state"></p>
+        <p id="stdout"></p>
         <progress id="progress" max="100" style="width: 100%;" hidden ></progress>
-        <div id="progressTableDiv" ></div>
+        <div id="progressTableDiv" style="overflow-y: auto; max-height: 33em;" ></div>
 
-        <h4>stdout</h4>
-        <pre id="stdout"></pre>
-        <h4>stderr log</h4>
-        <pre id="stderr" style="overflow-y: auto; height: 20em; font-size: 65%; font-family:'Lucida Console', monospace;" 
+        <a id="stderrToggle" data-toggle="collapse" data-target="#stderr" ><span class="glyphicon glyphicon-menu-up"></span> Diagnostic log</a>
+        <pre id="stderr" class="collapse in" style="overflow-y: auto; max-height: 20em; font-size: 65%; font-family:'Lucida Console', monospace;" 
         ></pre>
 
     </div>
@@ -215,8 +214,6 @@
 </div>
 
 
-<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
-
 <script>
 //"use strict";
 var g_checkerTask = null;
@@ -236,10 +233,11 @@ function getMinDpr() {
 function createProgressTable( data, destDiv ) {
     var table = $('<table>').addClass("table table-striped table-condensed").appendTo(destDiv);
     var header = $('<thead />').appendTo(table);
-    $('<th />', { text: "Frame" }).appendTo(header);
-    $('<th />', { text: "Progress" }).appendTo(header);
-    $('<th />', { text: "Time (minutes)" }).appendTo(header);
-    $('<th />', { text: "Updated" }).appendTo(header);
+    var hrow = $('<tr />').appendTo(header);
+    $('<th />', { text: "Frame" }).appendTo(hrow);
+    $('<th />', { text: "Progress" }).appendTo(hrow);
+    $('<th />', { text: "Time (minutes)" }).appendTo(hrow);
+    $('<th />', { text: "Updated" }).appendTo(hrow);
     var tBody = $('<tbody />').appendTo(table);
 
     options = {
@@ -252,7 +250,7 @@ function createProgressTable( data, destDiv ) {
     $.each( data, function( index, value ) {
         var row = $('<tr />').appendTo(tBody);
         $('<td />', { text: value.frameNum }).appendTo(row);
-        $('<td />', { text: value.progress.toFixed(3)*100 + '%' }).appendTo(row);
+        $('<td />', { text: (value.progress*100).toFixed(1) + '%' }).appendTo(row);
         $('<td />', { text: (value.elapsedTime/60).toFixed(1)}).appendTo(row);
         var dateTimeIso = value.lastDateTime;
         var dateTime = new Date( dateTimeIso );
@@ -267,6 +265,7 @@ function onStatusBut() {
         return;
     }
     saveSettings();
+    $('#resultsDiv').show();
 
     var urlPrefix='./api/jobs/';
     var queryParams = jobId
@@ -281,11 +280,17 @@ function onStatusBut() {
         //console.log( "jx responseJSON", jqxhr.responseJSON );
         if( typeof data === 'object' && data !== null && data.hasOwnProperty("state") ) {
             $('#state').text( data["state"])
-            //$('#stdout').text( data["stdout"])
             var nFramesFinished = 0;
             var nFramesWanted = 0;
             if( data.hasOwnProperty("progress") ) {
-                $('#stdout').text( JSON.stringify( data["progress"] ) )
+                var msg = data.progress.nFramesWanted + " frames wanted; " 
+                    + Math.round(data.progress.nFramesFinished) + " frames finished; "
+                    ;
+                if( data["state"] == 'running' ) {
+                    msg +=  data.progress.nWorkersWorking + " worker(s) assigned";
+                }
+                $('#stdout').text( msg );
+                //$('#stdout').text( JSON.stringify( data["progress"] ) )
                 var progress = data["progress"];
                 nFramesFinished = progress["nFramesFinished"];
                 nFramesWanted = progress["nFramesWanted"];
@@ -294,13 +299,17 @@ function onStatusBut() {
                     $('#progress').attr( "value", nFramesFinished );
                 }
                 $('#progressTableDiv').empty();
+                /**
                 fakeFrameProgress = [
                     {frameNum: 21, elapsedTime: 66, lastDateTime:"2020-02-14T22:03:57.123456+00:00", progress: 0.919},
                     {frameNum: 22, elapsedTime: 150, lastDateTime:"2020-02-14T22:04:58.123456+00:00", progress: 0.9886}
                 ]
+                */
                 if( progress.hasOwnProperty("frameDetails") ) {
                     var frameDetails = progress['frameDetails'];
-                    createProgressTable( frameDetails, '#progressTableDiv' );
+                    if( frameDetails.length > 0 ) {
+                        createProgressTable( frameDetails, '#progressTableDiv' );
+                    }
                 }
             }
             if( data["state"] == 'running' )
@@ -317,7 +326,7 @@ function onStatusBut() {
                 var imgUrl = urlPrefix + jobId + '/rendered.mp4'; // fallback
                 if( data["outputVidUrl"] ) {
                     imgUrl = './' + data["outputVidUrl"];
-                    console.log( "outputVidUrl", imgUrl )
+                    //console.log( "outputVidUrl", imgUrl )
                 }
                 var outputZipUrl = urlPrefix + jobId + '/rendered_frames.zip'; // fallback
                 if( data["outputZipUrl"] ) {
@@ -336,9 +345,10 @@ function onStatusBut() {
             }
         }
         else {
-            $('#state').empty()
-            $('#stdout').empty()
-            $('#stderr').text( data)
+            $('#state').empty();
+            $('#progressTableDiv').empty();
+            $('#stdout').empty();
+            $('#stderr').text( data);
             $('#outputDiv').hide();
         }
     })
@@ -415,7 +425,7 @@ function onLaunchBut() {
     else {
         frameTimeLimit = frameTimeLimit * 60;  // converts minutes to seconds
     }
-    console.log( "frameTimeLimit", frameTimeLimit, "seconds" )
+    //console.log( "frameTimeLimit", frameTimeLimit, "seconds" )
 
     var jobTimeLimit = $('#jobTimeLimit').val();
     if (jobTimeLimit.length > 0) {
@@ -441,6 +451,7 @@ function onLaunchBut() {
     // reset the output elements
     $('#progress').attr( "value", 0 );  // makes sure it has the attribute, before removing it
     $('#jobId').empty("");
+    $('#progressTableDiv').empty();
     $('#stderr').empty("");
     $('#stdout').empty("");
     $('#outputDiv').hide();
@@ -523,7 +534,7 @@ function onRegionsChanged() {
 }
 
 function onDprChanged() {
-    console.log( "onDprChanged()" );
+    //console.log( "onDprChanged()" );
     var dpr = $('#minDpr').val();
     if (dpr.length > 0) {
         dpr = dpr.trim();
@@ -680,6 +691,18 @@ function splitTextarea( elemId ){
     return lines
 }
 
+function on_stderr_collapsed( event ) {
+    //console.log( 'stderr collapsed' );
+    
+    $(this).parent().find(".glyphicon-menu-up").removeClass("glyphicon-menu-up").addClass("glyphicon-menu-down")
+    //$(this).parent().find(".glyphicon-minus").removeClass("glyphicon-minus").addClass("glyphicon-plus")
+}
+function on_stderr_shown( event ) {
+    //console.log( 'stderr shown' );
+    $(this).parent().find(".glyphicon-menu-down").removeClass("glyphicon-menu-down").addClass("glyphicon-menu-up")
+    //$(this).parent().find(".glyphicon-plus").removeClass("glyphicon-plus").addClass("glyphicon-minus");
+}
+
 function on_ready() {
     // Check for FileReader API (HTML5) support.
     if (!window.FileReader) {
@@ -690,6 +713,9 @@ function on_ready() {
     $('#stopBut').click(onStopBut);
     $('#regions').change(onRegionsChanged);
     $('#minDpr').change(onDprChanged);
+    $('#stderr').on('hidden.bs.collapse', on_stderr_collapsed);
+    $('#stderr').on('shown.bs.collapse', on_stderr_shown);
+   
     loadSettings();
     onDprChanged();  // should only need checkAvail();
     g_availTask = setInterval( checkAvail, 15 * 1000 )
