@@ -524,7 +524,9 @@ def renderFramesOnInstance( inst ):
             if returnCode:
                 logger.warning( 'renderFailed for frame %d on %s', frameNum, iid )
                 logFrameState( frameNum, 'renderFailed', iid, returnCode )
+                frameDetails[ 'progress' ] = 0
                 g_framesToDo.append( frameNum )
+                saveProgress()
                 time.sleep(10) # maybe we should retire this instance; at least, making it sleep so it is less competitive
             else:
                 logFrameState( frameNum, 'rendered', iid )
@@ -556,11 +558,12 @@ def renderFramesOnInstance( inst ):
                 frameDetails[ 'lastDateTime' ] = rightNow.isoformat()
                 frameDetails[ 'elapsedTime' ] = (rightNow - frameStartDateTime).total_seconds()
                 frameDetails[ 'progress' ] = 1.0
-                saveProgress()
             else:
                 logStderr( stderr.rstrip(), iid )
                 logFrameState( frameNum, 'retrieveFailed', iid, returnCode )
+                frameDetails[ 'progress' ] = 0
                 g_framesToDo.append( frameNum )
+            saveProgress()
         if returnCode:
             nFailures += 1
     if iid in g_workingInstances:
