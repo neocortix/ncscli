@@ -380,7 +380,6 @@ def launchScInstances( authToken, encryptFiles, numReq=1,
                 jsonFirstElem = False
             else:
                 print( ',', end=' ', file=jsonOutFile)
-            logger.info( 'printing to jsonOutFile' )
             print( json.dumps( outRec ), file=jsonOutFile )
         if shouldBreak():
             break
