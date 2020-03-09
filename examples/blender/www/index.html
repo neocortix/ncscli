@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css">
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
     <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/js/bootstrap.min.js"></script>
+    <script src="sorttable.js"></script>
 
     <link href="footer.css" rel="stylesheet" type="text/css">
     <style>
@@ -231,10 +232,10 @@ function getMinDpr() {
 }
 
 function createProgressTable( data, destDiv ) {
-    var table = $('<table>').addClass("table table-striped table-condensed").appendTo(destDiv);
+    var table = $('<table>').addClass("table table-striped table-condensed sortable").appendTo(destDiv);
     var header = $('<thead />').appendTo(table);
     var hrow = $('<tr />').appendTo(header);
-    $('<th />', { text: "Frame" }).appendTo(hrow);
+    var thFrame = $('<th />', { text: "Frame" }).appendTo(hrow);
     $('<th />', { text: "Progress" }).appendTo(hrow);
     $('<th />', { text: "Time (minutes)" }).appendTo(hrow);
     $('<th />', { text: "Updated" }).appendTo(hrow);
@@ -256,7 +257,10 @@ function createProgressTable( data, destDiv ) {
         var dateTime = new Date( dateTimeIso );
         formatted = formatter.format( dateTime );
         $('<td />', { text: formatted }).appendTo(row);
-    })
+    });
+    // make it sortable, and sort it by the Frame column
+    sorttable.makeSortable( table.get()[0] );
+    sorttable.innerSortFunction.apply(thFrame.get()[0], []);
   }
 
 function onStatusBut() {
