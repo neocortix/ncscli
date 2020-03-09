@@ -13,6 +13,7 @@ import os
 import shutil
 import sys
 import time
+import uuid
 
 # third-party modules
 import dateutil.parser
@@ -284,8 +285,11 @@ def summarizeRenderingLog( instancesAllocated, rendererCollName, tag=None ):
         #logger.info( '%s had %d events', iid, len(events) )
         if iid in instancesAllocated:
             devId = instancesAllocated[iid].get( 'device-id' )
-        else:
+        elif iid.startswith( '<' ):
             devId = 0
+        else:
+            logger.info( 'IID UUID? %s', iid )
+            devId = uuid.UUID(iid).int
         seemedSlow = False
         startDateTime = None
         frameStartTimes = {}
@@ -376,12 +380,15 @@ def summarizeWorkers( _workerIids, instances, frameSummaries ):
         #if len( iid ) > 1:
         #    logger.warning( 'more than one instanceId for device %d in frameSummaries', devId)
         iid = iid[0]
-        inst = instances[iid]
-        dpr = inst.get('dpr')
-        if 'ram' in inst:
-            ramTotal = inst['ram'].get('total', 0) / 1000000
+        dpr = 0
+        ramTotal = 0
+        if iid not in instances:
+            inst = {}
         else:
-            ramTotal = 0
+            inst = instances[iid]
+            dpr = inst.get('dpr')
+            if 'ram' in inst:
+                ramTotal = inst['ram'].get('total', 0) / 1000000
         blendFilePaths = subset.blendFilePath.unique()
         if len( blendFilePaths ) > 1:
             logger.warning( 'more than one blendFilePath in frameSummaries')
@@ -468,7 +475,7 @@ def plotRenderTimes( framesDf, terminationOps, outFilePath ):
     jiggers = { 'renderFailed': .1, 'rsyncFailed': .1, 'retrieveFailed': .1 }
   
     jobColor0 = mpl.colors.to_rgb( 'gray' )
-    fontsize = 8
+    fontsize = 4  # was 8
    
     jobBottom = yMargin
     boxHeight = rowHeight*.7
@@ -528,9 +535,11 @@ def plotRenderTimes( framesDf, terminationOps, outFilePath ):
         jobBottom += rowHeight
 
     plt.gca().grid( True, axis='x')
+    #ax.labelsize = 4  # does not work for tick labels
+    ax.tick_params(axis='both', which='major', labelsize=6)
     plt.tight_layout()
     if outFilePath:
-        plt.savefig( outFilePath, dpi=150 )
+        plt.savefig( outFilePath, dpi=300 )
     else:
         plt.show()
 
@@ -796,8 +805,12 @@ if __name__ == "__main__":
         iid = termEvent['args']['terminateFailedWorker']
         tdt = universalizeDateTime( dateutil.parser.parse( termEvent['dateTime'], ignoretz=False ) )
         logger.info( 'terminateFailedWorker %s at %s', iid, tdt )
+        if iid in instancesAllocated:
+            devId = instancesAllocated[iid].get( 'device-id' )
+        else:
+            devId = 0
         terminations[ iid ] = { 'opType': 'terminateFailedWorker',
-            'dateTime': tdt, 'devId': instancesAllocated[iid].get( 'device-id' )  }
+            'dateTime': tdt, 'devId': devId }
         terminationCredit += (terminationDateTime - tdt).total_seconds()
     logger.info( 'terminationCredit: %.1f seconds (%.1f minutes)',
         terminationCredit, terminationCredit/60 )
@@ -812,8 +825,12 @@ if __name__ == "__main__":
         #logger.info( 'terminateExcessWorker %s at %s (%s)', iid, tdt, termEvent['dateTime'] )
         if iid in terminations:
             logger.warning( 'terminateExcessWorker already had a termination %s', terminations[iid] )
+        if iid in instancesAllocated:
+            devId = instancesAllocated[iid].get( 'device-id' )
+        else:
+            devId = 0
         terminations[ iid ] = { 'opType': 'terminateExcessWorker',
-            'dateTime': tdt, 'devId': instancesAllocated[iid].get( 'device-id' ) }
+            'dateTime': tdt, 'devId': devId }
         terminationCredit += (terminationDateTime - tdt).total_seconds()
     logger.info( 'terminationCredit: %.1f seconds (%.1f minutes)',
         terminationCredit, terminationCredit/60 )
