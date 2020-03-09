@@ -5,6 +5,7 @@ animates using distributed blender rendering (assigning whole frames to instance
 
 # standard library modules
 import argparse
+import asyncio
 import collections
 #import contextlib
 from concurrent import futures
@@ -158,45 +159,123 @@ def launchInstances( authToken, nInstances, sshClientKeyName, launchedJsonFilepa
         logger.error( 'exception while launching instances (%s) %s', type(exc), exc, exc_info=True )
         returnCode = 99
     return returnCode
-    '''
-    # prepare command-line for ncs launch
-    cmd = [
-        'ncs.py', 'sc', '--authToken', authToken, 'launch',
-        '--encryptFiles', str(encryptFiles),
-        '--count', str(nInstances), # filtersArg,
-        '--sshClientKeyName', sshClientKeyName, '--json'
-    ]
-    if filtersJson:
-        cmd.extend( ['--filter',  filtersJson] )
-    # this is complicated because we want to be able to kill while waiting for launch
-    try:
-        # truncate the intermediate output file
-        outFile = open( launchedJsonFilepath,'w' )
-        # start ncs asynchronously, then poll for status
-        proc = subprocess.Popen( cmd, stdout=outFile )
-        while True:
-            proc.poll() # sets proc.returncode
-            if proc.returncode != None:
-                break
-            if sigtermSignaled():
-                logger.info( 'signaling ncs')
-                proc.send_signal( signal.SIGTERM )
-                try:
-                    logger.info( 'waiting ncs')
-                    proc.wait(timeout=60)
-                    if proc.returncode:
-                        logger.warning( 'ncs return code %d', proc.returncode )
-                except subprocess.TimeoutExpired:
-                    logger.warning( 'ncs launch did not terminate in time' )
-            time.sleep( 2 )
-        returnCode = proc.returncode
-        if outFile:
-            outFile.close()
-    except Exception as exc: 
-        logger.error( 'exception while launching instances (%s) %s', type(exc), exc, exc_info=True )
-        returnCode = 99
-    return returnCode
-    '''
+
+def recruitInstance( launchedJsonFilePath, resultsLogFilePathIgnored ):
+    logger.info( 'recruiting 1 instance' )
+    nWorkersWanted = 1
+    # prepare sshClientKey for launch
+    if args.sshClientKeyName:
+        sshClientKeyName = args.sshClientKeyName
+    else:
+        keyContents = loadSshPubKey()
+        randomPart = str( uuid.uuid4() )[0:13]
+        keyContents += ' #' + randomPart
+        sshClientKeyName = 'bfr_%s' % (randomPart)
+        respCode = ncs.uploadSshClientKey( args.authToken, sshClientKeyName, keyContents )
+        if respCode < 200 or respCode >= 300:
+            logger.warning( 'ncs.uploadSshClientKey returned %s', respCode )
+            raise Exception( 'could not upload SSH client key')
+    #launch
+    logOperation( 'launchInstances', 1, '<recruitInstances>' )
+    rc = launchInstances( args.authToken, 1,
+        sshClientKeyName, launchedJsonFilePath, filtersJson=args.filter,
+        encryptFiles = args.encryptFiles
+        )
+    if rc:
+        logger.debug( 'launchInstances returned %d', rc )
+    # delete sshClientKey only if we just uploaded it
+    if sshClientKeyName != args.sshClientKeyName:
+        logger.info( 'deleting sshClientKey %s', sshClientKeyName)
+        ncs.deleteSshClientKey( args.authToken, sshClientKeyName )
+    if rc:
+        return None
+    launchedInstances = []
+    # get instances from the launched json file
+    with open( launchedJsonFilePath, 'r') as jsonInFile:
+        try:
+            launchedInstances = json.load(jsonInFile)  # an array
+        except Exception as exc:
+            logger.warning( 'could not load json (%s) %s', type(exc), exc )
+    if len( launchedInstances ) < nWorkersWanted:
+        logger.warning( 'could not launch as many instances as wanted (%d vs %d)',
+            len( launchedInstances ), nWorkersWanted )
+    nonstartedIids = [inst['instanceId'] for inst in launchedInstances if inst['state'] != 'started' ]
+    if nonstartedIids:
+        logger.warning( 'terminating non-started instances %s', nonstartedIids )
+        ncs.terminateInstances( args.authToken, nonstartedIids )
+    # proceed with instances that were actually started
+    startedInstances = [inst for inst in launchedInstances if inst['state'] == 'started' ]
+    if len(startedInstances) != 1:
+        logger.warning( 'launched %d instances', len(startedInstances) )
+        return None
+
+    inst = startedInstances[0]
+    iid = inst['instanceId']
+    abbrevIid = iid[0:16]
+    def trackStderr( proc ):
+        for line in proc.stderr:
+            print( '<stderr>', abbrevIid, line.strip(), file=sys.stderr )
+            logStderr( line.rstrip(), iid )
+
+    if sigtermSignaled():
+        logger.warning( 'terminating instance because sigtermSignaled %s', iid )
+        ncs.terminateInstances( args.authToken, [iid] )
+        return None
+    else:
+        # add instance to knownHosts
+        with open( os.path.expanduser('~/.ssh/known_hosts'), 'a' ) as khFile:
+            jsonToKnownHosts.jsonToKnownHosts( startedInstances, khFile )
+        # install blender on startedInstance
+        installerCmd = 'sudo apt-get -qq update && sudo apt-get -qq -y install blender > /dev/null'
+        logger.info( 'installerCmd %s', installerCmd )
+        sshSpecs = inst['ssh']
+        deadline = min( g_deadline, time.time() + args.instTimeLimit )
+        with subprocess.Popen(['ssh',
+                        '-p', str(sshSpecs['port']),
+                        '-o', 'ServerAliveInterval=360',
+                        '-o', 'ServerAliveCountMax=3',
+                        sshSpecs['user'] + '@' + sshSpecs['host'], installerCmd],
+                        encoding='utf8',
+                        #stdout=subprocess.PIPE,  # subprocess.PIPE subprocess.DEVNULL
+                        stderr=subprocess.PIPE) as proc:
+            stderrThr = threading.Thread(target=trackStderr, args=(proc,))
+            stderrThr.start()
+            while time.time() < deadline:
+                proc.poll() # sets proc.returncode
+                if proc.returncode == None:
+                    logger.info( 'waiting for install')
+                else:
+                    if proc.returncode == 0:
+                        logger.info( 'installer succeeded on instance %s', abbrevIid )
+                    else:
+                        logger.warning( 'instance %s gave returnCode %d', abbrevIid, proc.returncode )
+                    break
+                if sigtermSignaled():
+                    break
+                time.sleep(30)
+            proc.poll()
+            returnCode = proc.returncode if proc.returncode != None else 124 # declare timeout if no rc
+            if returnCode:
+                logger.warning( 'installerFailed on %s', iid )
+                logOperation('installerFailed', returnCode, iid )
+            else:
+                logOperation( 'installed', 0, iid )
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+                if proc.returncode:
+                    logger.warning( 'ssh return code %d', proc.returncode )
+            except subprocess.TimeoutExpired:
+                logger.warning( 'ssh did not terminate in time' )
+            stderrThr.join()
+            if returnCode:
+                logger.warning( 'terminating instance because installerFailed %s', iid )
+                ncs.terminateInstances( args.authToken, [iid] )
+                logOperation( 'terminateBad', [iid], '<recruitInstances>' )
+                return None
+            else:
+                return inst
+    return None
 
 def triage( statuses ):
     ''' separates good tellInstances statuses from bad ones'''
@@ -210,9 +289,12 @@ def triage( statuses ):
             badOnes.append( status )
     return (goodOnes, badOnes)
 
-def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted ):
-    '''launch instances and install blender on them; terminate those that could not install'''
+def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, resultsLogFilePath='' ):
+    '''launch instances and install blender on them;
+        terminate those that could not install; return list of good instances'''
     logger.info( 'recruiting up to %d instances', nWorkersWanted )
+    if not resultsLogFilePath:
+        resultsLogFilePath = dataDirPath+'/recruitInstances.jlog'
     goodInstances = []
     if launchWanted:
         logger.info( 'recruiting %d instances', nWorkersWanted )
@@ -255,10 +337,10 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted ):
     if len( launchedInstances ) < nWorkersWanted:
         logger.warning( 'could not launch as many instances as wanted (%d vs %d)',
             len( launchedInstances ), nWorkersWanted )
-    exhaustedIids = [inst['instanceId'] for inst in launchedInstances if inst['state'] == 'exhausted' ]
-    if exhaustedIids:
-        logger.warning( 'terminating exhausted instances %s', exhaustedIids )
-        ncs.terminateInstances( args.authToken, exhaustedIids )
+    nonstartedIids = [inst['instanceId'] for inst in launchedInstances if inst['state'] != 'started' ]
+    if nonstartedIids:
+        logger.warning( 'terminating non-started instances %s', nonstartedIids )
+        ncs.terminateInstances( args.authToken, nonstartedIids )
     # proceed with instances that were actually started
     startedInstances = [inst for inst in launchedInstances if inst['state'] == 'started' ]
     # add instances to knownHosts
@@ -269,13 +351,13 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted ):
         installerCmd = 'sudo apt-get -qq update && sudo apt-get -qq -y install blender > /dev/null'
         logger.info( 'calling tellInstances to install on %d instances', len(startedInstances))
         stepStatuses = tellInstances.tellInstances( startedInstances, installerCmd,
-            resultsLogFilePath=dataDirPath+'/recruitInstances.jlog',
+            resultsLogFilePath=resultsLogFilePath,
             download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
-            timeLimit=min(args.instTimeLimit, args.timeLimit), upload=None, stopOnSigterm=True,
+            timeLimit=min(args.instTimeLimit, args.timeLimit), upload=None, stopOnSigterm=not True,
             knownHostsOnly=True
             )
-        # restore our handler because tellInstances may have overridden it
-        signal.signal( signal.SIGTERM, sigtermHandler )
+        # SHOULD restore our handler because tellInstances may have overridden it
+        #signal.signal( signal.SIGTERM, sigtermHandler )
         if not stepStatuses:
             logger.warning( 'no statuses returned from installer')
             startedIids = [inst['instanceId'] for inst in startedInstances]
@@ -382,8 +464,8 @@ def saveProgress():
 
 
 def renderFramesOnInstance( inst ):
-    timeLimit=args.frameTimeLimit
-    rsyncTimeLimit = 18000  # was 240; have used 1800 for big files
+    timeLimit = min( args.frameTimeLimit, args.timeLimit )
+    rsyncTimeLimit = min( 18000, timeLimit )  # was 240; have used 1800 for big files
     iid = inst['instanceId']
     abbrevIid = iid[0:16]
     g_workingInstances.append( iid )
@@ -437,7 +519,7 @@ def renderFramesOnInstance( inst ):
             logger.warning( 'exiting thread because global deadline has passed' )
             break
 
-        if nFailures > 1:
+        if nFailures >= 3:
             logger.warning( 'exiting thread because instance has encountered %d failures', nFailures )
             logOperation( 'terminateFailedWorker', iid, '<master>')
             ncs.terminateInstances( args.authToken, [iid] )
@@ -571,6 +653,45 @@ def renderFramesOnInstance( inst ):
         saveProgress()
     return 0
 
+def recruitAndRender():
+    '''a threadproc to recruit an instance,render frames on it, and terminate it'''
+    eLoop = asyncio.new_event_loop()
+    asyncio.set_event_loop( eLoop )
+    
+    randomPart = str( uuid.uuid4() )[0:13]
+    launchedJsonFilePath = dataDirPath+'/recruitLaunched_' + randomPart + '.json'
+    resultsLogFilePath = dataDirPath+'/recruitInstance_' + randomPart + '.jlog'
+    try:
+        instance = recruitInstance( launchedJsonFilePath, resultsLogFilePath )
+        #instances = recruitInstances( 1, launchedJsonFilePath, True, resultsLogFilePath )
+    except Exception as exc:
+        logger.info( 'got exception from recruitInstance (%s) %s', type(exc), exc )
+        return -13
+    if not instance:
+        logger.warning( 'no good instance from recruit')
+        return -14
+    else:
+        renderFramesOnInstance( instance )
+        #return renderFramesOnInstance( instances[0] )
+        ncs.terminateInstances( args.authToken, [ instance['instanceId'] ] )
+
+def checkForInstances():
+    '''a threadproc to check whether we have enough instances running and maybe launch more'''
+    while len(g_framesFinished) < g_nFramesWanted and sigtermNotSignaled() and time.time()< g_deadline:
+        overageFactor = 2
+        nUnfinished = g_nFramesWanted - len(g_framesFinished)
+        nWorkers = len( g_workingInstances )
+        if nWorkers < (nUnfinished * overageFactor):
+            nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
+            if nAvail >= 2:
+                logger.warning( 'starting thread because not enough workers (%d unfinished, %d workers)',
+                    nUnfinished, nWorkers )
+                rendererThread = threading.Thread( target=recruitAndRender, name='recruitAndRender' )
+                rendererThread.start()
+
+        time.sleep( 60 )
+    logger.info( 'finished')
+
 def encodeTo264( destDirPath, destFileName, frameRate, kbps=30000,
     frameFileType='png', startFrame=0 ):
     kbpsParam = str(kbps)+'k'
@@ -649,6 +770,11 @@ if __name__ == "__main__":
     logger.info('procID: %s', myPid)
     logger.info('jobID: %s', args.jobId)
 
+    if args.frameTimeLimit > args.timeLimit:
+        logger.warning('given frameTimeLimit (%d) > given job timeLimit; using %d for both',
+            args.frameTimeLimit, args.timeLimit )
+
+
     progressFilePath = dataDirPath + '/progress.json'
     settingsJsonFilePath = dataDirPath + '/settings.json'
     resultsLogFilePath = dataDirPath+'/'+ \
@@ -672,7 +798,7 @@ if __name__ == "__main__":
         # regular case, where we pick a suitably large number to launch, based on # of frames
         nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
         nFrames = len( range(args.startFrame, args.endFrame+1, args.frameStep ) )
-        nToRecruit = min( nAvail, nFrames * 3 )
+        nToRecruit = min( nAvail, nFrames * 3 )  # SHOULD be * 3
     elif args.nWorkers > 0:
         # an override for advanced users, specifying exactly how many instances to launch
         nToRecruit = args.nWorkers
@@ -683,6 +809,7 @@ if __name__ == "__main__":
         msg = 'invalid nWorkers arg (%d, should be >= -1)' % args.nWorkers
         logger.warning( msg )
         sys.exit( msg )
+    onTheFlyWanted = (args.nWorkers==0)
 
     if args.launch:
         goodInstances= recruitInstances( nToRecruit, dataDirPath+'/recruitLaunched.json', True )
@@ -713,7 +840,16 @@ if __name__ == "__main__":
             '<master>' )
         with futures.ThreadPoolExecutor( max_workers=len(goodInstances) ) as executor:
             parIter = executor.map( renderFramesOnInstance, goodInstances )
+            if onTheFlyWanted:
+                checkerThread = threading.Thread( target=checkForInstances, name='checkForInstances' )
+                checkerThread.start()
             parResultList = list( parIter )
+        logger.info( 'finished initial thread pool')
+        # wait until it is time to exit
+        while len(g_framesFinished) < g_nFramesWanted and sigtermNotSignaled() and time.time()< g_deadline:
+            logger.info( 'waiting for frames to finish')
+            time.sleep( 10 )
+
 
     if args.launch:
         if not goodInstances:
