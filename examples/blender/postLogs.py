@@ -5,9 +5,12 @@ posts rendering logs to a mongodb
 
 # standard library modules
 import argparse
+import glob
+import json
 import logging
 import os
 import subprocess
+import sys
 
 # third-party module(s)
 import dateutil.parser
@@ -45,6 +48,19 @@ def postCollection( fileName, collName=None ):
     '''
     return collection
 
+def mergeInstanceFiles( srcFilePaths, destFilePath):
+    instances = []
+    logger.info( 'srcFilePaths: %s', srcFilePaths )
+    for inFilePath in srcFilePaths:
+        with open( inFilePath, 'r') as jsonInFile:
+            these = json.load(jsonInFile)
+            logger.info( 'len(these): %s', len(these) )
+            instances.extend( these )
+    logger.info( 'len(instances): %s', len(instances) )
+    logger.info( 'saving to: %s', destFilePath )
+    with open( destFilePath,'w' ) as outFile:
+        json.dump( instances, outFile )
+
 if __name__ == "__main__":
     logging.basicConfig(format='%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s', datefmt='%Y/%m/%d %H:%M:%S')
     logger.setLevel(logging.DEBUG)
@@ -66,7 +82,10 @@ if __name__ == "__main__":
 
     record = {'tag': args.tag, '_id': args.tag }
 
-    coll = postCollection( 'recruitLaunched.json', 'launchedInstances' )
+    instFiles = glob.glob( os.path.join( args.dataDir, args.tag, 'recruitLaunched*.json') )
+    mergeInstanceFiles( instFiles, os.path.join( args.dataDir, args.tag, 'launched.json') )
+
+    coll = postCollection( 'launched.json', 'launchedInstances' )
     record['launchedInstances'] = coll.name
     coll.create_index( 'instanceId' )
 
