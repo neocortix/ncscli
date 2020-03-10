@@ -51,6 +51,7 @@ global resultsLogFile
 class g_:
     signaled = False
     frameDetails = {}
+    installerLogFile = None
 g_deadline = None
 g_workingInstances = collections.deque()
 g_progressFileLock = threading.Lock()
@@ -129,6 +130,19 @@ def logOperation( op, value, instanceId ):
             }
         print( json.dumps( toLog, sort_keys=True ), file=resultsLogFile )
         resultsLogFile.flush()
+
+def logInstallerEvent( key, value, instanceId ):
+    logger.info( 'logging %s', locals() )
+    if g_.installerLogFile:
+        toLog = {key: value, 'instanceId': instanceId,
+            'dateTime': datetime.datetime.now(datetime.timezone.utc).isoformat() }
+        print( json.dumps( toLog, sort_keys=True ), file=g_.installerLogFile )
+        g_.installerLogFile.flush()
+
+def logInstallerOperation( instanceId, opArgs ):
+    # opArgs is a list containing the name of the op and its parameters
+    logInstallerEvent( 'operation', opArgs, instanceId )
+
 
 def boolArg( v ):
     '''use with ArgumentParser add_argument for (case-insensitive) boolean arg'''
@@ -215,7 +229,7 @@ def recruitInstance( launchedJsonFilePath, resultsLogFilePathIgnored ):
     def trackStderr( proc ):
         for line in proc.stderr:
             print( '<stderr>', abbrevIid, line.strip(), file=sys.stderr )
-            logStderr( line.rstrip(), iid )
+            logInstallerEvent( 'stderr', line.strip(), iid )
 
     if sigtermSignaled():
         logger.warning( 'terminating instance because sigtermSignaled %s', iid )
@@ -230,6 +244,7 @@ def recruitInstance( launchedJsonFilePath, resultsLogFilePathIgnored ):
         logger.info( 'installerCmd %s', installerCmd )
         sshSpecs = inst['ssh']
         deadline = min( g_deadline, time.time() + args.instTimeLimit )
+        logInstallerOperation( iid, ['connect', sshSpecs['host'], sshSpecs['port']] )
         with subprocess.Popen(['ssh',
                         '-p', str(sshSpecs['port']),
                         '-o', 'ServerAliveInterval=360',
@@ -238,6 +253,7 @@ def recruitInstance( launchedJsonFilePath, resultsLogFilePathIgnored ):
                         encoding='utf8',
                         #stdout=subprocess.PIPE,  # subprocess.PIPE subprocess.DEVNULL
                         stderr=subprocess.PIPE) as proc:
+            logInstallerOperation( iid, ['command', installerCmd] )
             stderrThr = threading.Thread(target=trackStderr, args=(proc,))
             stderrThr.start()
             while time.time() < deadline:
@@ -256,10 +272,11 @@ def recruitInstance( launchedJsonFilePath, resultsLogFilePathIgnored ):
             proc.poll()
             returnCode = proc.returncode if proc.returncode != None else 124 # declare timeout if no rc
             if returnCode:
-                logger.warning( 'installerFailed on %s', iid )
-                logOperation('installerFailed', returnCode, iid )
+                logger.warning( 'installer returnCode %s', returnCode )
+            if returnCode == 124:
+                logInstallerEvent( 'timeout', args.instTimeLimit, iid )
             else:
-                logOperation( 'installed', 0, iid )
+                logInstallerEvent('returncode', returnCode, iid )
             proc.terminate()
             try:
                 proc.wait(timeout=5)
@@ -777,6 +794,7 @@ if __name__ == "__main__":
 
     progressFilePath = dataDirPath + '/progress.json'
     settingsJsonFilePath = dataDirPath + '/settings.json'
+    installerLogFilePath = dataDirPath + '/recruitInstances.jlog'
     resultsLogFilePath = dataDirPath+'/'+ \
         os.path.splitext( os.path.basename( __file__ ) )[0] + '_results.jlog'
     if resultsLogFilePath:
@@ -815,6 +833,8 @@ if __name__ == "__main__":
         goodInstances= recruitInstances( nToRecruit, dataDirPath+'/recruitLaunched.json', True )
     else:
         goodInstances = recruitInstances( nToRecruit, dataDirPath+'/survivingInstances.json', False )
+
+    g_.installerLogFile = open( installerLogFilePath, 'a' )
 
     if args.nWorkers == -1:
         # for testing, do 3 frames for every well-installed instance
