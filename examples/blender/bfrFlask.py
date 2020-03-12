@@ -332,7 +332,7 @@ def launchJob( args ):
                 val = applyDprIfNone( val, g_minDpr )
                 val = applyMinRamIfNone( val, g_minRamMB )
             cmdArgs.extend( ['--' + key, str( val )] )
-    cmdArgs.extend( ['--instTimeLimit', '1800'] )
+    cmdArgs.extend( ['--instTimeLimit', '1100'] )
     #if '--frameTimeLimit' not in cmdArgs:
     #    cmdArgs.extend( ['--frameTimeLimit', '3600'] )
     cmdArgs.extend( ['--jobId', jobId] )
