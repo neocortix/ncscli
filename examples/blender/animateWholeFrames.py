@@ -233,6 +233,7 @@ def recruitInstance( launchedJsonFilePath, resultsLogFilePathIgnored ):
 
     if sigtermSignaled():
         logger.warning( 'terminating instance because sigtermSignaled %s', iid )
+        logOperation( 'terminateFinal', [iid], '<master>' )
         ncs.terminateInstances( args.authToken, [iid] )
         return None
     else:
@@ -690,7 +691,9 @@ def recruitAndRender():
     else:
         renderFramesOnInstance( instance )
         #return renderFramesOnInstance( instances[0] )
-        ncs.terminateInstances( args.authToken, [ instance['instanceId'] ] )
+        iid = instance['instanceId']
+        logOperation( 'terminateFinal', [iid], '<master>' )
+        ncs.terminateInstances( args.authToken, [iid] )
 
 def checkForInstances():
     '''a threadproc to check whether we have enough instances running and maybe launch more'''
