@@ -488,9 +488,80 @@ def summarizeInstanceTiming( instancesByIid, terminationOps, installerSumRecs, f
         sumRec['idleDur'] = idleDur
 
     #logger.info( 'sumRecs: %s', sumRecs )
-    df = pd.DataFrame.from_dict( sumRecs, orient='index' )
-    #print( df.info() )
-    #df.to_csv( 'instanceTiming.csv', index=False, date_format=isoFormat )
+    return sumRecs
+
+def retrieveTerminations( rendererColl, instancesByIid ):
+    '''finds termination operations and returns dict by iid of dicts '''
+    terminations = {}  # collects termination operations by iid
+
+    # look for terminations due to bad install
+    termEvents = rendererColl.find(
+        {'args.terminateBad': {'$exists':True}, 'instanceId': '<recruitInstances>'}
+        )
+    for termEvent in termEvents:
+        for iid in termEvent['args']['terminateBad']:
+            tdt = universalizeDateTime( dateutil.parser.parse( termEvent['dateTime'], ignoretz=False ) )
+            #logger.info( 'terminateBad %s at %s', iid, tdt )
+            if iid in instancesByIid:
+                devId = instancesByIid[iid].get( 'device-id' )
+            else:
+                devId = 0
+            terminations[ iid ] = { 'opType': 'terminateBad',
+                'dateTime': tdt, 'devId': devId }
+
+    # look for terminations due to failed workers
+    termEvents = rendererColl.find(
+        {'args.terminateFailedWorker': {'$exists':True}, 'instanceId': '<master>'}
+        )
+    for termEvent in termEvents:
+        iid = termEvent['args']['terminateFailedWorker']
+        tdt = universalizeDateTime( dateutil.parser.parse( termEvent['dateTime'], ignoretz=False ) )
+        #logger.info( 'terminateFailedWorker %s at %s', iid, tdt )
+        if iid in instancesByIid:
+            devId = instancesByIid[iid].get( 'device-id' )
+        else:
+            devId = 0
+        if iid in terminations:
+            logger.warning( 'terminateFailedWorker already had a termination %s', terminations[iid] )
+        else:
+            terminations[ iid ] = { 'opType': 'terminateFailedWorker',
+                'dateTime': tdt, 'devId': devId }
+
+    # look for terminations due to excess workers
+    termEvents = rendererColl.find(
+        {'args.terminateExcessWorker': {'$exists':True}, 'instanceId': '<master>'}
+        )
+    for termEvent in termEvents:
+        iid = termEvent['args']['terminateExcessWorker']
+        tdt = universalizeDateTime( dateutil.parser.parse( termEvent['dateTime'], ignoretz=False ) )
+        #logger.info( 'terminateExcessWorker %s at %s (%s)', iid, tdt, termEvent['dateTime'] )
+        if iid in terminations:
+            logger.warning( 'terminateExcessWorker already had a termination %s', terminations[iid] )
+        else:
+            if iid in instancesByIid:
+                devId = instancesByIid[iid].get( 'device-id' )
+            else:
+                devId = 0
+            terminations[ iid ] = { 'opType': 'terminateExcessWorker',
+                'dateTime': tdt, 'devId': devId }
+    #logger.info( 'early terminations (%d) %s', len(terminations), terminations )
+    # look for "final" terminations
+    termEvents = rendererColl.find(
+        {'args.terminateFinal': {'$exists':True}, 'instanceId': '<master>'}
+        )
+    for termEvent in termEvents:
+        for iid in termEvent['args']['terminateFinal']:
+            tdt = universalizeDateTime( dateutil.parser.parse( termEvent['dateTime'], ignoretz=False ) )
+            #logger.info( 'terminateFinal %s at %s', iid, tdt )
+            if iid in instancesByIid:
+                devId = instancesByIid[iid].get( 'device-id' )
+            else:
+                devId = 0
+            # only add it if instance wasn't already teminated
+            if iid not in terminations:
+                terminations[ iid ] = { 'opType': 'terminateFinal',
+                    'dateTime': tdt, 'devId': devId }
+    return terminations
 
 def plotRenderTimes( framesDf, terminationOps, outFilePath ):
     '''plots rendering job timings based on frame summaries'''
@@ -682,6 +753,7 @@ if __name__ == "__main__":
     installerSummariesFilePath = args.outDir + '/installerSummaries.csv'
     frameSummariesFilePath = args.outDir + '/frameSummaries.csv'
     workerSummariesFilePath = args.outDir + '/workerSummaries.csv'
+    instanceTimingFilePath = args.outDir + '/instanceTiming.csv'
     rendererTimingPlotFilePath = args.outDir + '/rendererTiming.png'
     isoFormat = '%Y-%m-%dT%H:%M:%S.%f%z'
 
@@ -856,96 +928,6 @@ if __name__ == "__main__":
     #logger.info( 'finishedEvent %s', finishedEvent )
     endDateTime = interpretDateTimeField( finishedEvent['dateTime'] )
 
-    # as a fallback, use endDateTime as terminationDateTime (in case terminateFinal is missing)
-    terminationDateTime = endDateTime
-    # query for the terminateFinal operation, which occurs after all rendering has finished
-    terminationEvent = logsDb[rendererCollName].find_one(
-        {'args.terminateFinal': {'$exists':True}, 'instanceId': '<master>'}
-        )
-    if terminationEvent:
-        terminationDateTime = interpretDateTimeField( terminationEvent['dateTime'] )
-        logger.info( 'terminateFinal %s', terminationDateTime )
-
-    startDateTime = interpretDateTimeField( startingEvent['dateTime'] )
-
-    terminationCredit = 0
-    terminations = {}  # collects termination operations by iid
-
-    # look for terminations due to bad install
-    termEvents = logsDb[rendererCollName].find(
-        {'args.terminateBad': {'$exists':True}, 'instanceId': '<recruitInstances>'}
-        )
-    for termEvent in termEvents:
-        for iid in termEvent['args']['terminateBad']:
-            tdt = universalizeDateTime( dateutil.parser.parse( termEvent['dateTime'], ignoretz=False ) )
-            #logger.info( 'terminateBad %s at %s', iid, tdt )
-            if iid in instancesAllocated:
-                devId = instancesAllocated[iid].get( 'device-id' )
-            else:
-                devId = 0
-            terminations[ iid ] = { 'opType': 'terminateBad',
-                'dateTime': tdt, 'devId': devId }
-            terminationCredit += (terminationDateTime - tdt).total_seconds()
-    logger.info( 'terminationCredit: %.1f seconds (%.1f minutes)',
-        terminationCredit, terminationCredit/60 )
-
-    # look for terminations due to failed workers
-    termEvents = logsDb[rendererCollName].find(
-        {'args.terminateFailedWorker': {'$exists':True}, 'instanceId': '<master>'}
-        )
-    for termEvent in termEvents:
-        iid = termEvent['args']['terminateFailedWorker']
-        tdt = universalizeDateTime( dateutil.parser.parse( termEvent['dateTime'], ignoretz=False ) )
-        #logger.info( 'terminateFailedWorker %s at %s', iid, tdt )
-        if iid in instancesAllocated:
-            devId = instancesAllocated[iid].get( 'device-id' )
-        else:
-            devId = 0
-        terminations[ iid ] = { 'opType': 'terminateFailedWorker',
-            'dateTime': tdt, 'devId': devId }
-        terminationCredit += (terminationDateTime - tdt).total_seconds()
-    logger.info( 'terminationCredit: %.1f seconds (%.1f minutes)',
-        terminationCredit, terminationCredit/60 )
-
-    # look for terminations due to excess workers
-    termEvents = logsDb[rendererCollName].find(
-        {'args.terminateExcessWorker': {'$exists':True}, 'instanceId': '<master>'}
-        )
-    for termEvent in termEvents:
-        iid = termEvent['args']['terminateExcessWorker']
-        tdt = universalizeDateTime( dateutil.parser.parse( termEvent['dateTime'], ignoretz=False ) )
-        #logger.info( 'terminateExcessWorker %s at %s (%s)', iid, tdt, termEvent['dateTime'] )
-        if iid in terminations:
-            logger.warning( 'terminateExcessWorker already had a termination %s', terminations[iid] )
-        if iid in instancesAllocated:
-            devId = instancesAllocated[iid].get( 'device-id' )
-        else:
-            devId = 0
-        terminations[ iid ] = { 'opType': 'terminateExcessWorker',
-            'dateTime': tdt, 'devId': devId }
-        terminationCredit += (terminationDateTime - tdt).total_seconds()
-    logger.info( 'terminationCredit: %.1f seconds (%.1f minutes)',
-        terminationCredit, terminationCredit/60 )
-    #logger.info( 'early terminations (%d) %s', len(terminations), terminations )
-    # look for "final" terminations
-    termEvents = logsDb[rendererCollName].find(
-        {'args.terminateFinal': {'$exists':True}, 'instanceId': '<master>'}
-        )
-    for termEvent in termEvents:
-        for iid in termEvent['args']['terminateFinal']:
-            tdt = universalizeDateTime( dateutil.parser.parse( termEvent['dateTime'], ignoretz=False ) )
-            #logger.info( 'terminateFinal %s at %s', iid, tdt )
-            if iid in instancesAllocated:
-                devId = instancesAllocated[iid].get( 'device-id' )
-            else:
-                devId = 0
-            # only add it if instance wasn't already teminated
-            if iid not in terminations:
-                terminations[ iid ] = { 'opType': 'terminateFinal',
-                    'dateTime': tdt, 'devId': devId }
-                terminationCredit += (terminationDateTime - tdt).total_seconds()
-    logger.info( 'terminationCredit: %.1f seconds (%.1f minutes)',
-        terminationCredit, terminationCredit/60 )
 
     # summarize renderer events into a table
     frameSumRecs = summarizeRenderingLog( instancesAllocated, rendererCollName, tag=args.tag )
@@ -960,7 +942,37 @@ if __name__ == "__main__":
     workerIids = list( frameSummaries.instanceId.unique() )
     #workerIids = [iid for iid in byInstance.keys() if '<' not in iid]
 
-    summarizeInstanceTiming( instancesAllocated, terminations, installerSumRecs, frameSumRecs )
+    rsyncStartDateTime = frameSummaries.startDateTime.min() # actually first rsync start
+    logger.info( 'rsyncStartDateTime: %s', rsyncStartDateTime )
+
+    # as a fallback, use endDateTime as terminationDateTime (in case terminateFinal is missing)
+    terminationDateTime = endDateTime
+    # query for the terminateFinal operation, which occurs after all rendering has finished
+    terminationEvent = logsDb[rendererCollName].find_one(
+        {'args.terminateFinal': {'$exists':True}, 'instanceId': '<master>'}
+        )
+    if terminationEvent:
+        terminationDateTime = interpretDateTimeField( terminationEvent['dateTime'] )
+        logger.info( 'initial terminateFinal %s', terminationDateTime )
+
+    terminations = retrieveTerminations( logsDb[rendererCollName], instancesAllocated )
+    #terminationsTable = pd.DataFrame.from_dict( terminations, orient='index' )
+    #terminationsTable.to_csv( 'terminations.csv', index=False, date_format=isoFormat )
+
+    terminationCredit = 0
+    for iid, termOp in terminations.items():
+        if termOp['opType'] != 'terminateBad':
+            tdt = termOp['dateTime'] 
+            terminationCredit += (terminationDateTime - tdt).total_seconds()
+    logger.info( 'terminationCredit: %.1f seconds (%.1f minutes)',
+        terminationCredit, terminationCredit/60 )
+    
+    iTimingRecs = summarizeInstanceTiming( instancesAllocated, terminations, installerSumRecs, frameSumRecs )
+    instanceTimingSummaries = pd.DataFrame.from_dict( iTimingRecs, orient='index' )
+    #print( df.info() )
+    instanceTimingSummaries.to_csv( instanceTimingFilePath, index=False, date_format=isoFormat )
+    totalIdleDur = instanceTimingSummaries.idleDur.sum()
+
     #sys.exit( 'DEBUGGING')
     if True:
         sumRecs = summarizeWorkers( None, instancesAllocated, frameSummaries )
@@ -1064,11 +1076,13 @@ if __name__ == "__main__":
 
         renderingElapsedTime = (frameSummaries.endDateTime.max() - frameSummaries.startDateTime.min()).total_seconds()
         logger.info( 'renderingElapsedTime %d secs (%.1f minutes)', renderingElapsedTime, renderingElapsedTime/60)
-        totInstSecs = (renderingElapsedTime*stateCounts['installed']) - terminationCredit
-        if frameStateCounts.get('retrieved', 0):
-            body += 'overall cost of rendering was %.1f worker-minutes per frame (including failures and idle time)\n' % \
-                ((totInstSecs/60) / frameStateCounts.get('retrieved', 0))
+        #totInstSecs = (renderingElapsedTime*stateCounts['installed']) - terminationCredit
+        #if frameStateCounts.get('retrieved', 0):
+        #    body += 'overall cost of rendering was %.1f worker-minutes per frame (including failures and idle time)\n' % \
+        #        ((totInstSecs/60) / frameStateCounts.get('retrieved', 0))
 
+        body += 'total idle time was %.1f instance-minutes (including installer-idle time)\n' % (totalIdleDur/60)
+        
         body += '\nTiming Summary (durations in minutes)\n'
         eventTimings.append( eventTiming.eventTiming( 
             'launching', startDateTime,
