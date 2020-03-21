@@ -47,3 +47,14 @@
       #command: chdir=~/loadtest ./startWorker.sh
       async: 45
       poll: 0
+
+    - name: stat runLocust log
+      stat:
+        path: ~/loadtest/runLocust.log
+      register: runLocustLogStat
+
+    - name: check runLocust log
+      assert:
+        that:
+          - (runLocustLogStat.stat.exists)
+        msg: "runLocust.log not found"
