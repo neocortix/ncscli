@@ -101,7 +101,7 @@ def demuxResults( inFilePath ):
     return byInstance, badOnes
 
 
-def getStartedInstances( launchedJsonFilePath ):
+def getStartedInstancesFromFile( launchedJsonFilePath ):
     launchedInstances = []
     # get instances from the launched json file
     with open( launchedJsonFilePath, 'r') as jsonInFile:
@@ -117,19 +117,6 @@ def getStartedInstances( launchedJsonFilePath ):
     startedInstances = [inst for inst in launchedInstances if inst['state'] == 'started' ]
 
     return startedInstances
-
-def ingestJson( srcFilePath, dbName, collectionName=None ):
-    # uses some args from the global ArgumentParser
-    cmd = [
-        'mongoimport', '--host', args.mongoHost, '--port', str(args.mongoPort),
-        '--drop',
-        '-d', dbName, '-c', collectionName,
-        srcFilePath
-    ]
-    if srcFilePath.endswith( '.json' ):
-        cmd.append( '--jsonArray' )
-    #logger.info( 'cmd: %s', cmd )
-    subprocess.check_call( cmd )
 
 def getStartedInstances( db ):
     collNames = db.list_collection_names( filter={ 'name': {'$regex': r'^launchedInstances_.*'} } )
@@ -147,6 +134,132 @@ def getStartedInstances( db ):
         startedInstances.extend( [inst for inst in inRecs if inst['state'] == 'started'] )
     return startedInstances
 
+def ingestJson( srcFilePath, dbName, collectionName=None ):
+    # uses some args from the global ArgumentParser
+    cmd = [
+        'mongoimport', '--host', args.mongoHost, '--port', str(args.mongoPort),
+        '--drop',
+        '-d', dbName, '-c', collectionName,
+        srcFilePath
+    ]
+    if srcFilePath.endswith( '.json' ):
+        cmd.append( '--jsonArray' )
+    #logger.info( 'cmd: %s', cmd )
+    subprocess.check_call( cmd )
+
+def launchInstances( authToken, nInstances, sshClientKeyName, launchedJsonFilepath,
+        filtersJson=None, encryptFiles=True ):
+    returnCode = 13
+    logger.info( 'launchedJsonFilepath %s', launchedJsonFilepath )
+    try:
+        with open( launchedJsonFilepath, 'w' ) as launchedJsonFile:
+            returnCode = ncs.launchScInstances( authToken, encryptFiles, numReq=nInstances,
+                sshClientKeyName=sshClientKeyName, jsonFilter=filtersJson,
+                okToContinueFunc=sigtermNotSignaled, jsonOutFile=launchedJsonFile )
+    except Exception as exc: 
+        logger.error( 'exception while launching instances (%s) %s', type(exc), exc, exc_info=True )
+        returnCode = 99
+    return returnCode
+
+def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, resultsLogFilePath ):
+    '''launch instances and install boinc on them;
+        terminate those that could not install; return list of good instances'''
+    logger.info( 'recruiting up to %d instances', nWorkersWanted )
+    goodInstances = []
+    if launchWanted:
+        nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
+        if nWorkersWanted > (nAvail + 0):
+            logger.error( 'not enough devices available (%d requested, %d avail)', nWorkersWanted, nAvail )
+            raise ValueError( 'not enough devices available')
+        # upload an sshClientKey for launch (unless one was provided)
+        if args.sshClientKeyName:
+            sshClientKeyName = args.sshClientKeyName
+        else:
+            keyContents = loadSshPubKey()
+            randomPart = str( uuid.uuid4() )[0:13]
+            keyContents += ' #' + randomPart
+            sshClientKeyName = 'boinc_%s' % (randomPart)
+            respCode = ncs.uploadSshClientKey( args.authToken, sshClientKeyName, keyContents )
+            if respCode < 200 or respCode >= 300:
+                logger.warning( 'ncs.uploadSshClientKey returned %s', respCode )
+                sys.exit( 'could not upload SSH client key')
+        #launch
+        #logResult( 'operation', {'launchInstances': nWorkersWanted}, '<recruitInstances>' )
+        #logOperation( 'launchInstances', nWorkersWanted, '<recruitInstances>' )
+        rc = launchInstances( args.authToken, nWorkersWanted,
+            sshClientKeyName, launchedJsonFilePath, filtersJson=args.filter,
+            encryptFiles = args.encryptFiles
+            )
+        if rc:
+            logger.info( 'launchInstances returned %d', rc )
+        # delete sshClientKey only if we just uploaded it
+        if sshClientKeyName != args.sshClientKeyName:
+            logger.info( 'deleting sshClientKey %s', sshClientKeyName)
+            ncs.deleteSshClientKey( args.authToken, sshClientKeyName )
+    launchedInstances = []
+    # get instances from the launched json file
+    with open( launchedJsonFilePath, 'r') as jsonInFile:
+        try:
+            launchedInstances = json.load(jsonInFile)  # an array
+        except Exception as exc:
+            logger.warning( 'could not load json (%s) %s', type(exc), exc )
+    if len( launchedInstances ) < nWorkersWanted:
+        logger.warning( 'could not launch as many instances as wanted (%d vs %d)',
+            len( launchedInstances ), nWorkersWanted )
+    nonstartedIids = [inst['instanceId'] for inst in launchedInstances if inst['state'] != 'started' ]
+    if nonstartedIids:
+        logger.warning( 'terminating non-started instances %s', nonstartedIids )
+        ncs.terminateInstances( args.authToken, nonstartedIids )
+    # proceed with instances that were actually started
+    startedInstances = [inst for inst in launchedInstances if inst['state'] == 'started' ]
+
+    if not sigtermSignaled():
+        installerCmd = './startBoinc_seti.sh'
+        logger.info( 'calling tellInstances to install on %d instances', len(startedInstances))
+        stepStatuses = tellInstances.tellInstances( startedInstances, installerCmd,
+            resultsLogFilePath=resultsLogFilePath,
+            download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
+            timeLimit=args.timeLimit, upload='startBoinc_seti.sh', stopOnSigterm=False,
+            knownHostsOnly=False
+            )
+        # SHOULD restore our handler because tellInstances may have overridden it
+        #signal.signal( signal.SIGTERM, sigtermHandler )
+        if not stepStatuses:
+            logger.warning( 'no statuses returned from installer')
+            startedIids = [inst['instanceId'] for inst in startedInstances]
+            #logOperation( 'terminateBad', startedIids, '<recruitInstances>' )
+            ncs.terminateInstances( args.authToken, startedIids )
+            return []
+        #(goodOnes, badOnes) = triage( stepStatuses )
+        # separate good tellInstances statuses from bad ones
+        goodOnes = []
+        badOnes = []
+        for status in stepStatuses:
+            if isinstance( status['status'], int) and status['status'] == 0:
+                goodOnes.append( status['instanceId'])
+            else:
+                badOnes.append( status )
+        
+        logger.info( '%d good installs, %d bad installs', len(goodOnes), len(badOnes) )
+        logger.info( 'stepStatuses %s', stepStatuses )
+        goodInstances = [inst for inst in startedInstances if inst['instanceId'] in goodOnes ]
+        badIids = []
+        for status in badOnes:
+            badIids.append( status['instanceId'] )
+        if badIids:
+            #logOperation( 'terminateBad', badIids, '<recruitInstances>' )
+            ncs.terminateInstances( args.authToken, badIids )
+
+    return goodInstances
+
+def loadSshPubKey():
+    '''returns the contents of current user public ssh client key'''
+    pubKeyFilePath = os.path.expanduser( '~/.ssh/id_rsa.pub' )
+    with open( pubKeyFilePath ) as inFile:
+        contents = inFile.read()
+    return contents
+
+
 if __name__ == "__main__":
     # configure logger formatting
     logFmt = '%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s'
@@ -162,14 +275,19 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser( description=__doc__,
         fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( 'action', help='the action to perform', 
-        choices=['launch', 'list', 'import', 'check']
+        choices=['launch', 'report', 'import', 'check', 'terminateBad']
         )
-    ap.add_argument( '--authToken', required=False, help='the NCS authorization token to use (required)' )
+    ap.add_argument( '--authToken', help='the NCS authorization token to use (required for launch or terminate)' )
+    ap.add_argument( '--count', type=int, default=1, help='the number of instances (for launch, default=1)' )
     ap.add_argument( '--dataDir', help='data directory', default='./data/' )
+    ap.add_argument( '--encryptFiles', type=boolArg, default=False, help='whether to encrypt files on launched instances' )
+    ap.add_argument( '--filter', help='json to filter instances for launch',
+        default='{"dpr": ">=37","ram:":">=6000000000"}' )
     ap.add_argument( '--inFilePath', help='a file to read (for some actions)', default='./data/' )
-    ap.add_argument('--mongoHost', help='the host of mongodb server', default='localhost')
-    ap.add_argument('--mongoPort', help='the port of mongodb server', default=27017)
+    ap.add_argument( '--mongoHost', help='the host of mongodb server', default='localhost')
+    ap.add_argument( '--mongoPort', help='the port of mongodb server', default=27017)
     ap.add_argument( '--sshAgent', type=boolArg, default=False, help='whether or not to use ssh agent' )
+    ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use (advanced)' )
     ap.add_argument( '--tag', required=False, help='tag for data dir and collection names' )
     ap.add_argument( '--timeLimit', type=int, help='time limit (in seconds) for the whole job',
         default=2*60 )
@@ -180,7 +298,23 @@ if __name__ == "__main__":
     dbName = 'boinc_seti_0'
     db = mclient[dbName]
     launchedTag = args.tag  # '2020-03-20_173400'  # '2019-03-19_130200'
-    if args.action == 'import':
+    if args.action == 'launch':
+        startDateTime = datetime.datetime.now( datetime.timezone.utc )
+        dateTimeTagFormat = '%Y-%m-%d_%H%M%S'  # cant use iso format dates in filenames because colons
+        dateTimeTag = startDateTime.strftime( dateTimeTagFormat )
+
+        launchedJsonFilePath = os.path.join( dataDirPath, 'launched_%s.json' % dateTimeTag )
+        resultsLogFilePath = os.path.join( dataDirPath, 'startBoinc_%s.jlog' % dateTimeTag )
+        collName = 'launchedInstances_' + dateTimeTag
+        logger.info( 'would launch %d instances', args.count )
+        logger.info( 'local files %s and %s', launchedJsonFilePath, resultsLogFilePath )
+
+        goodInstances = recruitInstances( args.count, launchedJsonFilePath, True, resultsLogFilePath )
+        logger.info( 'ingesting into %s', collName )
+        ingestJson( launchedJsonFilePath, dbName, collName )
+
+        sys.exit()
+    elif args.action == 'import':
         launchedJsonFileName = 'launched_%s.json' % launchedTag
         launchedJsonFilePath = os.path.join( dataDirPath, launchedJsonFileName )
         collName = 'launchedInstances_' + launchedTag
@@ -197,22 +331,13 @@ if __name__ == "__main__":
 
         wereChecked = list( db['checkedInstances'].find() ) # fully iterates the cursor, getting all records
         checkedByIid = { inst['_id']: inst for inst in wereChecked }
-
+        # after checking, each checked instance will have "state" set to "checked", "failed", "inaccessible", or "terminated"
         checkables = []
-        if True:
-            for iid, inst in instancesByIid.items():
-                if iid in checkedByIid and checkedByIid[iid]['state'] == 'inaccessible':
-                    pass
-                else:
-                    checkables.append( inst )
-        else:
-            # older logic just goes through already-checked
-            for inRec in wereChecked:
-                if inRec['state'] != 'inaccessible':
-                    iid = inRec['_id']
-                    inst = instancesByIid[ iid ]
-                    ssh = inst['ssh']
-                    checkables.append( {'instanceId': iid, 'ssh': ssh })
+        for iid, inst in instancesByIid.items():
+            if iid in checkedByIid and checkedByIid[iid]['state'] != 'checked':
+                pass
+            else:
+                checkables.append( inst )
         logger.info( '%d instances checkable', len(checkables) )
 
         resultsLogFilePath=dataDirPath+'/checkInstances.jlog'
@@ -237,35 +362,135 @@ if __name__ == "__main__":
             if iid not in instancesByIid:
                 logger.warning( 'instance not found')
             inst = instancesByIid[ iid ]
-            if not inst['ssh']:
-                logger.warning( 'no ssh info')
             abbrevIid = iid[0:16]
+            instCheck = checkedByIid.get( iid )
+            if instCheck:
+                nExceptions = instCheck.get( 'nExceptions', 0)
+                nFailures = instCheck.get( 'nFailures', 0)
+            else:
+                nExceptions = 0
+                nFailures = 0
+            if nExceptions:
+                logger.warning( 'instance %s previouosly had %d exceptions', iid, nExceptions )
+            state = 'checked'
             for event in events:
                 #logger.info( 'event %s', event )
-                state = 'checked'
                 if 'exception' in event:
+                    nExceptions += 1
+                    if nExceptions >= 2:
+                        state = 'inaccessible'
                     exceptedIids.append( iid )
-                    state = 'inaccessible'
                     coll.update_one( {'_id': iid},
-                        { "$set": { "state": state } },
+                        { "$set": { "state": state, 'nExceptions': nExceptions } },
                         upsert=True
                         )
                 elif 'returncode' in event:
                     if event['returncode']:
-                        state = 'failed'
+                        nFailures += 1
+                        if nFailures >= 2:
+                            state = 'failed'
                         failedIids.append( iid )
                     else:
-                        state = 'checked'
                         goodIids.append( iid )
                     coll.update_one( {'_id': iid},
-                        { "$set": { "state": state } },
+                        { "$set": { "state": state, 'nFailures': nFailures, 'ssh': inst.get('ssh') } },
                         upsert=True
                         )
-
         logger.info( '%d good; %d excepted; %d failed instances',
             len(goodIids), len(exceptedIids), len(failedIids) )
         sys.exit()
+    elif args.action == 'terminateBad':
+        coll = db['checkedInstances']
+        wereChecked = list( coll.find() ) # fully iterates the cursor, getting all records
+        terminatedIids = []
+        for checkedInst in wereChecked:
+            state = checkedInst.get( 'state')
+            if state in ['failed', 'inaccessible' ]:
+                iid = checkedInst['_id']
+                abbrevIid = iid[0:16]
+                logger.warning( 'would terminate %s', abbrevIid )
+                terminatedIids.append( iid )
+                coll.update_one( {'_id': iid},
+                    { "$set": { "state": "terminated" } },
+                    upsert=False
+                    )
+        logger.info( 'terminating %d instances', len( terminatedIids ))
+        ncs.terminateInstances( args.authToken, terminatedIids )
+        sys.exit()
+    elif args.action == 'report':
+        logger.info( 'would report' )
+        # get all the nstance info; TODO avoid this by keeping ssh info in checkedInstances (or elsewhere)
+        startedInstances = getStartedInstances( db )
+        instancesByIid = {inst['instanceId']: inst for inst in startedInstances }
 
+        # will report only on "checked" instances
+        wereChecked = db['checkedInstances'].find()
+        reportables = []
+        for inst in wereChecked:
+            if inst['state'] == 'checked':
+                iid =inst['_id']
+                if iid in instancesByIid:
+                    inst[ 'instanceId'] = iid
+                    if 'ssh' not in inst:
+                        logger.info( 'getting ssh info from launchedInstances for %s', inst )
+                        inst['ssh'] = instancesByIid[iid]['ssh']
+                    reportables.append( inst )
+        logger.info( '%d instances reportable', len(reportables) )
+
+        resultsLogFilePath=dataDirPath+'/reportInstances.jlog'
+        workerCmd = "boinccmd --get_project_status | grep 'jobs succeeded: [^0]'"
+        logger.info( 'calling tellInstances to get success report on %d instances', len(reportables))
+        stepStatuses = tellInstances.tellInstances( reportables, workerCmd,
+            resultsLogFilePath=resultsLogFilePath,
+            download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
+            timeLimit=min(args.timeLimit, args.timeLimit), upload=None, stopOnSigterm=True,
+            knownHostsOnly=False
+            )
+        # triage the statuses
+        goodIids = []
+        failedIids = []
+        exceptedIids = []
+        for statusRec in stepStatuses:
+            #logger.info( 'keys: %s', statusRec.keys() )
+            iid = statusRec['instanceId']
+            abbrevId = iid[0:16]
+            status = statusRec['status']
+            #logger.info( "%s (%s) %s", abbrevId, type(status), status )
+            if isinstance( status, int) and status == 0:
+                goodIids.append( iid )
+            elif isinstance( status, int ):
+                failedIids.append( iid )
+            else:
+                exceptedIids.append( iid )
+        logger.info( '%d with successful jobs', len( goodIids ) )
+        logger.info( '%d failed', len( failedIids ) )
+        logger.info( '%d excepted', len( exceptedIids ) )
+        # read back the results
+        (eventsByInstance, badIidSet) = demuxResults( resultsLogFilePath )
+        totJobsSucc = 0
+        for iid in goodIids:
+            abbrevIid = iid[0:16]
+            #logger.info( 'iid: %s', iid)
+            events = eventsByInstance[ iid ]
+            for event in events:
+                #logger.info( 'event %s', event )
+                #eventType = event.get('type')
+                if 'stdout' in event:
+                    #logger.info( 'STDOUT: %s', event )
+                    stdoutStr = event['stdout']
+                    if 'jobs succeeded: ' in stdoutStr:
+                        numPart = stdoutStr.rsplit( 'jobs succeeded: ')[1]
+                        #logger.info( 'numPart: %s', numPart)
+                        nJobsSucc = int( numPart )
+                        #if nJobsSucc >= 3:
+                        #    logger.info( '%s nJobsSucc: %d', abbrevIid, nJobsSucc)
+                        totJobsSucc += nJobsSucc
+                    else:
+                        logger.warning( 'not matched (%s)', event )
+        logger.info( 'totJobsSucc: %d', totJobsSucc )
+
+        sys.exit()
+    # the rest is legacy code
     useDb = True
     if useDb:
         collNames = db.list_collection_names( filter={ 'name': {'$regex': r'^launchedInstances_.*'} } )
@@ -288,7 +513,7 @@ if __name__ == "__main__":
         launchedJsonFileName = 'launched_2019-03-19_130200.json'
         #launchedJsonFileName = 'launched_2019-03-19_170900.json'
         launchedJsonFilePath = os.path.join( dataDirPath, launchedJsonFileName )
-        startedInstances = getStartedInstances( launchedJsonFilePath )
+        startedInstances = getStartedInstancesFromFile( launchedJsonFilePath )
 
     if not sigtermSignaled():
         resultsLogFilePath=dataDirPath+'/jobsSucceeded.jlog'
