@@ -212,7 +212,8 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
         ncs.terminateInstances( args.authToken, nonstartedIids )
     # proceed with instances that were actually started
     startedInstances = [inst for inst in launchedInstances if inst['state'] == 'started' ]
-
+    if not startedInstances:
+        return []
     if not sigtermSignaled():
         installerCmd = './startBoinc_seti.sh'
         logger.info( 'calling tellInstances to install on %d instances', len(startedInstances))
@@ -275,12 +276,14 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser( description=__doc__,
         fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( 'action', help='the action to perform', 
-        choices=['launch', 'report', 'import', 'check', 'terminateBad']
+        choices=['launch', 'report', 'import', 'check', 'terminateBad', 'terminateAll']
         )
     ap.add_argument( '--authToken', help='the NCS authorization token to use (required for launch or terminate)' )
-    ap.add_argument( '--count', type=int, default=1, help='the number of instances (for launch, default=1)' )
+    ap.add_argument( '--count', type=int, help='the number of instances (for launch)' )
+    ap.add_argument( '--target', type=int, help='target number of working instances (for launch)' )
     ap.add_argument( '--dataDir', help='data directory', default='./data/' )
     ap.add_argument( '--encryptFiles', type=boolArg, default=False, help='whether to encrypt files on launched instances' )
+    ap.add_argument( '--farm', required=True, help='the name of the virtual boinc farm' )
     ap.add_argument( '--filter', help='json to filter instances for launch',
         default='{"dpr": ">=37","ram:":">=6000000000"}' )
     ap.add_argument( '--inFilePath', help='a file to read (for some actions)', default='./data/' )
@@ -293,9 +296,11 @@ if __name__ == "__main__":
         default=2*60 )
     args = ap.parse_args()
 
+    logger.info( 'starting action "%s" for farm "%s"', args.action, args.farm )
+
     dataDirPath = args.dataDir
     mclient = pymongo.MongoClient(args.mongoHost, args.mongoPort)
-    dbName = 'boinc_seti_0'
+    dbName = 'boinc_' + args.farm  # was 'boinc_seti_0'
     db = mclient[dbName]
     launchedTag = args.tag  # '2020-03-20_173400'  # '2019-03-19_130200'
     if args.action == 'launch':
@@ -306,13 +311,35 @@ if __name__ == "__main__":
         launchedJsonFilePath = os.path.join( dataDirPath, 'launched_%s.json' % dateTimeTag )
         resultsLogFilePath = os.path.join( dataDirPath, 'startBoinc_%s.jlog' % dateTimeTag )
         collName = 'launchedInstances_' + dateTimeTag
-        logger.info( 'would launch %d instances', args.count )
+
+        if args.count and (args.count > 0):
+            nToLaunch = args.count
+        elif args.target and (args.target > 0):
+            logger.info( 'launcher target: %s', args.target )
+            # try to reach target by counting existing working instances and launching more
+            mQuery =  {'state': 'checked' }
+            nExisting = db['checkedInstances'].count_documents( mQuery )
+            logger.info( '%d workers checked', nExisting )
+            nToLaunch = int( (args.target - nExisting) * 1.5 )
+            nToLaunch = max( nToLaunch, 0 )
+
+            nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
+            logger.info( '%d devices available', nAvail )
+
+            nToLaunch = min( nToLaunch, nAvail )
+        else:
+            sys.exit( 'error: no positive --count or --target supplied')
+        logger.info( 'would launch %d instances', nToLaunch )
+        if nToLaunch <= 0:
+            sys.exit( 'NOT launching additional instances')
         logger.info( 'local files %s and %s', launchedJsonFilePath, resultsLogFilePath )
 
-        goodInstances = recruitInstances( args.count, launchedJsonFilePath, True, resultsLogFilePath )
-        logger.info( 'ingesting into %s', collName )
-        ingestJson( launchedJsonFilePath, dbName, collName )
-
+        goodInstances = recruitInstances( nToLaunch, launchedJsonFilePath, True, resultsLogFilePath )
+        if goodInstances:
+            logger.info( 'ingesting into %s', collName )
+            ingestJson( launchedJsonFilePath, dbName, collName )
+        else:
+            logger.warning( 'no instances recruited' )
         sys.exit()
     elif args.action == 'import':
         launchedJsonFileName = 'launched_%s.json' % launchedTag
@@ -325,6 +352,10 @@ if __name__ == "__main__":
 
         sys.exit()
     elif args.action == 'check':
+        if not db.list_collection_names():
+            logger.warn( 'no collections found found for db %s', dbName )
+            sys.exit()
+
         startedInstances = getStartedInstances( db )
 
         instancesByIid = {inst['instanceId']: inst for inst in startedInstances }
@@ -400,6 +431,8 @@ if __name__ == "__main__":
             len(goodIids), len(exceptedIids), len(failedIids) )
         sys.exit()
     elif args.action == 'terminateBad':
+        if not args.authToken:
+            sys.exit( 'error: can not terminate because no authToken was passed')
         coll = db['checkedInstances']
         wereChecked = list( coll.find() ) # fully iterates the cursor, getting all records
         terminatedIids = []
@@ -410,6 +443,29 @@ if __name__ == "__main__":
                 abbrevIid = iid[0:16]
                 logger.warning( 'would terminate %s', abbrevIid )
                 terminatedIids.append( iid )
+                coll.update_one( {'_id': iid},
+                    { "$set": { "state": "terminated" } },
+                    upsert=False
+                    )
+        logger.info( 'terminating %d instances', len( terminatedIids ))
+        ncs.terminateInstances( args.authToken, terminatedIids )
+        sys.exit()
+    elif args.action == 'terminateAll':
+        if not args.authToken:
+            sys.exit( 'error: can not terminate because no authToken was passed')
+        logger.info( 'checking for instances to terminate')
+        # will terminate all instances and update checkedInstances accordingly
+        startedInstances = getStartedInstances( db )  # expensive, could just query for iids
+        wereChecked = db['checkedInstances'].find()
+        checkedByIid = { inst['_id']: inst for inst in wereChecked }
+        terminatedIids = []
+        for inst in startedInstances:
+            iid = inst['instanceId']
+            #abbrevIid = iid[0:16]
+            #logger.warning( 'would terminate %s', abbrevIid )
+            terminatedIids.append( iid )
+            checkedInst = checkedByIid[iid]
+            if checkedInst['state'] != 'terminated':
                 coll.update_one( {'_id': iid},
                     { "$set": { "state": "terminated" } },
                     upsert=False
