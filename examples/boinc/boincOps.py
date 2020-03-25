@@ -242,7 +242,7 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
                 badOnes.append( status )
         
         logger.info( '%d good installs, %d bad installs', len(goodOnes), len(badOnes) )
-        logger.info( 'stepStatuses %s', stepStatuses )
+        #logger.info( 'stepStatuses %s', stepStatuses )
         goodInstances = [inst for inst in startedInstances if inst['instanceId'] in goodOnes ]
         badIids = []
         for status in badOnes:
@@ -259,6 +259,62 @@ def loadSshPubKey():
     with open( pubKeyFilePath ) as inFile:
         contents = inFile.read()
     return contents
+
+def report_cc_status( db, dataDirPath ):
+    # will report only on "checked" instances
+    wereChecked = db['checkedInstances'].find( {'state': 'checked' } )
+    reportables = []
+    for inst in wereChecked:
+        #iid =inst['_id']
+        if 'ssh' not in inst:
+            logger.warning( 'no ssh info from checkedInstances for %s', inst )
+        else:
+            inst['instanceId'] =inst ['_id']
+            reportables.append( inst )
+
+    resultsLogFilePath=dataDirPath+'/report_cc_status.jlog'
+    workerCmd = "boinccmd --get_cc_status"
+    logger.info( 'calling tellInstances to get cc_status report on %d instances', len(reportables))
+    stepStatuses = tellInstances.tellInstances( reportables, workerCmd,
+        resultsLogFilePath=resultsLogFilePath,
+        download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
+        timeLimit=min(args.timeLimit, args.timeLimit), upload=None, stopOnSigterm=True,
+        knownHostsOnly=False
+        )
+    # triage the statuses
+    goodIids = []
+    failedIids = []
+    exceptedIids = []
+    for statusRec in stepStatuses:
+        iid = statusRec['instanceId']
+        abbrevId = iid[0:16]
+        status = statusRec['status']
+        #logger.info( "%s (%s) %s", abbrevId, type(status), status )
+        if isinstance( status, int) and status == 0:
+            goodIids.append( iid )
+        elif isinstance( status, int ):
+            failedIids.append( iid )
+        else:
+            exceptedIids.append( iid )
+    logger.info( '%d completed, %d failed, %d exceptions',
+        len( goodIids ), len( failedIids ), len( exceptedIids ) )
+    # read back the results
+    (eventsByInstance, badIidSet) = demuxResults( resultsLogFilePath )
+    nCounted = 0
+    for iid in goodIids:
+        abbrevIid = iid[0:16]
+        events = eventsByInstance[ iid ]
+        onBatteries = False
+        for event in events:
+            if 'stdout' in event:
+                stdoutStr = event['stdout']
+                if 'batteries' in stdoutStr:
+                    logger.info( "%s", stdoutStr )
+                    onBatteries = True
+        if onBatteries:
+            nCounted += 1
+            logger.warning( 'instance %s on batteries', abbrevIid )
+    logger.info( 'nOnBatteries: %d', nCounted )
 
 
 if __name__ == "__main__":
@@ -285,7 +341,7 @@ if __name__ == "__main__":
     ap.add_argument( '--encryptFiles', type=boolArg, default=False, help='whether to encrypt files on launched instances' )
     ap.add_argument( '--farm', required=True, help='the name of the virtual boinc farm' )
     ap.add_argument( '--filter', help='json to filter instances for launch',
-        default='{"dpr": ">=37","ram:":">=6000000000"}' )
+        default='{"dpr": ">=33","ram:":">=3400000000", "user":"shell.cortix@gmail.com"}' )
     ap.add_argument( '--inFilePath', help='a file to read (for some actions)', default='./data/' )
     ap.add_argument( '--mongoHost', help='the host of mongodb server', default='localhost')
     ap.add_argument( '--mongoPort', help='the port of mongodb server', default=27017)
@@ -298,7 +354,9 @@ if __name__ == "__main__":
 
     logger.info( 'starting action "%s" for farm "%s"', args.action, args.farm )
 
-    dataDirPath = args.dataDir
+    dataDirPath = os.path.join( args.dataDir, args.farm )
+    os.makedirs( dataDirPath, exist_ok=True )
+    
     mclient = pymongo.MongoClient(args.mongoHost, args.mongoPort)
     dbName = 'boinc_' + args.farm  # was 'boinc_seti_0'
     db = mclient[dbName]
@@ -424,7 +482,9 @@ if __name__ == "__main__":
                     else:
                         goodIids.append( iid )
                     coll.update_one( {'_id': iid},
-                        { "$set": { "state": state, 'nFailures': nFailures, 'ssh': inst.get('ssh') } },
+                        { "$set": { "state": state, 'nFailures': nFailures,
+                            'ssh': inst.get('ssh'), 'devId': inst.get('device-id') } 
+                            },
                         upsert=True
                         )
         logger.info( '%d good; %d excepted; %d failed instances',
@@ -456,7 +516,8 @@ if __name__ == "__main__":
         logger.info( 'checking for instances to terminate')
         # will terminate all instances and update checkedInstances accordingly
         startedInstances = getStartedInstances( db )  # expensive, could just query for iids
-        wereChecked = db['checkedInstances'].find()
+        coll = db['checkedInstances']
+        wereChecked = coll.find()
         checkedByIid = { inst['_id']: inst for inst in wereChecked }
         terminatedIids = []
         for inst in startedInstances:
@@ -474,8 +535,10 @@ if __name__ == "__main__":
         ncs.terminateInstances( args.authToken, terminatedIids )
         sys.exit()
     elif args.action == 'report':
+        report_cc_status( db, dataDirPath )
+
         logger.info( 'would report' )
-        # get all the nstance info; TODO avoid this by keeping ssh info in checkedInstances (or elsewhere)
+        # get all the instance info; TODO avoid this by keeping ssh info in checkedInstances (or elsewhere)
         startedInstances = getStartedInstances( db )
         instancesByIid = {inst['instanceId']: inst for inst in startedInstances }
 
@@ -538,8 +601,8 @@ if __name__ == "__main__":
                         numPart = stdoutStr.rsplit( 'jobs succeeded: ')[1]
                         #logger.info( 'numPart: %s', numPart)
                         nJobsSucc = int( numPart )
-                        #if nJobsSucc >= 3:
-                        #    logger.info( '%s nJobsSucc: %d', abbrevIid, nJobsSucc)
+                        if nJobsSucc >= 1:
+                            logger.info( '%s nJobsSucc: %d', abbrevIid, nJobsSucc)
                         totJobsSucc += nJobsSucc
                     else:
                         logger.warning( 'not matched (%s)', event )
