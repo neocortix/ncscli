@@ -62,6 +62,13 @@ def sigtermNotSignaled():
     return not sigtermSignaled()
 
 
+def anyFound( a, b ):
+    ''' return true iff any items from iterable a is found in iterable b '''
+    for x in a:
+        if x in b:
+            return True
+    return False
+
 def boolArg( v ):
     '''use with ArgumentParser add_argument for (case-insensitive) boolean arg'''
     if v.lower() == 'true':
@@ -123,7 +130,7 @@ def getStartedInstances( db ):
     logger.info( 'launched collections: %s', collNames )
     startedInstances = []
     for collName in collNames:
-        logger.info( 'getting instances from %s', collName )
+        #logger.info( 'getting instances from %s', collName )
         launchedColl = db[collName]
         inRecs = list( launchedColl.find() ) # fully iterates the cursor, getting all records
         if len(inRecs) <= 0:
@@ -134,7 +141,7 @@ def getStartedInstances( db ):
         startedInstances.extend( [inst for inst in inRecs if inst['state'] == 'started'] )
     return startedInstances
 
-def ingestJson( srcFilePath, dbName, collectionName=None ):
+def ingestJson( srcFilePath, dbName, collectionName ):
     # uses some args from the global ArgumentParser
     cmd = [
         'mongoimport', '--host', args.mongoHost, '--port', str(args.mongoPort),
@@ -260,6 +267,52 @@ def loadSshPubKey():
         contents = inFile.read()
     return contents
 
+def collectBoincStatus( db, dataDirPath, statusType ):
+    # will collect data only from "checked" instances
+    wereChecked = db['checkedInstances'].find( {'state': 'checked' } )
+    reportables = []
+    for inst in wereChecked:
+        #iid =inst['_id']
+        if 'ssh' not in inst:
+            logger.warning( 'no ssh info from checkedInstances for %s', inst )
+        else:
+            if 'instanceId' not in inst:
+                inst['instanceId'] =inst ['_id']
+            reportables.append( inst )
+
+    startDateTime = datetime.datetime.now( datetime.timezone.utc )
+    dateTimeTagFormat = '%Y-%m-%d_%H%M%S'  # cant use iso format dates in filenames because colons
+    dateTimeTag = startDateTime.strftime( dateTimeTagFormat )
+
+    resultsLogFilePath=dataDirPath+'/%s_%s.jlog' % (statusType, dateTimeTag )
+    collName = '%s_%s' % (statusType, dateTimeTag )
+    
+    workerCmd = "boinccmd --%s" % statusType
+    #logger.info( 'calling tellInstances to get status report on %d instances', len(reportables))
+    stepStatuses_ = tellInstances.tellInstances( reportables, workerCmd,
+        resultsLogFilePath=resultsLogFilePath,
+        download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
+        timeLimit=min(args.timeLimit, args.timeLimit), upload=None, stopOnSigterm=True,
+        knownHostsOnly=False
+        )
+    (eventsByInstance, badIidSet_) = demuxResults( resultsLogFilePath )
+    # save json file just for debugging
+    #with open( resultsLogFilePath+'.json', 'w') as jsonOutFile:
+    #    json.dump( eventsByInstance, jsonOutFile, indent=2 )
+    # create a list of cleaned-up records to insert
+    insertables = []
+    for iid, events in eventsByInstance.items():
+        for event in events:
+            if 'instanceId' in event:
+                del event['instanceId']
+        insertables.append( {'instanceId': iid, 'events': events,
+            'dateTime': events[0]['dateTime'] } )
+    logger.info( 'inserting %d records into %s', len(insertables), collName )
+    db[ collName ].insert_many( insertables )
+    db[ collName ].create_index( 'instanceId' )
+    db[ collName ].create_index( 'dateTime' )
+    #ingestJson( resultsLogFilePath, db.name, collName )
+
 def report_cc_status( db, dataDirPath ):
     # will report only on "checked" instances
     wereChecked = db['checkedInstances'].find( {'state': 'checked' } )
@@ -316,6 +369,79 @@ def report_cc_status( db, dataDirPath ):
             logger.warning( 'instance %s on batteries', abbrevIid )
     logger.info( 'nOnBatteries: %d', nCounted )
 
+def reportAll( db, dataDirPath ):
+    collNames = sorted( db.list_collection_names(
+        filter={ 'name': {'$regex': r'^get_cc_status_.*'} } ) )
+    logger.info( 'get_cc_status_ collections: %s', collNames )
+    for collName in collNames:
+        logger.info( 'getting data from %s', collName )
+        coll = db[collName]
+        # iterate over records, each containing output for an instance
+        for inRec in coll.find():
+            iid = inRec['instanceId']
+            eventDateTime = inRec['dateTime']
+            abbrevIid = iid[0:16]
+            if iid == '<master>':
+                logger.info( 'found <master> record' )
+            else:
+                logger.info( 'iid: %s', iid )
+                events = inRec['events']
+                for event in events:
+                    if 'stdout' in event:
+                        stdoutStr =  event['stdout']
+                        #logger.info( '%s: %s', abbrevIid, stdoutStr )
+                        #TODO extract more info, depending on context
+                        if 'batteries' in stdoutStr:
+                            logger.info( "%s: %s, %s", abbrevIid, eventDateTime, stdoutStr.strip() )
+
+    collNames = sorted( db.list_collection_names(
+        filter={ 'name': {'$regex': r'^get_project_status_.*'} } ) )
+    logger.info( 'get_project_status_ collections: %s', collNames )
+    for collName in collNames:
+        logger.info( 'getting data from %s', collName )
+        coll = db[collName]
+        # iterate over records, each containing output for an instance
+        for inRec in coll.find():
+            iid = inRec['instanceId']
+            eventDateTime = inRec['dateTime']
+            abbrevIid = iid[0:16]
+            if iid == '<master>':
+                logger.info( 'found <master> record' )
+            else:
+                logger.info( 'iid: %s', iid )
+                events = inRec['events']
+                for event in events:
+                    if 'stdout' in event:
+                        stdoutStr =  event['stdout']
+                        #logger.info( '%s: %s', abbrevIid, stdoutStr )
+                        #TODO extract more info, depending on context
+                        if 'downloaded' in stdoutStr or 'jobs succeeded' in stdoutStr:
+                            logger.info( "%s: %s, %s", abbrevIid, eventDateTime[0:19], stdoutStr.strip() )
+
+    collNames = sorted( db.list_collection_names(
+        filter={ 'name': {'$regex': r'^get_tasks_.*'} } ) )
+    logger.info( 'get_tasks_ collections: %s', collNames )
+    for collName in collNames:
+        logger.info( 'getting data from %s', collName )
+        coll = db[collName]
+        # iterate over records, each containing output for an instance
+        for inRec in coll.find():
+            iid = inRec['instanceId']
+            eventDateTime = inRec['dateTime']
+            abbrevIid = iid[0:16]
+            if iid == '<master>':
+                logger.info( 'found <master> record' )
+            else:
+                logger.info( 'iid: %s', iid )
+                events = inRec['events']
+                for event in events:
+                    if 'stdout' in event:
+                        stdoutStr =  event['stdout']
+                        #logger.info( '%s: %s', abbrevIid, stdoutStr )
+                        #TODO extract more info, depending on context
+                        if anyFound( ['WU name:', 'fraction done', 'UNINITIALIZED'], stdoutStr ):
+                            logger.info( "%s: %s, %s", abbrevIid, eventDateTime[0:19], stdoutStr.strip() )
+    return
 
 if __name__ == "__main__":
     # configure logger formatting
@@ -332,7 +458,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser( description=__doc__,
         fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( 'action', help='the action to perform', 
-        choices=['launch', 'report', 'import', 'check', 'terminateBad', 'terminateAll']
+        choices=['launch', 'report', 'reportAll', 'import', 'check', 'collectStatus', 'terminateBad', 'terminateAll']
         )
     ap.add_argument( '--authToken', help='the NCS authorization token to use (required for launch or terminate)' )
     ap.add_argument( '--count', type=int, help='the number of instances (for launch)' )
@@ -490,6 +616,10 @@ if __name__ == "__main__":
         logger.info( '%d good; %d excepted; %d failed instances',
             len(goodIids), len(exceptedIids), len(failedIids) )
         sys.exit()
+    elif args.action == 'collectStatus':
+        collectBoincStatus( db, dataDirPath, 'get_cc_status' )
+        collectBoincStatus( db, dataDirPath, 'get_project_status' )
+        collectBoincStatus( db, dataDirPath, 'get_tasks' )
     elif args.action == 'terminateBad':
         if not args.authToken:
             sys.exit( 'error: can not terminate because no authToken was passed')
@@ -609,81 +739,8 @@ if __name__ == "__main__":
         logger.info( 'totJobsSucc: %d', totJobsSucc )
 
         sys.exit()
-    # the rest is legacy code
-    useDb = True
-    if useDb:
-        collNames = db.list_collection_names( filter={ 'name': {'$regex': r'^launchedInstances_.*'} } )
-        logger.info( 'launched collections: %s', collNames )
-        #collName = 'launchedInstances_' + launchedTag
-        #if collName not in db.list_collection_names():
-        #    logger.warn( 'no collection found ("%s"', collName )
-        startedInstances = []
-        for collName in collNames:
-            logger.info( 'getting instances from %s', collName )
-            launchedColl = db[collName]
-            inRecs = list( launchedColl.find() ) # fully iterates the cursor, getting all records
-            if len(inRecs) <= 0:
-                logger.warn( 'no launched instances found for %s', launchedTag )
-            for inRec in inRecs:
-                if 'instanceId' not in inRec:
-                    logger.warning( 'no instance ID in input record')
-            startedInstances.extend( [inst for inst in inRecs if inst['state'] == 'started'] )
+    elif args.action == 'reportAll':
+        reportAll( db, dataDirPath )
     else:
-        launchedJsonFileName = 'launched_2019-03-19_130200.json'
-        #launchedJsonFileName = 'launched_2019-03-19_170900.json'
-        launchedJsonFilePath = os.path.join( dataDirPath, launchedJsonFileName )
-        startedInstances = getStartedInstancesFromFile( launchedJsonFilePath )
-
-    if not sigtermSignaled():
-        resultsLogFilePath=dataDirPath+'/jobsSucceeded.jlog'
-        workerCmd = "boinccmd --get_project_status | grep 'jobs succeeded: [^0]'"
-        logger.info( 'calling tellInstances get task success on %d instances', len(startedInstances))
-        stepStatuses = tellInstances.tellInstances( startedInstances, workerCmd,
-            resultsLogFilePath=resultsLogFilePath,
-            download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
-            timeLimit=min(args.timeLimit, args.timeLimit), upload=None, stopOnSigterm=True,
-            knownHostsOnly=False
-            )
-        #logger.info( 'stepStatuses %s', stepStatuses )
-        # triage the statuses
-        goodIids = []
-        failedIids = []
-        exceptedIids = []
-        for statusRec in stepStatuses:
-            #logger.info( 'keys: %s', statusRec.keys() )
-            iid = statusRec['instanceId']
-            abbrevId = iid[0:16]
-            status = statusRec['status']
-            #logger.info( "%s (%s) %s", abbrevId, type(status), status )
-            if isinstance( status, int) and status == 0:
-                goodIids.append( iid )
-            elif isinstance( status, int ):
-                failedIids.append( iid )
-            else:
-                exceptedIids.append( iid )
-        logger.info( '%d good', len( goodIids ) )
-        logger.info( '%d failed', len( failedIids ) )
-        logger.info( '%d excepted', len( exceptedIids ) )
-
-        (eventsByInstance, badIidSet) = demuxResults( resultsLogFilePath )
-        totJobsSucc = 0
-        for iid in goodIids:
-            abbrevIid = iid[0:16]
-            #logger.info( 'iid: %s', iid)
-            events = eventsByInstance[ iid ]
-            for event in events:
-                #logger.info( 'event %s', event )
-                #eventType = event.get('type')
-                if 'stdout' in event:
-                    #logger.info( 'STDOUT: %s', event )
-                    stdoutStr = event['stdout']
-                    if 'jobs succeeded: ' in stdoutStr:
-                        numPart = stdoutStr.rsplit( 'jobs succeeded: ')[1]
-                        #logger.info( 'numPart: %s', numPart)
-                        nJobsSucc = int( numPart )
-                        #if nJobsSucc >= 3:
-                        #    logger.info( '%s nJobsSucc: %d', abbrevIid, nJobsSucc)
-                        totJobsSucc += nJobsSucc
-                    else:
-                        logger.warning( 'not matched (%s)', event )
-        logger.info( 'totJobsSucc: %d', totJobsSucc )
+        logger.warning( 'action "%s" unimplemented', args.action )
+    logger.info( 'finished' )
