@@ -369,6 +369,32 @@ def report_cc_status( db, dataDirPath ):
             logger.warning( 'instance %s on batteries', abbrevIid )
     logger.info( 'nOnBatteries: %d', nCounted )
 
+def parseTaskLines( lines ):
+    tasks = []
+    curTask = {}
+    firstLine = True
+    for line in lines:
+        line = line.rstrip()
+        if not line:
+            continue
+        if firstLine and '== Tasks ==' in line:
+            continue
+        if line[0] != ' ':
+            #logger.info( 'task BOUNDARY %s', line )
+            numPart = line.split( ')' )[0]
+            taskNum = int(numPart)
+            #logger.info( 'TASK %d', taskNum )
+            curTask = { 'num': taskNum }
+            tasks.append( curTask )
+            continue
+        if ':' in line:
+            stripped = line.strip()
+            parts = stripped.split( ':', 1 )  # only the first colon will be significant
+            curTask[ parts[0] ] = parts[1].strip()
+            continue
+        logger.info( '> %s', line )
+    return tasks
+
 def reportAll( db, dataDirPath ):
     collNames = sorted( db.list_collection_names(
         filter={ 'name': {'$regex': r'^get_cc_status_.*'} } ) )
@@ -418,6 +444,7 @@ def reportAll( db, dataDirPath ):
                         if 'downloaded' in stdoutStr or 'jobs succeeded' in stdoutStr:
                             logger.info( "%s: %s, %s", abbrevIid, eventDateTime[0:19], stdoutStr.strip() )
 
+    allTasks = {}
     collNames = sorted( db.list_collection_names(
         filter={ 'name': {'$regex': r'^get_tasks_.*'} } ) )
     logger.info( 'get_tasks_ collections: %s', collNames )
@@ -429,6 +456,7 @@ def reportAll( db, dataDirPath ):
             iid = inRec['instanceId']
             eventDateTime = inRec['dateTime']
             abbrevIid = iid[0:16]
+            taskLines = []
             if iid == '<master>':
                 logger.info( 'found <master> record' )
             else:
@@ -437,10 +465,25 @@ def reportAll( db, dataDirPath ):
                 for event in events:
                     if 'stdout' in event:
                         stdoutStr =  event['stdout']
+                        taskLines.append( stdoutStr )
                         #logger.info( '%s: %s', abbrevIid, stdoutStr )
-                        #TODO extract more info, depending on context
-                        if anyFound( ['WU name:', 'fraction done', 'UNINITIALIZED'], stdoutStr ):
-                            logger.info( "%s: %s, %s", abbrevIid, eventDateTime[0:19], stdoutStr.strip() )
+                        #if anyFound( ['WU name:', 'fraction done', 'UNINITIALIZED'], stdoutStr ):
+                        #    logger.info( "%s: %s, %s", abbrevIid, eventDateTime[0:19], stdoutStr.strip() )
+            tasks = parseTaskLines( taskLines )
+            #print( 'tasks for', abbrevIid, 'from', eventDateTime[0:19] )
+            #print( tasks  )
+            for task in tasks:
+                if task['name'] not in allTasks:
+                    task['startTimeApprox'] = eventDateTime
+                    task['instanceId'] = iid
+                    allTasks[ task['name']] = task
+                else:
+                    task['lastCheckTime'] = eventDateTime
+                    allTasks[ task['name']].update( task )
+        # save json file just for debugging
+        with open( dataDirPath+'/allTasks.json', 'w') as jsonOutFile:
+            json.dump( allTasks, jsonOutFile, indent=2 )
+
     return
 
 if __name__ == "__main__":
@@ -578,13 +621,21 @@ if __name__ == "__main__":
                 logger.warning( 'instance not found')
             inst = instancesByIid[ iid ]
             abbrevIid = iid[0:16]
+            launchedDateTimeStr = inst.get( 'started-at' )
             instCheck = checkedByIid.get( iid )
             if instCheck:
                 nExceptions = instCheck.get( 'nExceptions', 0)
                 nFailures = instCheck.get( 'nFailures', 0)
             else:
+                # this is the first time checking this instance
                 nExceptions = 0
                 nFailures = 0
+                coll.insert_one( {'_id': iid,
+                    'devId': inst.get('device-id'),
+                    'launchedDateTime': launchedDateTimeStr,
+                    'ssh': inst.get('ssh')
+                } )
+
             if nExceptions:
                 logger.warning( 'instance %s previouosly had %d exceptions', iid, nExceptions )
             state = 'checked'
@@ -609,6 +660,7 @@ if __name__ == "__main__":
                         goodIids.append( iid )
                     coll.update_one( {'_id': iid},
                         { "$set": { "state": state, 'nFailures': nFailures,
+                            'launchedDateTime': launchedDateTimeStr,
                             'ssh': inst.get('ssh'), 'devId': inst.get('device-id') } 
                             },
                         upsert=True
@@ -623,6 +675,7 @@ if __name__ == "__main__":
     elif args.action == 'terminateBad':
         if not args.authToken:
             sys.exit( 'error: can not terminate because no authToken was passed')
+        terminatedDateTimeStr = datetime.datetime.now( datetime.timezone.utc ).isoformat()
         coll = db['checkedInstances']
         wereChecked = list( coll.find() ) # fully iterates the cursor, getting all records
         terminatedIids = []
@@ -634,7 +687,8 @@ if __name__ == "__main__":
                 logger.warning( 'would terminate %s', abbrevIid )
                 terminatedIids.append( iid )
                 coll.update_one( {'_id': iid},
-                    { "$set": { "state": "terminated" } },
+                    { "$set": { "state": "terminated",
+                        'terminatedDateTime': terminatedDateTimeStr } },
                     upsert=False
                     )
         logger.info( 'terminating %d instances', len( terminatedIids ))
@@ -649,18 +703,23 @@ if __name__ == "__main__":
         coll = db['checkedInstances']
         wereChecked = coll.find()
         checkedByIid = { inst['_id']: inst for inst in wereChecked }
+        terminatedDateTimeStr = datetime.datetime.now( datetime.timezone.utc ).isoformat()
         terminatedIids = []
         for inst in startedInstances:
             iid = inst['instanceId']
             #abbrevIid = iid[0:16]
             #logger.warning( 'would terminate %s', abbrevIid )
             terminatedIids.append( iid )
-            checkedInst = checkedByIid[iid]
-            if checkedInst['state'] != 'terminated':
-                coll.update_one( {'_id': iid},
-                    { "$set": { "state": "terminated" } },
-                    upsert=False
-                    )
+            if iid not in checkedByIid:
+                logger.warning( 'terminating unchecked instance %s', iid )
+            else:
+                checkedInst = checkedByIid[iid]
+                if checkedInst['state'] != 'terminated':
+                    coll.update_one( {'_id': iid},
+                        { "$set": { "state": "terminated",
+                            'terminatedDateTime': terminatedDateTimeStr } },
+                        upsert=False
+                        )
         logger.info( 'terminating %d instances', len( terminatedIids ))
         ncs.terminateInstances( args.authToken, terminatedIids )
         sys.exit()
