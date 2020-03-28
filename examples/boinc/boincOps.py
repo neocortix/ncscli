@@ -597,7 +597,7 @@ if __name__ == "__main__":
             else:
                 checkables.append( inst )
         logger.info( '%d instances checkable', len(checkables) )
-
+        checkedDateTimeStr = datetime.datetime.now( datetime.timezone.utc ).isoformat()
         resultsLogFilePath=dataDirPath+'/checkInstances.jlog'
         workerCmd = 'boinccmd --get_tasks | grep "fraction done"'
         logger.info( 'calling tellInstances on %d instances', len(checkables))
@@ -647,7 +647,8 @@ if __name__ == "__main__":
                         state = 'inaccessible'
                     exceptedIids.append( iid )
                     coll.update_one( {'_id': iid},
-                        { "$set": { "state": state, 'nExceptions': nExceptions } },
+                        { "$set": { "state": state, 'nExceptions': nExceptions,
+                            'checkedDateTime': checkedDateTimeStr } },
                         upsert=True
                         )
                 elif 'returncode' in event:
@@ -661,13 +662,59 @@ if __name__ == "__main__":
                     coll.update_one( {'_id': iid},
                         { "$set": { "state": state, 'nFailures': nFailures,
                             'launchedDateTime': launchedDateTimeStr,
+                            'checkedDateTime': checkedDateTimeStr,
                             'ssh': inst.get('ssh'), 'devId': inst.get('device-id') } 
                             },
                         upsert=True
                         )
         logger.info( '%d good; %d excepted; %d failed instances',
             len(goodIids), len(exceptedIids), len(failedIids) )
-        sys.exit()
+        reachables = [inst for inst in checkables if inst['instanceId'] not in exceptedIids ]
+
+        logger.info( 'downloading boinc*.log from %d instances', len(reachables))
+        stepStatuses = tellInstances.tellInstances( reachables,
+            download='/var/log/boinc*.log', downloadDestDir=dataDirPath+'/boincLogs', 
+            timeLimit=args.timeLimit, sshAgent=args.sshAgent,
+            stopOnSigterm=True, knownHostsOnly=False
+            )
+
+        logger.info( 'checking for project hostId for %d instances', len(reachables))
+        resultsLogFilePath=dataDirPath+'/getHostId.jlog'
+        stepStatuses = tellInstances.tellInstances( reachables,
+            command=r'grep \<hostid\> /var/lib/boinc-client/client_state.xml',
+            resultsLogFilePath=resultsLogFilePath,
+            timeLimit=args.timeLimit, sshAgent=args.sshAgent,
+            stopOnSigterm=True, knownHostsOnly=False
+            )
+        # extract hostids from stdouts
+        hostIdsByIid = {}
+        with open( resultsLogFilePath, 'rb' ) as inFile:
+            for line in inFile:
+                decoded = json.loads( line )
+                if 'stdout' in decoded:
+                    stdoutLine = decoded['stdout']
+                    iid = decoded.get( 'instanceId')
+                    if iid and ('<hostid>' in stdoutLine):
+                        #logger.info( '%s %s', iid[0:16], stdoutLine )
+                        hostId = 0
+                        try:
+                            numPart = re.search( r'\<hostid\>(.*)\</hostid\>', stdoutLine ).group(1)
+                            hostId = int( numPart )
+                        except Exception as exc:
+                            logger.warning( 'could not parse <hostid> line "%s"',
+                                stdoutLine.rstrip() )
+                        if hostId:
+                            hostIdsByIid[ iid ] = hostId
+        logger.info( 'hostIds: %s', hostIdsByIid )
+        for iid, inst in checkedByIid.items():
+            oldHostId = inst.get( 'bpsHostId' )
+            if iid in hostIdsByIid and hostIdsByIid[iid] != oldHostId:
+                coll.update_one( {'_id': iid},
+                { "$set": { "bpsHostId": hostIdsByIid[iid] } },
+                upsert=False
+                )
+               
+        
     elif args.action == 'collectStatus':
         collectBoincStatus( db, dataDirPath, 'get_cc_status' )
         collectBoincStatus( db, dataDirPath, 'get_project_status' )
