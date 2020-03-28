@@ -146,11 +146,11 @@ async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.
                 async with conn.create_process(cmd) as proc:
                     async for line in proc.stdout:
                         logger.info('stdout[%s] %s', iidAbbrev, line.strip() )
-                        logResult( 'stdout', line.strip(), iid )
+                        logResult( 'stdout', line.rstrip(), iid )
 
                     async for line in proc.stderr:
                         logger.info('stderr[%s] %s', iidAbbrev, line.strip() )
-                        logResult( 'stderr', line.strip(), iid )
+                        logResult( 'stderr', line.rstrip(), iid )
                 await proc.wait_closed()
                 logResult( 'returncode', proc.returncode, iid )
                 if proc.returncode is None:
@@ -272,8 +272,11 @@ async def run_multiple_clients( instances, cmd, timeLimit=None, sshAgent=None,
         nGood, nExceptions, nFailed, nTimedOut, nOther )
     return statuses
 
-def tellInstances( instancesSpec, command, resultsLogFilePath, download, downloadDestDir,
-    jsonOut, sshAgent, timeLimit, upload, knownHostsOnly=False, stopOnSigterm=False ):
+def tellInstances( instancesSpec, command=None, resultsLogFilePath=None,
+    download=None, downloadDestDir=None,
+    jsonOut=None, sshAgent=False, timeLimit=3600, upload=None,
+    knownHostsOnly=False, stopOnSigterm=False
+    ):
     '''tellInstances to upload, execute, and/or download, things'''
     args = locals().copy()
 
