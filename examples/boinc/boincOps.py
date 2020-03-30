@@ -78,6 +78,13 @@ def boolArg( v ):
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
+def isNumber( sss ):
+    try:
+        float(sss)
+        return True
+    except ValueError:
+        return False
+
 
 def demuxResults( inFilePath ):
     '''deinterleave jlog items into separate lists for each instance'''
@@ -312,6 +319,7 @@ def collectBoincStatus( db, dataDirPath, statusType ):
     db[ collName ].create_index( 'instanceId' )
     db[ collName ].create_index( 'dateTime' )
     #ingestJson( resultsLogFilePath, db.name, collName )
+    return db[ collName ]
 
 def report_cc_status( db, dataDirPath ):
     # will report only on "checked" instances
@@ -388,12 +396,66 @@ def parseTaskLines( lines ):
             tasks.append( curTask )
             continue
         if ':' in line:
+            # extract a key:value pair from this line
             stripped = line.strip()
             parts = stripped.split( ':', 1 )  # only the first colon will be significant
-            curTask[ parts[0] ] = parts[1].strip()
+            # convert to numeric or None type, if appropriate
+            val = parts[1].strip()
+            if val is None:
+                pass
+            elif val.isnumeric():
+                val = int( val )
+            elif isNumber( val ):
+                val = float( val )
+            # store the value
+            curTask[ parts[0] ] = val
             continue
         logger.info( '> %s', line )
     return tasks
+
+def mergeTaskData( srcColl, destColl ):
+    coll = srcColl
+    allTasks = {}
+    # iterate over records, each containing output for an instance
+    for inRec in coll.find():
+        iid = inRec['instanceId']
+        eventDateTime = inRec['dateTime']
+        abbrevIid = iid[0:16]
+        taskLines = []
+        if iid == '<master>':
+            #logger.info( 'found <master> record' )
+            pass
+        else:
+            #logger.info( 'iid: %s', iid )
+            events = inRec['events']
+            for event in events:
+                if 'stdout' in event:
+                    stdoutStr =  event['stdout']
+                    taskLines.append( stdoutStr )
+                    #logger.info( '%s: %s', abbrevIid, stdoutStr )
+                    #if anyFound( ['WU name:', 'fraction done', 'UNINITIALIZED'], stdoutStr ):
+                    #    logger.info( "%s: %s, %s", abbrevIid, eventDateTime[0:19], stdoutStr.strip() )
+        tasks = parseTaskLines( taskLines )
+        #print( 'tasks for', abbrevIid, 'from', eventDateTime[0:19] )
+        #print( tasks  )
+        for task in tasks:
+            if task['name'] not in allTasks:
+                task['startDateTimeApprox'] = eventDateTime
+                task['instanceId'] = iid
+                allTasks[ task['name']] = task
+            else:
+                task['lastCheckTime'] = eventDateTime
+                allTasks[ task['name']].update( task )
+
+    coll = destColl
+    #countsByIid = collections.Counter()
+    for task in allTasks.values():
+        taskName =  task['name']
+        task['_id'] = taskName
+        coll.replace_one( {'_id': taskName }, task, upsert=True )
+        #countsByIid[ task['instanceId'] ] += 1
+    #logger.info( 'totTasks per instance: %s', countsByIid )
+    return allTasks
 
 def reportAll( db, dataDirPath ):
     collNames = sorted( db.list_collection_names(
@@ -408,9 +470,10 @@ def reportAll( db, dataDirPath ):
             eventDateTime = inRec['dateTime']
             abbrevIid = iid[0:16]
             if iid == '<master>':
-                logger.info( 'found <master> record' )
+                #logger.info( 'found <master> record' )
+                pass
             else:
-                logger.info( 'iid: %s', iid )
+                #logger.info( 'iid: %s', iid )
                 events = inRec['events']
                 for event in events:
                     if 'stdout' in event:
@@ -432,17 +495,18 @@ def reportAll( db, dataDirPath ):
             eventDateTime = inRec['dateTime']
             abbrevIid = iid[0:16]
             if iid == '<master>':
-                logger.info( 'found <master> record' )
+                #logger.info( 'found <master> record' )
+                pass
             else:
-                logger.info( 'iid: %s', iid )
+                #logger.info( 'iid: %s', iid )
                 events = inRec['events']
                 for event in events:
                     if 'stdout' in event:
                         stdoutStr =  event['stdout']
                         #logger.info( '%s: %s', abbrevIid, stdoutStr )
                         #TODO extract more info, depending on context
-                        if 'downloaded' in stdoutStr or 'jobs succeeded' in stdoutStr:
-                            logger.info( "%s: %s, %s", abbrevIid, eventDateTime[0:19], stdoutStr.strip() )
+                        #if 'downloaded' in stdoutStr or 'jobs succeeded' in stdoutStr:
+                            #logger.info( "%s: %s, %s", abbrevIid, eventDateTime[0:19], stdoutStr.strip() )
 
     allTasks = {}
     collNames = sorted( db.list_collection_names(
@@ -451,6 +515,7 @@ def reportAll( db, dataDirPath ):
     for collName in collNames:
         logger.info( 'getting data from %s', collName )
         coll = db[collName]
+        
         # iterate over records, each containing output for an instance
         for inRec in coll.find():
             iid = inRec['instanceId']
@@ -458,9 +523,10 @@ def reportAll( db, dataDirPath ):
             abbrevIid = iid[0:16]
             taskLines = []
             if iid == '<master>':
-                logger.info( 'found <master> record' )
+                #logger.info( 'found <master> record' )
+                pass
             else:
-                logger.info( 'iid: %s', iid )
+                #logger.info( 'iid: %s', iid )
                 events = inRec['events']
                 for event in events:
                     if 'stdout' in event:
@@ -480,10 +546,19 @@ def reportAll( db, dataDirPath ):
                 else:
                     task['lastCheckTime'] = eventDateTime
                     allTasks[ task['name']].update( task )
-        # save json file just for debugging
-        with open( dataDirPath+'/allTasks.json', 'w') as jsonOutFile:
-            json.dump( allTasks, jsonOutFile, indent=2 )
-
+        
+    # save json file just for debugging
+    with open( dataDirPath+'/allTasks.json', 'w') as jsonOutFile:
+        json.dump( allTasks, jsonOutFile, indent=2 )
+    #with open( dataDirPath+'/allTasksFlat.json', 'w') as jsonOutFile:
+    #    json.dump( list( allTasks.values() ), jsonOutFile, indent=2 )
+    countsByIid = collections.Counter()
+    for task in allTasks.values():
+        taskName =  task['name']
+        task['_id'] = taskName
+        countsByIid[ task['instanceId'] ] += 1
+    logger.info( '%d total tasks listed', len( allTasks ) )
+    logger.info( 'totTasks per instance: %s', countsByIid )
     return
 
 if __name__ == "__main__":
@@ -562,9 +637,10 @@ if __name__ == "__main__":
         logger.info( 'local files %s and %s', launchedJsonFilePath, resultsLogFilePath )
 
         goodInstances = recruitInstances( nToLaunch, launchedJsonFilePath, True, resultsLogFilePath )
-        if goodInstances:
+        if nToLaunch:
             logger.info( 'ingesting into %s', collName )
             ingestJson( launchedJsonFilePath, dbName, collName )
+            ingestJson( resultsLogFilePath, dbName, 'startBoinc_'+dateTimeTag )
         else:
             logger.warning( 'no instances recruited' )
         sys.exit()
@@ -600,7 +676,7 @@ if __name__ == "__main__":
         checkedDateTimeStr = datetime.datetime.now( datetime.timezone.utc ).isoformat()
         resultsLogFilePath=dataDirPath+'/checkInstances.jlog'
         workerCmd = 'boinccmd --get_tasks | grep "fraction done"'
-        logger.info( 'calling tellInstances on %d instances', len(checkables))
+        #logger.info( 'calling tellInstances on %d instances', len(checkables))
         stepStatuses = tellInstances.tellInstances( checkables, workerCmd,
             resultsLogFilePath=resultsLogFilePath,
             download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
@@ -639,6 +715,7 @@ if __name__ == "__main__":
             if nExceptions:
                 logger.warning( 'instance %s previouosly had %d exceptions', iid, nExceptions )
             state = 'checked'
+            nCurTasks = 0
             for event in events:
                 #logger.info( 'event %s', event )
                 if 'exception' in event:
@@ -667,6 +744,23 @@ if __name__ == "__main__":
                             },
                         upsert=True
                         )
+                elif 'stdout' in event:
+                    try:
+                        stdoutStr = event['stdout']
+                        if 'fraction done' in stdoutStr:
+                            numPart = stdoutStr.rsplit( 'fraction done: ')[1]
+                            fractionDone = float( numPart )
+                            if fractionDone > 0:
+                                #logger.info( 'fractionDone %.3f', fractionDone )
+                                nCurTasks += 1
+                    except Exception as exc:
+                        logger.warning( 'could not parse <hostid> line "%s"', stdoutStr.rstrip() )
+            logger.info( '%d nCurTasks for %s', nCurTasks, abbrevIid )
+            coll.update_one( {'_id': iid},
+                { "$set": { "nCurTasks": nCurTasks } },
+                upsert=False
+                )
+
         logger.info( '%d good; %d excepted; %d failed instances',
             len(goodIids), len(exceptedIids), len(failedIids) )
         reachables = [inst for inst in checkables if inst['instanceId'] not in exceptedIids ]
@@ -718,7 +812,9 @@ if __name__ == "__main__":
     elif args.action == 'collectStatus':
         collectBoincStatus( db, dataDirPath, 'get_cc_status' )
         collectBoincStatus( db, dataDirPath, 'get_project_status' )
-        collectBoincStatus( db, dataDirPath, 'get_tasks' )
+        tasksColl = collectBoincStatus( db, dataDirPath, 'get_tasks' )
+        # could parse and merge into allTasks here
+        mergeTaskData( tasksColl, db['allTasks'] )
     elif args.action == 'terminateBad':
         if not args.authToken:
             sys.exit( 'error: can not terminate because no authToken was passed')
