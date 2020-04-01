@@ -134,7 +134,7 @@ def getStartedInstancesFromFile( launchedJsonFilePath ):
 
 def getStartedInstances( db ):
     collNames = db.list_collection_names( filter={ 'name': {'$regex': r'^launchedInstances_.*'} } )
-    logger.info( 'launched collections: %s', collNames )
+    #logger.info( 'launched collections: %s', collNames )
     startedInstances = []
     for collName in collNames:
         #logger.info( 'getting instances from %s', collName )
@@ -229,12 +229,12 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
     if not startedInstances:
         return []
     if not sigtermSignaled():
-        installerCmd = './startBoinc_seti.sh'
+        installerCmd = './' + args.installerFileName
         logger.info( 'calling tellInstances to install on %d instances', len(startedInstances))
         stepStatuses = tellInstances.tellInstances( startedInstances, installerCmd,
             resultsLogFilePath=resultsLogFilePath,
             download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
-            timeLimit=args.timeLimit, upload='startBoinc_seti.sh', stopOnSigterm=False,
+            timeLimit=args.timeLimit, upload=args.installerFileName, stopOnSigterm=False,
             knownHostsOnly=False
             )
         # SHOULD restore our handler because tellInstances may have overridden it
@@ -414,13 +414,14 @@ def parseTaskLines( lines ):
     return tasks
 
 def mergeTaskData( srcColl, destColl ):
-    coll = srcColl
+    preexisting = destColl.find( {}, {'instanceId':1, 'name':1} )
+    preexMap = { rec['name']: rec for rec in preexisting }
     allTasks = {}
     # iterate over records, each containing output for an instance
-    for inRec in coll.find():
+    for inRec in srcColl.find():
         iid = inRec['instanceId']
         eventDateTime = inRec['dateTime']
-        abbrevIid = iid[0:16]
+        #abbrevIid = iid[0:16]
         taskLines = []
         if iid == '<master>':
             #logger.info( 'found <master> record' )
@@ -439,20 +440,20 @@ def mergeTaskData( srcColl, destColl ):
         #print( 'tasks for', abbrevIid, 'from', eventDateTime[0:19] )
         #print( tasks  )
         for task in tasks:
-            if task['name'] not in allTasks:
+            task['checkedDateTime'] = eventDateTime
+            if task['name'] not in preexMap:
                 task['startDateTimeApprox'] = eventDateTime
+            if task['name'] not in allTasks:
                 task['instanceId'] = iid
                 allTasks[ task['name']] = task
             else:
-                task['lastCheckTime'] = eventDateTime
                 allTasks[ task['name']].update( task )
 
-    coll = destColl
     #countsByIid = collections.Counter()
     for task in allTasks.values():
         taskName =  task['name']
         task['_id'] = taskName
-        coll.replace_one( {'_id': taskName }, task, upsert=True )
+        destColl.replace_one( {'_id': taskName }, task, upsert=True )
         #countsByIid[ task['instanceId'] ] += 1
     #logger.info( 'totTasks per instance: %s', countsByIid )
     return allTasks
@@ -559,6 +560,11 @@ def reportAll( db, dataDirPath ):
         countsByIid[ task['instanceId'] ] += 1
     logger.info( '%d total tasks listed', len( allTasks ) )
     logger.info( 'totTasks per instance: %s', countsByIid )
+
+    logger.info( 'total tasks in db %d', db['allTasks'].count({}) )
+    #mFilter = {"fraction done": {"$gt": 0} }
+    mFilter = {"active_task_state": 'EXECUTING' }
+    logger.info( 'current tasks in db %d', db['allTasks'].count(mFilter) )
     return
 
 if __name__ == "__main__":
@@ -587,6 +593,7 @@ if __name__ == "__main__":
     ap.add_argument( '--filter', help='json to filter instances for launch',
         default='{"dpr": ">=33","ram:":">=3400000000", "user":"shell.cortix@gmail.com"}' )
     ap.add_argument( '--inFilePath', help='a file to read (for some actions)', default='./data/' )
+    ap.add_argument( '--installerFileName', help='a script to upload and run on the instances', default='startBoinc_ralph.sh' )
     ap.add_argument( '--mongoHost', help='the host of mongodb server', default='localhost')
     ap.add_argument( '--mongoPort', help='the port of mongodb server', default=27017)
     ap.add_argument( '--sshAgent', type=boolArg, default=False, help='whether or not to use ssh agent' )
@@ -689,7 +696,7 @@ if __name__ == "__main__":
         failedIids = []
         exceptedIids = []
         coll = db['checkedInstances']
-        logger.info( 'updating database' )
+        #logger.info( 'updating database' )
         for iid, events in eventsByInstance.items():
             if iid.startswith( '<'):  # skip instances with names like '<master>'
                 continue
@@ -731,7 +738,7 @@ if __name__ == "__main__":
                 elif 'returncode' in event:
                     if event['returncode']:
                         nFailures += 1
-                        if nFailures >= 2:
+                        if nFailures >= 10:
                             state = 'failed'
                         failedIids.append( iid )
                     else:
@@ -807,11 +814,18 @@ if __name__ == "__main__":
                 { "$set": { "bpsHostId": hostIdsByIid[iid] } },
                 upsert=False
                 )
-               
-        
+        # do a blind boinccmd update to trigger communication with the project server
+        stepStatuses = tellInstances.tellInstances( reachables,
+            command='boinccmd --project %s update' % 'http://ralph.bakerlab.org',
+            resultsLogFilePath=dataDirPath+'/boinccmd_update.jlog',
+            timeLimit=args.timeLimit, sshAgent=args.sshAgent,
+            stopOnSigterm=True, knownHostsOnly=False
+            )
+
     elif args.action == 'collectStatus':
         collectBoincStatus( db, dataDirPath, 'get_cc_status' )
         collectBoincStatus( db, dataDirPath, 'get_project_status' )
+        time.sleep( 6 )  # couldn't hurt
         tasksColl = collectBoincStatus( db, dataDirPath, 'get_tasks' )
         # could parse and merge into allTasks here
         mergeTaskData( tasksColl, db['allTasks'] )
@@ -869,7 +883,7 @@ if __name__ == "__main__":
     elif args.action == 'report':
         report_cc_status( db, dataDirPath )
 
-        logger.info( 'would report' )
+        #logger.info( 'would report' )
         # get all the instance info; TODO avoid this by keeping ssh info in checkedInstances (or elsewhere)
         startedInstances = getStartedInstances( db )
         instancesByIid = {inst['instanceId']: inst for inst in startedInstances }
@@ -935,6 +949,9 @@ if __name__ == "__main__":
                         nJobsSucc = int( numPart )
                         if nJobsSucc >= 1:
                             logger.info( '%s nJobsSucc: %d', abbrevIid, nJobsSucc)
+                            db['checkedInstances'].update_one( 
+                                {'_id': iid}, { "$set": { "nSuccTasks": nJobsSucc } }
+                                )
                         totJobsSucc += nJobsSucc
                     else:
                         logger.warning( 'not matched (%s)', event )
