@@ -294,7 +294,7 @@ def collectBoincStatus( db, dataDirPath, statusType ):
     resultsLogFilePath=dataDirPath+'/%s_%s.jlog' % (statusType, dateTimeTag )
     collName = '%s_%s' % (statusType, dateTimeTag )
     
-    workerCmd = "boinccmd --%s" % statusType
+    workerCmd = "boinccmd --%s || (sleep 5 && boinccmd --%s)" % (statusType, statusType)
     #logger.info( 'calling tellInstances to get status report on %d instances', len(reportables))
     stepStatuses_ = tellInstances.tellInstances( reportables, workerCmd,
         resultsLogFilePath=resultsLogFilePath,
@@ -376,6 +376,71 @@ def report_cc_status( db, dataDirPath ):
             nCounted += 1
             logger.warning( 'instance %s on batteries', abbrevIid )
     logger.info( 'nOnBatteries: %d', nCounted )
+
+def parseProjectLines( lines ):
+    props = {}
+    ignorables = ['  name: ', '  description: ', '  URL: ' ]
+    firstLine = True
+    for line in lines:
+        line = line.rstrip()
+        if not line:
+            continue
+        if firstLine:
+            firstLine = False
+            if '== Projects ==' in line:
+                continue
+            else:
+                logger.warning( 'improper first line')
+                break
+        if line[0] != ' ':
+            if line.startswith( '2)' ):
+                logger.info( 'found a second project; exiting')
+                break
+            #logger.info( 'ignoring %s', line.rstrip())
+            continue
+        if anyFound( ignorables, line ):
+            #logger.info( 'ignoring %s', line.rstrip())
+            continue
+        if ':' in line:
+            stripped = line.strip()
+            parts = stripped.split( ':', 1 )  # only the first colon will be significant
+            # convert to numeric or None type, if appropriate
+            val = parts[1].strip()
+            if val is None:
+                pass
+            elif val.isnumeric():
+                val = int( val )
+            elif isNumber( val ):
+                val = float( val )
+            props[ parts[0] ] = val
+            continue
+        logger.info( '> %s', line )
+    return props
+
+def mergeProjectData( srcColl, destColl ):
+    # iterate over records, each containing output for an instance
+    for inRec in srcColl.find():
+        iid = inRec['instanceId']
+        eventDateTime = inRec['dateTime']
+        projLines = []
+        if iid == '<master>':
+            #logger.info( 'found <master> record' )
+            pass
+        else:
+            #logger.info( 'iid: %s', iid )
+            events = inRec['events']
+            for event in events:
+                if 'stdout' in event:
+                    stdoutStr =  event['stdout']
+                    projLines.append( stdoutStr )
+        props = parseProjectLines( projLines )
+        if not props:
+            logger.info( 'empty props for %s', iid )
+        else:
+            props['instanceId'] = iid
+            props['checkedDateTime'] = eventDateTime
+            #logger.info( 'props: %s', props  )
+            destColl.replace_one( {'_id': iid }, props, upsert=True )
 
 def parseTaskLines( lines ):
     tasks = []
@@ -593,7 +658,8 @@ if __name__ == "__main__":
     ap.add_argument( '--filter', help='json to filter instances for launch',
         default='{"dpr": ">=33","ram:":">=3400000000", "user":"shell.cortix@gmail.com"}' )
     ap.add_argument( '--inFilePath', help='a file to read (for some actions)', default='./data/' )
-    ap.add_argument( '--installerFileName', help='a script to upload and run on the instances', default='startBoinc_ralph.sh' )
+    ap.add_argument( '--installerFileName', help='a script to upload and run on the instances', default='startBoinc_rosetta.sh' )
+    ap.add_argument( '--projectUrl', help='the URL to the boinc science project', default='http://boinc.bakerlab.org/rosetta/' )
     ap.add_argument( '--mongoHost', help='the host of mongodb server', default='localhost')
     ap.add_argument( '--mongoPort', help='the port of mongodb server', default=27017)
     ap.add_argument( '--sshAgent', type=boolArg, default=False, help='whether or not to use ssh agent' )
@@ -647,10 +713,12 @@ if __name__ == "__main__":
         if nToLaunch:
             logger.info( 'ingesting into %s', collName )
             ingestJson( launchedJsonFilePath, dbName, collName )
-            ingestJson( resultsLogFilePath, dbName, 'startBoinc_'+dateTimeTag )
+            if not os.path.isfile( resultsLogFilePath ):
+                logger.warning( 'no results file %s', resultsLogFilePath )
+            else:
+                ingestJson( resultsLogFilePath, dbName, 'startBoinc_'+dateTimeTag )
         else:
             logger.warning( 'no instances recruited' )
-        sys.exit()
     elif args.action == 'import':
         launchedJsonFileName = 'launched_%s.json' % launchedTag
         launchedJsonFilePath = os.path.join( dataDirPath, launchedJsonFileName )
@@ -816,7 +884,7 @@ if __name__ == "__main__":
                 )
         # do a blind boinccmd update to trigger communication with the project server
         stepStatuses = tellInstances.tellInstances( reachables,
-            command='boinccmd --project %s update' % 'http://ralph.bakerlab.org',
+            command='boinccmd --project %s update' % args.projectUrl,
             resultsLogFilePath=dataDirPath+'/boinccmd_update.jlog',
             timeLimit=args.timeLimit, sshAgent=args.sshAgent,
             stopOnSigterm=True, knownHostsOnly=False
@@ -824,7 +892,9 @@ if __name__ == "__main__":
 
     elif args.action == 'collectStatus':
         collectBoincStatus( db, dataDirPath, 'get_cc_status' )
-        collectBoincStatus( db, dataDirPath, 'get_project_status' )
+        time.sleep( 6 )  # couldn't hurt
+        projColl = collectBoincStatus( db, dataDirPath, 'get_project_status' )
+        mergeProjectData( projColl, db['projectStatus'] )
         time.sleep( 6 )  # couldn't hurt
         tasksColl = collectBoincStatus( db, dataDirPath, 'get_tasks' )
         # could parse and merge into allTasks here
@@ -916,11 +986,9 @@ if __name__ == "__main__":
         failedIids = []
         exceptedIids = []
         for statusRec in stepStatuses:
-            #logger.info( 'keys: %s', statusRec.keys() )
             iid = statusRec['instanceId']
             abbrevId = iid[0:16]
             status = statusRec['status']
-            #logger.info( "%s (%s) %s", abbrevId, type(status), status )
             if isinstance( status, int) and status == 0:
                 goodIids.append( iid )
             elif isinstance( status, int ):
@@ -935,17 +1003,12 @@ if __name__ == "__main__":
         totJobsSucc = 0
         for iid in goodIids:
             abbrevIid = iid[0:16]
-            #logger.info( 'iid: %s', iid)
             events = eventsByInstance[ iid ]
             for event in events:
-                #logger.info( 'event %s', event )
-                #eventType = event.get('type')
                 if 'stdout' in event:
-                    #logger.info( 'STDOUT: %s', event )
                     stdoutStr = event['stdout']
                     if 'jobs succeeded: ' in stdoutStr:
                         numPart = stdoutStr.rsplit( 'jobs succeeded: ')[1]
-                        #logger.info( 'numPart: %s', numPart)
                         nJobsSucc = int( numPart )
                         if nJobsSucc >= 1:
                             logger.info( '%s nJobsSucc: %d', abbrevIid, nJobsSucc)
