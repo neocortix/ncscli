@@ -175,7 +175,8 @@ def launchInstances( authToken, nInstances, sshClientKeyName, launchedJsonFilepa
         returnCode = 99
     return returnCode
 
-def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, resultsLogFilePath ):
+def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted,
+    resultsLogFilePath, installerFileName ):
     '''launch instances and install boinc on them;
         terminate those that could not install; return list of good instances'''
     logger.info( 'recruiting up to %d instances', nWorkersWanted )
@@ -229,12 +230,12 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
     if not startedInstances:
         return []
     if not sigtermSignaled():
-        installerCmd = './' + args.installerFileName
+        installerCmd = './' + installerFileName
         logger.info( 'calling tellInstances to install on %d instances', len(startedInstances))
         stepStatuses = tellInstances.tellInstances( startedInstances, installerCmd,
             resultsLogFilePath=resultsLogFilePath,
             download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
-            timeLimit=args.timeLimit, upload=args.installerFileName, stopOnSigterm=False,
+            timeLimit=args.timeLimit, upload=installerFileName, stopOnSigterm=False,
             knownHostsOnly=False
             )
         # SHOULD restore our handler because tellInstances may have overridden it
@@ -709,7 +710,15 @@ if __name__ == "__main__":
             sys.exit( 'NOT launching additional instances')
         logger.info( 'local files %s and %s', launchedJsonFilePath, resultsLogFilePath )
 
-        goodInstances = recruitInstances( nToLaunch, launchedJsonFilePath, True, resultsLogFilePath )
+        if not args.installerFileName:
+            logger.error( 'no installer script file name; use --installerFileName to supply one' )
+            raise ValueError( 'no installer script file name' )
+        if not os.path.isfile( args.installerFileName ):
+            logger.error( 'installer script file not found (%s)', args.installerFileName )
+            raise ValueError( 'installer script file not found' )
+        # launch and install, passing name of installer script to upload and run
+        goodInstances = recruitInstances( nToLaunch, launchedJsonFilePath, True,
+            resultsLogFilePath, args.installerFileName )
         if nToLaunch:
             logger.info( 'ingesting into %s', collName )
             ingestJson( launchedJsonFilePath, dbName, collName )
@@ -750,7 +759,8 @@ if __name__ == "__main__":
         logger.info( '%d instances checkable', len(checkables) )
         checkedDateTimeStr = datetime.datetime.now( datetime.timezone.utc ).isoformat()
         resultsLogFilePath=dataDirPath+'/checkInstances.jlog'
-        workerCmd = 'boinccmd --get_tasks | grep "fraction done"'
+        #workerCmd = 'boinccmd --get_tasks | grep "fraction done"'
+        workerCmd = r'boinccmd --get_tasks | grep \"active_task_state: EXEC\" || sleep 5 && boinccmd --get_tasks | grep \"active_task_state: EXEC\"'
         #logger.info( 'calling tellInstances on %d instances', len(checkables))
         stepStatuses = tellInstances.tellInstances( checkables, workerCmd,
             resultsLogFilePath=resultsLogFilePath,
@@ -822,12 +832,14 @@ if __name__ == "__main__":
                 elif 'stdout' in event:
                     try:
                         stdoutStr = event['stdout']
-                        if 'fraction done' in stdoutStr:
+                        if 'active_task_state: EXECUTING' in stdoutStr:
+                            nCurTasks += 1
+                        elif 'fraction done' in stdoutStr:  #TODO remove this
                             numPart = stdoutStr.rsplit( 'fraction done: ')[1]
                             fractionDone = float( numPart )
                             if fractionDone > 0:
                                 #logger.info( 'fractionDone %.3f', fractionDone )
-                                nCurTasks += 1
+                                nCurTasks += 0*1
                     except Exception as exc:
                         logger.warning( 'could not parse <hostid> line "%s"', stdoutStr.rstrip() )
             logger.info( '%d nCurTasks for %s', nCurTasks, abbrevIid )
