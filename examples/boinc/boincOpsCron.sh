@@ -12,21 +12,21 @@ sdtTag=$(date --date=$sdt +"%Y-%m-%d_%H%M%S")
 
 cd ~/ncscli/examples/boinc
 
-farm="seti_3"
+farm="rosetta_2"
 
 dataDirPath=data/$farm
 mkdir -p $dataDirPath
-errLogPath=$dataDirPath/boincOpsErr.log
+errLogPath=$dataDirPath/boincOps.log
 echo $errLogPath
 
 echo ">>>boincOpsCron.sh" >> $errLogPath
 echo $sdtTag >> $errLogPath
 
-./boincOps.py check \
+./boincOps.py check @../../../myAuthToken --timeLimit 180 \
     --mongoHost codero4.neocortix.com --farm $farm 2>> $errLogPath
 
 ./boincOps.py terminateBad @../../../myAuthToken \
-    --mongoHost codero4.neocortix.com --farm $farm  2>> $errLogPath
+    --mongoHost codero4.neocortix.com --farm $farm 2>> $errLogPath
 
 ./boincOps.py collectStatus \
     --mongoHost codero4.neocortix.com --farm $farm 2>> $errLogPath
@@ -34,7 +34,7 @@ echo $sdtTag >> $errLogPath
 ./boincOps.py report \
     --mongoHost codero4.neocortix.com --farm $farm 2>> $errLogPath
 
-./boincOps.py launch @../../../myAuthToken --target 3 --timeLimit 300 \
+./boincOps.py launch @../../../myAuthToken --target 30 --timeLimit 300 \
     --mongoHost codero4.neocortix.com --farm $farm 2>> $errLogPath
 
 echo ">>>boincOpsCron.sh finished"
