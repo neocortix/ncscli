@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -122,7 +123,7 @@ async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.
         #sshAgent = os.getenv( 'SSH_AUTH_SOCK' )
         #async with asyncssh.connect(host, port=port, username=user, password=password, known_hosts=None) as conn:
         async with asyncssh.connect(host, port=port, username=user,
-            keepalive_interval=10, keepalive_count_max=3,
+            keepalive_interval=15, keepalive_count_max=4,
             known_hosts=known_hosts, agent_path=sshAgent ) as conn:
             serverHostKey = conn.get_server_host_key()
             #logger.info( 'got serverHostKey (%s) %s', type(serverHostKey), serverHostKey )
@@ -155,8 +156,8 @@ async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.
                 logResult( 'returncode', proc.returncode, iid )
                 if proc.returncode is None:
                     logger.warning( 'returncode[%s] NONE', iidAbbrev )
-                elif proc.returncode:
-                    logger.warning( 'returncode %s for %s', proc.returncode, iidAbbrev )
+                #elif proc.returncode:
+                #    logger.warning( 'returncode %s for %s', proc.returncode, iidAbbrev )
 
             if dlFileName:
                 destDirPath = '%s/%s' % (dlDirPath, iid)
@@ -254,6 +255,10 @@ async def run_multiple_clients( instances, cmd, timeLimit=None, sshAgent=None,
             nExceptions += 1
             logger.warning('connection refused for %s', abbrevIid )
             inst['commandState'] = 'unreachable'
+        elif isinstance(result, socket.gaierror):  # another type of Exception
+            nExceptions += 1
+            logger.warning('gaierror "%s" for %s (%s)', result, abbrevIid, inst['ssh'].get('host') )
+            inst['commandState'] = 'gaierror'
         elif isinstance(result, asyncio.CancelledError):  # another type of Exception (sort of)
             nExceptions += 1
             logger.warning('task cancelled for %s', abbrevIid )
