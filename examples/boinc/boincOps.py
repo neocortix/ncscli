@@ -729,7 +729,7 @@ if __name__ == "__main__":
     ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use (advanced)' )
     ap.add_argument( '--tag', required=False, help='tag for data dir and collection names' )
     ap.add_argument( '--timeLimit', type=int, help='time limit (in seconds) for the whole job',
-        default=2*60 )
+        default=90 )
     args = ap.parse_args()
 
     logger.info( 'starting action "%s" for farm "%s"', args.action, args.farm )
@@ -804,7 +804,7 @@ if __name__ == "__main__":
         collection = db[collName]
         logger.info( '%s has %d documents', collName, collection.count_documents({}) )
 
-        sys.exit()
+        #sys.exit()
     elif args.action == 'check':
         if not db.list_collection_names():
             logger.warn( 'no collections found found for db %s', dbName )
@@ -866,7 +866,7 @@ if __name__ == "__main__":
             if instCheck:
                 nExceptions = instCheck.get( 'nExceptions', 0)
                 nFailures = instCheck.get( 'nFailures', 0)
-                nSuccesses = instCheck.get( 'nSuccTasks', 0) + instCheck.get( 'nSuccesses', 0)
+                nSuccesses = instCheck.get( 'nTasksComputed', 0)
             else:
                 # this is the first time checking this instance
                 nExceptions = 0
@@ -879,7 +879,7 @@ if __name__ == "__main__":
                     'ramMb': ramMb,
                     'nExceptions': 0,
                     'nFailures': 0,
-                    'nSuccTasks': 0
+                    'nTasksComputed': 0
                 } )
 
             if nExceptions:
@@ -947,10 +947,12 @@ if __name__ == "__main__":
             response = ncs.queryNcsSc( 'instances/%s' % iid, args.authToken, maxRetries=1)
             if response['statusCode'] == 200:
                 inst = response['content']
-                lastEvent = inst['events'][-1]
-                if (lastEvent['category'] == 'instance') and ('stop' in lastEvent['event']):
-                    logger.warning( 'instance found to be stopped: %s', iid )
-                    coll.update_one( {'_id': iid}, { "$set": { "state": 'stopped' } } )
+                if 'events' in inst:
+                    coll.update_one( {'_id': iid}, { "$set": { "events": inst['events'] } } )
+                    lastEvent = inst['events'][-1]
+                    if (lastEvent['category'] == 'instance') and ('stop' in lastEvent['event']):
+                        logger.warning( 'instance found to be stopped: %s', iid )
+                        coll.update_one( {'_id': iid}, { "$set": { "state": 'stopped' } } )
 
         logger.info( 'downloading boinc*.log from %d instances', len(reachables))
         stepStatuses = tellInstances.tellInstances( reachables,
@@ -1025,6 +1027,7 @@ if __name__ == "__main__":
                 upsert=False
                 )
         # do a blind boinccmd update to trigger communication with the project server
+        logger.info( 'boinccmd --project update for %d instances', len(reachables))
         stepStatuses = tellInstances.tellInstances( reachables,
             command='boinccmd --project %s update' % args.projectUrl,
             resultsLogFilePath=dataDirPath+'/boinccmd_update.jlog',
@@ -1062,7 +1065,7 @@ if __name__ == "__main__":
                     )
         logger.info( 'terminating %d instances', len( terminatedIids ))
         ncs.terminateInstances( args.authToken, terminatedIids )
-        sys.exit()
+        #sys.exit()
     elif args.action == 'terminateAll':
         if not args.authToken:
             sys.exit( 'error: can not terminate because no authToken was passed')
@@ -1091,7 +1094,7 @@ if __name__ == "__main__":
                         )
         logger.info( 'terminating %d instances', len( terminatedIids ))
         ncs.terminateInstances( args.authToken, terminatedIids )
-        sys.exit()
+        #sys.exit()
     elif args.action == 'report':
         report_cc_status( db, dataDirPath )
 
@@ -1155,16 +1158,16 @@ if __name__ == "__main__":
                         if nJobsSucc >= 1:
                             logger.info( '%s nJobsSucc: %d', abbrevIid, nJobsSucc)
                             db['checkedInstances'].update_one( 
-                                {'_id': iid}, { "$set": { "nSuccTasks": nJobsSucc } }
+                                {'_id': iid}, { "$set": { "nTasksComputed": nJobsSucc } }
                                 )
                         totJobsSucc += nJobsSucc
                     else:
                         logger.warning( 'not matched (%s)', event )
         logger.info( 'totJobsSucc: %d', totJobsSucc )
 
-        sys.exit()
+        #sys.exit()
     elif args.action == 'reportAll':
         reportAll( db, dataDirPath )
     else:
         logger.warning( 'action "%s" unimplemented', args.action )
-    logger.info( 'finished' )
+    logger.info( 'finished action "%s"', args.action )
