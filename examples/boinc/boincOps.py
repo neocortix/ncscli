@@ -5,6 +5,7 @@ sumnmarizes the status of instances running boinc client
 
 # standard library modules
 import argparse
+import asyncio
 import collections
 #import contextlib
 from concurrent import futures
@@ -40,6 +41,7 @@ except ImportError:
     os.environ["PATH"] += os.pathsep + ncscliPath
     import ncs
 import tellInstances
+import waitForScript
 
 logger = logging.getLogger(__name__)
 
@@ -266,6 +268,8 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted,
                 goodOnes.append( status['instanceId'])
             else:
                 badOnes.append( status )
+                if isinstance( status['status'], asyncio.TimeoutError ):
+                    logger.info( 'installer status asyncio.TimeoutError' )
         
         logger.info( '%d good installs, %d bad installs', len(goodOnes), len(badOnes) )
         #logger.info( 'stepStatuses %s', stepStatuses )
@@ -696,6 +700,7 @@ def reportAll( db, dataDirPath ):
     return
 
 if __name__ == "__main__":
+    startTime = time.time()
     # configure logger formatting
     logFmt = '%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s'
     logDateFmt = '%Y/%m/%d %H:%M:%S'
@@ -707,6 +712,10 @@ if __name__ == "__main__":
     tellInstances.logger.setLevel(logging.WARNING)
     logger.debug('the logger is configured')
 
+    waitForScript.logger.setLevel(logging.INFO)
+    # wait for any running instance of this script to exit
+    waitForScript.waitForScript( os.path.basename( __file__ ) )
+
     ap = argparse.ArgumentParser( description=__doc__,
         fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( 'action', help='the action to perform', 
@@ -714,7 +723,8 @@ if __name__ == "__main__":
         )
     ap.add_argument( '--authToken', help='the NCS authorization token to use (required for launch or terminate)' )
     ap.add_argument( '--count', type=int, help='the number of instances (for launch)' )
-    ap.add_argument( '--target', type=int, help='target number of working instances (for launch)' )
+    ap.add_argument( '--target', type=int, help='target number of working instances (for launch)',
+        default=520 )
     ap.add_argument( '--dataDir', help='data directory', default='./data/' )
     ap.add_argument( '--encryptFiles', type=boolArg, default=False, help='whether to encrypt files on launched instances' )
     ap.add_argument( '--farm', required=True, help='the name of the virtual boinc farm' )
@@ -765,6 +775,7 @@ if __name__ == "__main__":
             logger.info( '%d devices available', nAvail )
 
             nToLaunch = min( nToLaunch, nAvail )
+            nToLaunch = min( nToLaunch, 60 )
         else:
             sys.exit( 'error: no positive --count or --target supplied')
         logger.info( 'would launch %d instances', nToLaunch )
@@ -895,7 +906,7 @@ if __name__ == "__main__":
                     if event['exception']['type']=='ConnectionRefusedError':
                         logger.warning( 'checkInstances found ConnectionRefusedError for %s', iid )
                     #    nExceptions += 1
-                    if ((nExceptions - nSuccesses) >= 12) or(event['exception']['type']=='gaierror'):
+                    if ((nExceptions - nSuccesses*1.5) >= 12) or(event['exception']['type']=='gaierror'):
                         state = 'inaccessible'
                     exceptedIids.append( iid )
                     coll.update_one( {'_id': iid},
@@ -996,7 +1007,7 @@ if __name__ == "__main__":
         stepStatuses = tellInstances.tellInstances( reachables,
             command=r'grep \<hostid\> /var/lib/boinc-client/client_state.xml',
             resultsLogFilePath=resultsLogFilePath,
-            timeLimit=args.timeLimit, sshAgent=args.sshAgent,
+            timeLimit=min(args.timeLimit, 90), sshAgent=args.sshAgent,
             stopOnSigterm=True, knownHostsOnly=False
             )
         # extract hostids from stdouts
@@ -1031,16 +1042,16 @@ if __name__ == "__main__":
         stepStatuses = tellInstances.tellInstances( reachables,
             command='boinccmd --project %s update' % args.projectUrl,
             resultsLogFilePath=dataDirPath+'/boinccmd_update.jlog',
-            timeLimit=args.timeLimit, sshAgent=args.sshAgent,
+            timeLimit=min(args.timeLimit, 90), sshAgent=args.sshAgent,
             stopOnSigterm=True, knownHostsOnly=False
             )
 
     elif args.action == 'collectStatus':
         collectBoincStatus( db, dataDirPath, 'get_cc_status' )
-        time.sleep( 6 )  # couldn't hurt
+        #time.sleep( 6 )  # couldn't hurt (or could it?)
         projColl = collectBoincStatus( db, dataDirPath, 'get_project_status' )
         mergeProjectData( projColl, db['projectStatus'] )
-        time.sleep( 6 )  # couldn't hurt
+        #time.sleep( 6 )  # couldn't hurt (or could it?)
         tasksColl = collectBoincStatus( db, dataDirPath, 'get_tasks' )
         # could parse and merge into allTasks here
         mergeTaskData( tasksColl, db['allTasks'] )
@@ -1096,7 +1107,7 @@ if __name__ == "__main__":
         ncs.terminateInstances( args.authToken, terminatedIids )
         #sys.exit()
     elif args.action == 'report':
-        report_cc_status( db, dataDirPath )
+        #report_cc_status( db, dataDirPath )
 
         #logger.info( 'would report' )
         # get all the instance info; TODO avoid this by keeping ssh info in checkedInstances (or elsewhere)
@@ -1170,4 +1181,6 @@ if __name__ == "__main__":
         reportAll( db, dataDirPath )
     else:
         logger.warning( 'action "%s" unimplemented', args.action )
-    logger.info( 'finished action "%s"', args.action )
+    elapsed = time.time() - startTime
+    logger.info( 'finished action "%s"; elapsed time %.1f minutes',
+        args.action, elapsed/60 )
