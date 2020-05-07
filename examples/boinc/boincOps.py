@@ -26,6 +26,7 @@ import time
 import uuid
 
 # third-party module(s)
+import dateutil.parser
 import pymongo
 import requests
 
@@ -84,6 +85,16 @@ def isNumber( sss ):
         return True
     except ValueError:
         return False
+
+def datetimeIsAware( dt ):
+    if not dt: return None
+    return (dt.tzinfo is not None) and (dt.tzinfo.utcoffset( dt ) is not None)
+
+def universalizeDateTime( dt ):
+    if not dt: return None
+    if datetimeIsAware( dt ):
+        return dt.astimezone(datetime.timezone.utc)
+    return dt.replace( tzinfo=datetime.timezone.utc )
 
 
 def demuxResults( inFilePath ):
@@ -266,7 +277,7 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted,
             #logOperation( 'terminateBad', badIids, '<recruitInstances>' )
             ncs.terminateInstances( args.authToken, badIids )
 
-    return goodInstances
+    return goodInstances, badOnes
 
 def loadSshPubKey():
     '''returns the contents of current user public ssh client key'''
@@ -274,6 +285,56 @@ def loadSshPubKey():
     with open( pubKeyFilePath ) as inFile:
         contents = inFile.read()
     return contents
+
+def lastGenDateTime( coll ):
+    found = coll.find().sort([( '$natural', -1 )]).limit(1)
+    if found:
+        return found[0]['_id'].generation_time
+    return None
+
+def ingestBoincLog( logFile, coll ):
+    '''ingest records from a boinc log innto a mongo collection'''
+    linePat = r'(.*)\[(.*)\](.*)'
+    #projSet = set()  # for debugging
+    recs = []
+    for line in logFile:
+        line = line.rstrip()
+        if not line:
+            continue
+        if line.endswith( 'Initialization completed' ):
+            datePart = line.split(' Init')[0]
+            dateTime = universalizeDateTime( dateutil.parser.parse( datePart ) )
+            projPart = '---'  # really none, but this is what most non-project lines contain
+            msg = 'Initialization completed'
+            recs.append( {
+                'dateTime': dateTime.isoformat(),
+                'project': projPart,
+                'msg': msg
+                } )
+            continue
+        match = re.match( linePat, line )
+        if not match:
+            logger.warning( 'no match in %s', line )
+            continue
+        if len( match.groups() ) == 3:
+            datePart = match.group(1)
+            projPart = match.group(2)
+            msgPart = match.group(3)
+            
+            #if projPart not in projSet:
+            #    logger.info( 'proj %s', projPart )
+            #    projSet.add( projPart )
+            dateTime = universalizeDateTime( dateutil.parser.parse( datePart ) )
+            
+            msg = msgPart.strip()
+            recs.append( {
+                'dateTime': dateTime.isoformat(),
+                'project': projPart,
+                'msg': msg
+                } )
+    if len(recs):
+        coll.insert_many( recs, ordered=True )
+    #return recs
 
 def collectBoincStatus( db, dataDirPath, statusType ):
     # will collect data only from "checked" instances
@@ -436,7 +497,8 @@ def mergeProjectData( srcColl, destColl ):
                     projLines.append( stdoutStr )
         props = parseProjectLines( projLines )
         if not props:
-            logger.info( 'empty props for %s', iid )
+            pass
+            #logger.info( 'empty props for %s', iid )
         else:
             props['instanceId'] = iid
             props['checkedDateTime'] = eventDateTime
@@ -657,7 +719,7 @@ if __name__ == "__main__":
     ap.add_argument( '--encryptFiles', type=boolArg, default=False, help='whether to encrypt files on launched instances' )
     ap.add_argument( '--farm', required=True, help='the name of the virtual boinc farm' )
     ap.add_argument( '--filter', help='json to filter instances for launch',
-        default='{"dpr": ">=33","ram:":">=3400000000", "user":"shell.cortix@gmail.com"}' )
+        default='{"dpr": ">=39", "ram": ">=3000000000", "storage": ">=2000000000", "app-version":2104}' )
     ap.add_argument( '--inFilePath', help='a file to read (for some actions)', default='./data/' )
     ap.add_argument( '--installerFileName', help='a script to upload and run on the instances', default='startBoinc_rosetta.sh' )
     ap.add_argument( '--projectUrl', help='the URL to the boinc science project', default='http://boinc.bakerlab.org/rosetta/' )
@@ -717,7 +779,7 @@ if __name__ == "__main__":
             logger.error( 'installer script file not found (%s)', args.installerFileName )
             raise ValueError( 'installer script file not found' )
         # launch and install, passing name of installer script to upload and run
-        goodInstances = recruitInstances( nToLaunch, launchedJsonFilePath, True,
+        (goodInstances, badStatuses) = recruitInstances( nToLaunch, launchedJsonFilePath, True,
             resultsLogFilePath, args.installerFileName )
         if nToLaunch:
             logger.info( 'ingesting into %s', collName )
@@ -726,6 +788,11 @@ if __name__ == "__main__":
                 logger.warning( 'no results file %s', resultsLogFilePath )
             else:
                 ingestJson( resultsLogFilePath, dbName, 'startBoinc_'+dateTimeTag )
+            for statusRec in badStatuses:
+                statusRec['status'] = str(statusRec['status'])
+                statusRec['dateTime'] = startDateTime.isoformat()
+                statusRec['_id' ] = statusRec['instanceId']
+                db['badInstalls'].insert_one( statusRec )
         else:
             logger.warning( 'no instances recruited' )
     elif args.action == 'import':
@@ -754,13 +821,21 @@ if __name__ == "__main__":
         for iid, inst in instancesByIid.items():
             if iid in checkedByIid and checkedByIid[iid]['state'] != 'checked':
                 pass
+            elif db['badInstalls'].find_one( {'_id': iid }):
+                pass
+                #logger.info('skipping badinstalled instance %s', iid )
             else:
                 checkables.append( inst )
         logger.info( '%d instances checkable', len(checkables) )
-        checkedDateTimeStr = datetime.datetime.now( datetime.timezone.utc ).isoformat()
-        resultsLogFilePath=dataDirPath+'/checkInstances.jlog'
+        checkedDateTime = datetime.datetime.now( datetime.timezone.utc )
+        checkedDateTimeStr = checkedDateTime.isoformat()
+        dateTimeTagFormat = '%Y-%m-%d_%H%M%S'  # cant use iso format dates in filenames because colons
+        dateTimeTag = checkedDateTime.strftime( dateTimeTagFormat )
+
+        resultsLogFilePath=dataDirPath+('/checkInstances_%s.jlog' % dateTimeTag)
         #workerCmd = 'boinccmd --get_tasks | grep "fraction done"'
-        workerCmd = r'boinccmd --get_tasks | grep \"active_task_state: EXEC\" || sleep 5 && boinccmd --get_tasks | grep \"active_task_state: EXEC\"'
+        #workerCmd = r'boinccmd --get_tasks | grep \"active_task_state: EXEC\" || sleep 5 && boinccmd --get_tasks | grep \"active_task_state: EXEC\"'
+        workerCmd = r'boinccmd --get_tasks | grep active_task_state || sleep 6 && boinccmd --get_tasks | grep active_task_state'
         #logger.info( 'calling tellInstances on %d instances', len(checkables))
         stepStatuses = tellInstances.tellInstances( checkables, workerCmd,
             resultsLogFilePath=resultsLogFilePath,
@@ -768,7 +843,7 @@ if __name__ == "__main__":
             timeLimit=min(args.timeLimit, args.timeLimit), upload=None, stopOnSigterm=True,
             knownHostsOnly=False
             )
-
+        ingestJson( resultsLogFilePath, db.name, 'checkInstances_'+dateTimeTag )
         (eventsByInstance, badIidSet) = demuxResults( resultsLogFilePath )
         goodIids = []
         failedIids = []
@@ -784,28 +859,43 @@ if __name__ == "__main__":
             abbrevIid = iid[0:16]
             launchedDateTimeStr = inst.get( 'started-at' )
             instCheck = checkedByIid.get( iid )
+            if 'ram' in inst:
+                ramMb = inst['ram']['total'] / 1000000
+            else:
+                ramMb = 0
             if instCheck:
                 nExceptions = instCheck.get( 'nExceptions', 0)
                 nFailures = instCheck.get( 'nFailures', 0)
+                nSuccesses = instCheck.get( 'nSuccTasks', 0) + instCheck.get( 'nSuccesses', 0)
             else:
                 # this is the first time checking this instance
                 nExceptions = 0
                 nFailures = 0
+                nSuccesses = 0
                 coll.insert_one( {'_id': iid,
                     'devId': inst.get('device-id'),
                     'launchedDateTime': launchedDateTimeStr,
-                    'ssh': inst.get('ssh')
+                    'ssh': inst.get('ssh'),
+                    'ramMb': ramMb,
+                    'nExceptions': 0,
+                    'nFailures': 0,
+                    'nSuccTasks': 0
                 } )
 
             if nExceptions:
-                logger.warning( 'instance %s previouosly had %d exceptions', iid, nExceptions )
+                logger.warning( 'instance %s previously had %d exceptions', iid, nExceptions )
             state = 'checked'
             nCurTasks = 0
             for event in events:
                 #logger.info( 'event %s', event )
                 if 'exception' in event:
                     nExceptions += 1
-                    if nExceptions >= 2:
+                    if event['exception']['type']=='gaierror':
+                        logger.warning( 'checkInstances found gaierror, will mark as inaccessible %s', iid )
+                    if event['exception']['type']=='ConnectionRefusedError':
+                        logger.warning( 'checkInstances found ConnectionRefusedError for %s', iid )
+                    #    nExceptions += 1
+                    if ((nExceptions - nSuccesses) >= 12) or(event['exception']['type']=='gaierror'):
                         state = 'inaccessible'
                     exceptedIids.append( iid )
                     coll.update_one( {'_id': iid},
@@ -816,7 +906,7 @@ if __name__ == "__main__":
                 elif 'returncode' in event:
                     if event['returncode']:
                         nFailures += 1
-                        if nFailures >= 10:
+                        if (nFailures - nSuccesses) >= 10:
                             state = 'failed'
                         failedIids.append( iid )
                     else:
@@ -844,7 +934,7 @@ if __name__ == "__main__":
                         logger.warning( 'could not parse <hostid> line "%s"', stdoutStr.rstrip() )
             logger.info( '%d nCurTasks for %s', nCurTasks, abbrevIid )
             coll.update_one( {'_id': iid},
-                { "$set": { "nCurTasks": nCurTasks } },
+                { "$set": { "nCurTasks": nCurTasks, "ramMb": ramMb } },
                 upsert=False
                 )
 
@@ -852,12 +942,52 @@ if __name__ == "__main__":
             len(goodIids), len(exceptedIids), len(failedIids) )
         reachables = [inst for inst in checkables if inst['instanceId'] not in exceptedIids ]
 
+        # query cloudserver to see if any of the excepted instances are dead
+        for iid in exceptedIids:
+            response = ncs.queryNcsSc( 'instances/%s' % iid, args.authToken, maxRetries=1)
+            if response['statusCode'] == 200:
+                inst = response['content']
+                lastEvent = inst['events'][-1]
+                if (lastEvent['category'] == 'instance') and ('stop' in lastEvent['event']):
+                    logger.warning( 'instance found to be stopped: %s', iid )
+                    coll.update_one( {'_id': iid}, { "$set": { "state": 'stopped' } } )
+
         logger.info( 'downloading boinc*.log from %d instances', len(reachables))
         stepStatuses = tellInstances.tellInstances( reachables,
             download='/var/log/boinc*.log', downloadDestDir=dataDirPath+'/boincLogs', 
             timeLimit=args.timeLimit, sshAgent=args.sshAgent,
             stopOnSigterm=True, knownHostsOnly=False
             )
+        # prepare to ingest all new or updated boinc logs
+        logsDirPath = os.path.join( dataDirPath, 'boincLogs' )
+        logDirs = os.listdir( logsDirPath )
+        logger.info( '%d logDirs found', len(logDirs ) )
+        loggedCollNames = db.list_collection_names(
+            filter={ 'name': {'$regex': r'^boincLog_.*'} } )
+        for logDir in logDirs:
+            # logDir is also the instanceId
+            inFilePath = os.path.join( logsDirPath, logDir, 'boinc.log' )
+            collName = 'boincLog_' + logDir
+            if collName in loggedCollNames:
+                existingGenTime = lastGenDateTime( db[collName] ) - datetime.timedelta(hours=1)
+                fileModDateTime = datetime.datetime.fromtimestamp( os.path.getmtime( inFilePath ) )
+                fileModDateTime = universalizeDateTime( fileModDateTime )
+                if existingGenTime >= fileModDateTime:
+                    #logger.info( 'already posted %s %s %s',
+                    #    logDir[0:8], fmtDt( existingGenTime ), fmtDt( fileModDateTime )  )
+                    continue
+            if not os.path.isfile( inFilePath ):
+                logger.warning( 'no file "%s"', inFilePath )
+            else:
+                #logger.info( 'parsing log for %s', logDir[0:16] )
+                try:
+                    with open( inFilePath, 'r' ) as logFile:
+                        # for safety, ingest to a temp collection and then rename (with replace) when done
+                        ingestBoincLog( logFile, db['boincLog_temp'] )
+                        db['boincLog_temp'].rename( collName, dropTarget=True )
+                except Exception as exc:
+                    logger.warning( 'exception (%s) ingesting %s', type(exc), inFilePath, exc_info=True )
+
 
         logger.info( 'checking for project hostId for %d instances', len(reachables))
         resultsLogFilePath=dataDirPath+'/getHostId.jlog'
@@ -886,7 +1016,7 @@ if __name__ == "__main__":
                                 stdoutLine.rstrip() )
                         if hostId:
                             hostIdsByIid[ iid ] = hostId
-        logger.info( 'hostIds: %s', hostIdsByIid )
+        #logger.info( 'hostIds: %s', hostIdsByIid )
         for iid, inst in checkedByIid.items():
             oldHostId = inst.get( 'bpsHostId' )
             if iid in hostIdsByIid and hostIdsByIid[iid] != oldHostId:
@@ -920,7 +1050,7 @@ if __name__ == "__main__":
         terminatedIids = []
         for checkedInst in wereChecked:
             state = checkedInst.get( 'state')
-            if state in ['failed', 'inaccessible' ]:
+            if state in ['failed', 'inaccessible', 'stopped' ]:
                 iid = checkedInst['_id']
                 abbrevIid = iid[0:16]
                 logger.warning( 'would terminate %s', abbrevIid )

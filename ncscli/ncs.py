@@ -397,7 +397,7 @@ def terminateNcscInstance( authToken, iid ):
         logger.warn( 'response code %s', resp.status_code )
         if len( resp.text ):
             logger.info( 'response "%s"', resp.text )
-        if resp.status_code == 502:  # "bad gateway"
+        if resp.status_code in [502, 504]:  # "bad gateway", "gateway timeout"
             time.sleep( 10 )
             return terminateNcscInstance( authToken, iid )
     return resp.status_code
