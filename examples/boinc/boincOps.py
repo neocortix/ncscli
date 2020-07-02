@@ -714,7 +714,7 @@ if __name__ == "__main__":
 
     waitForScript.logger.setLevel(logging.INFO)
     # wait for any running instance of this script to exit
-    waitForScript.waitForScript( os.path.basename( __file__ ) )
+    #waitForScript.waitForScript( os.path.basename( __file__ ) )
 
     ap = argparse.ArgumentParser( description=__doc__,
         fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
@@ -724,7 +724,7 @@ if __name__ == "__main__":
     ap.add_argument( '--authToken', help='the NCS authorization token to use (required for launch or terminate)' )
     ap.add_argument( '--count', type=int, help='the number of instances (for launch)' )
     ap.add_argument( '--target', type=int, help='target number of working instances (for launch)',
-        default=520 )
+        default=150 )
     ap.add_argument( '--dataDir', help='data directory', default='./data/' )
     ap.add_argument( '--encryptFiles', type=boolArg, default=False, help='whether to encrypt files on launched instances' )
     ap.add_argument( '--farm', required=True, help='the name of the virtual boinc farm' )
@@ -820,7 +820,7 @@ if __name__ == "__main__":
         if not db.list_collection_names():
             logger.warn( 'no collections found found for db %s', dbName )
             sys.exit()
-
+        checkerTimeLimit = 360
         startedInstances = getStartedInstances( db )
 
         instancesByIid = {inst['instanceId']: inst for inst in startedInstances }
@@ -851,7 +851,7 @@ if __name__ == "__main__":
         stepStatuses = tellInstances.tellInstances( checkables, workerCmd,
             resultsLogFilePath=resultsLogFilePath,
             download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
-            timeLimit=min(args.timeLimit, args.timeLimit), upload=None, stopOnSigterm=True,
+            timeLimit=checkerTimeLimit, upload=None, stopOnSigterm=True,
             knownHostsOnly=False
             )
         ingestJson( resultsLogFilePath, db.name, 'checkInstances_'+dateTimeTag )
@@ -859,6 +859,7 @@ if __name__ == "__main__":
         goodIids = []
         failedIids = []
         exceptedIids = []
+        timedOutIids = []
         coll = db['checkedInstances']
         #logger.info( 'updating database' )
         for iid, events in eventsByInstance.items():
@@ -878,11 +879,13 @@ if __name__ == "__main__":
                 nExceptions = instCheck.get( 'nExceptions', 0)
                 nFailures = instCheck.get( 'nFailures', 0)
                 nSuccesses = instCheck.get( 'nTasksComputed', 0)
+                nTimeouts = instCheck.get( 'nTimeouts', 0)
             else:
                 # this is the first time checking this instance
                 nExceptions = 0
                 nFailures = 0
                 nSuccesses = 0
+                nTimeouts = 0
                 coll.insert_one( {'_id': iid,
                     'devId': inst.get('device-id'),
                     'launchedDateTime': launchedDateTimeStr,
@@ -890,7 +893,8 @@ if __name__ == "__main__":
                     'ramMb': ramMb,
                     'nExceptions': 0,
                     'nFailures': 0,
-                    'nTasksComputed': 0
+                    'nTasksComputed': 0,
+                    'nTimeouts': 0
                 } )
 
             if nExceptions:
@@ -911,6 +915,15 @@ if __name__ == "__main__":
                     exceptedIids.append( iid )
                     coll.update_one( {'_id': iid},
                         { "$set": { "state": state, 'nExceptions': nExceptions,
+                            'checkedDateTime': checkedDateTimeStr } },
+                        upsert=True
+                        )
+                elif 'timeout' in event:
+                    #logger.info('timeout in checkInstances (%d)', event['timeout'] )
+                    nTimeouts +=1
+                    timedOutIids.append( iid )
+                    coll.update_one( {'_id': iid},
+                        { "$set": { "state": state, 'nTimeouts': nTimeouts,
                             'checkedDateTime': checkedDateTimeStr } },
                         upsert=True
                         )
@@ -949,8 +962,8 @@ if __name__ == "__main__":
                 upsert=False
                 )
 
-        logger.info( '%d good; %d excepted; %d failed instances',
-            len(goodIids), len(exceptedIids), len(failedIids) )
+        logger.info( '%d good; %d excepted; %d timed out; %d failed instances',
+            len(goodIids), len(exceptedIids), len(timedOutIids), len(failedIids) )
         reachables = [inst for inst in checkables if inst['instanceId'] not in exceptedIids ]
 
         # query cloudserver to see if any of the excepted instances are dead
@@ -999,7 +1012,7 @@ if __name__ == "__main__":
                         ingestBoincLog( logFile, db['boincLog_temp'] )
                         db['boincLog_temp'].rename( collName, dropTarget=True )
                 except Exception as exc:
-                    logger.warning( 'exception (%s) ingesting %s', type(exc), inFilePath, exc_info=True )
+                    logger.warning( 'exception (%s) ingesting %s', type(exc), inFilePath, exc_info=False )
 
 
         logger.info( 'checking for project hostId for %d instances', len(reachables))
@@ -1128,13 +1141,14 @@ if __name__ == "__main__":
                     reportables.append( inst )
         logger.info( '%d instances reportable', len(reportables) )
 
+        projStatusTimeLimit = 180
         resultsLogFilePath=dataDirPath+'/reportInstances.jlog'
         workerCmd = "boinccmd --get_project_status | grep 'jobs succeeded: [^0]'"
         logger.info( 'calling tellInstances to get success report on %d instances', len(reportables))
         stepStatuses = tellInstances.tellInstances( reportables, workerCmd,
             resultsLogFilePath=resultsLogFilePath,
             download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
-            timeLimit=min(args.timeLimit, args.timeLimit), upload=None, stopOnSigterm=True,
+            timeLimit=projStatusTimeLimit, upload=None, stopOnSigterm=True,
             knownHostsOnly=False
             )
         # triage the statuses
