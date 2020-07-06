@@ -385,6 +385,7 @@ def collectBoincStatus( db, dataDirPath, statusType ):
     db[ collName ].create_index( 'instanceId' )
     db[ collName ].create_index( 'dateTime' )
     #ingestJson( resultsLogFilePath, db.name, collName )
+    os.remove( resultsLogFilePath )
     return db[ collName ]
 
 def report_cc_status( db, dataDirPath ):
@@ -988,6 +989,19 @@ if __name__ == "__main__":
         logsDirPath = os.path.join( dataDirPath, 'boincLogs' )
         logDirs = os.listdir( logsDirPath )
         logger.info( '%d logDirs found', len(logDirs ) )
+        # but first, delete very old log files
+        lookbackDays = 7
+        thresholdDateTime = datetime.datetime.now( datetime.timezone.utc ) \
+            - datetime.timedelta( days=lookbackDays )
+        for logDir in logDirs:
+            inFilePath = os.path.join( logsDirPath, logDir, 'boinc.log' )
+            if os.path.isfile( inFilePath ):
+                fileModDateTime = datetime.datetime.fromtimestamp( os.path.getmtime( inFilePath ) )
+                fileModDateTime = universalizeDateTime( fileModDateTime )
+                if fileModDateTime <= thresholdDateTime:
+                    os.remove( inFilePath )
+        
+        # ingest all new or updated boinc logs
         loggedCollNames = db.list_collection_names(
             filter={ 'name': {'$regex': r'^boincLog_.*'} } )
         for logDir in logDirs:
