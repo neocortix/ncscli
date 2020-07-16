@@ -293,7 +293,7 @@ def ingestFahLog( logFile, coll ):
     # these patterns are found in the different tyoes of log lines
     startedLinePat = r'\* Log Started (.*) \*'
     dateLinePat = r'\* Date: (.*) \*'
-    timePat = r'^[^0-2]?([0-2][0-9]:[0-5][0-9]:[0-5][0-9]):(.*)' # extracts time and then the rest of the line
+    timePat = r'^[^0-2]{0,5}([0-2][0-9]:[0-5][0-9]:[0-5][0-9]):(.*)' # extracts time and then the rest of the line
 
     dateTime = datetime.datetime.now( datetime.timezone.utc )  # default datetime in case none is found
     tzInfo = dateTime.tzinfo
@@ -311,7 +311,8 @@ def ingestFahLog( logFile, coll ):
             msg = line
             recs.append( {
                 'dateTime': dateTime.isoformat(),
-                'msg': msg
+                'mType': 'logStarted',
+                'msg': msg,
                 } )
         elif '* Date:' in line:
             dateMatch = re.search( dateLinePat, line )
@@ -321,9 +322,15 @@ def ingestFahLog( logFile, coll ):
                 dateTime = dateutil.parser.parse( datePart )
                 dateTime = dateTime.replace( tzinfo=tzInfo ) # may not need this
         else:
+            # strip out any leading terminal-escape code
+            escaped = re.search( r'^\x1b\[..m', line )
+            if escaped:
+                line = line[5:]
+            # find the timestamp, if present
             timeMatch = re.search( timePat, line )
             if not timeMatch:
                 logger.warning( 'no timeMatch in %s', line )
+                # previous dateTime will carry over, in this case
                 msg = line
             else:
                 timePart = timeMatch.group(1)
@@ -331,13 +338,26 @@ def ingestFahLog( logFile, coll ):
                 # combine lineTime with previously set date and tz
                 dateTime = datetime.datetime.combine( dateTime, lineTime.time(), tzInfo )
                 msg = timeMatch.group(2)
+            mType = None
+            if 'WARNING:' in msg:
+                mType = 'warning'
+            elif ':Upload' in msg:
+                mType = 'upload'
+            elif ':Completed' in msg:
+                mType = 'complete'
+            elif 'WORK_ACK' in msg:
+                mType = 'work_acc'
+            
             # append it to the list of log entries to save          
             recs.append( {
                 'dateTime': dateTime.isoformat(),
+                'mType': mType,
                 'msg': msg
                 } )
     if len(recs):
         coll.insert_many( recs, ordered=True )
+        coll.create_index( 'dateTime' )
+        coll.create_index( 'mType' )
     #return recs
 
 
@@ -351,7 +371,7 @@ if __name__ == "__main__":
     ncs.logger.setLevel(logging.INFO)
     #runDistributedBlender.logger.setLevel(logging.INFO)
     logger.setLevel(logging.INFO)
-    tellInstances.logger.setLevel(logging.INFO)
+    tellInstances.logger.setLevel(logging.WARNING)
     logger.debug('the logger is configured')
 
 
@@ -614,6 +634,69 @@ if __name__ == "__main__":
                         logger.warning( 'instance found to be stopped: %s', iid )
                         coll.update_one( {'_id': iid}, { "$set": { "state": 'stopped' } } )
 
+        simInfoTimeLimit = 120
+        resultsLogFilePath=dataDirPath+'/simInfo.jlog'
+        workerCmd = "/usr/bin/FAHClient --send-command 'simulation-info 0'"
+        logger.info( 'calling tellInstances to get simulation-info on %d instances', len(goodIids))
+        stepStatuses = tellInstances.tellInstances( reachables, workerCmd,
+            resultsLogFilePath=resultsLogFilePath,
+            sshAgent=args.sshAgent,
+            timeLimit=simInfoTimeLimit, stopOnSigterm=True
+            )
+
+        # read back the results
+        (eventsByInstance, badIidSet) = demuxResults( resultsLogFilePath )
+        nFoundInfo = 0
+        for iid in goodIids:
+            events = eventsByInstance[ iid ]
+            inPyOn = False
+            gotInfo = False
+            for event in events:
+                if 'stdout' in event:
+                    stdoutStr = event['stdout']
+                    if stdoutStr.startswith( 'PyON'):
+                        #logger.info( '<PyON> %s', stdoutStr )
+                        inPyOn = True
+                    elif stdoutStr.startswith( '---'):
+                        #logger.info( 'end <PyON>' )
+                        inPyOn = False
+                    elif stdoutStr.startswith( '{'):
+                        #logger.info( 'maybe sim-info %s', stdoutStr )
+                        if not inPyOn:
+                            logger.info( 'unexpected "{", not in PyOn %s', stdoutStr )
+                        else:
+                            if gotInfo:
+                                logger.warning( 'got an unexpected second pyOn object <%s>', stdoutStr )
+                            simInfo = None
+                            try:
+                                simInfo = json.loads( stdoutStr )
+                            except Exception as exc:
+                                logger.info( 'exception parsing pyon (%s) %s', type(exc), exc )
+                            if simInfo != None:
+                                gotInfo = True
+                                #logger.info( 'simInfo %s', simInfo )
+                                db['checkedInstances'].update_one( 
+                                    {'_id': iid}, { "$set": { "simInfo": simInfo } }
+                                    )
+                                nFoundInfo += 1
+            if not gotInfo:
+                #instCheck = checkedByIid.get( iid )
+                instCheck = db['checkedInstances'].find_one( {'_id': iid} )
+                if not instCheck:
+                    logger.warning( 'checked instance not found (%s)', iid )
+                else:
+                    nFailures = instCheck.get( 'nFailures', 0) + 1
+                    logger.info( '%d failures for %s', nFailures, iid[0:16] )
+                    if (nFailures - nSuccesses) >= 10:
+                        state = 'failed'
+                    else:
+                        state = 'checked'
+                    coll.update_one( {'_id': iid},
+                        { "$set": { "state": state, 'nFailures': nFailures
+                            } },
+                        upsert=True
+                        )
+                
         logger.info( 'downloading log.txt from %d instances', len(reachables))
         stepStatuses = tellInstances.tellInstances( reachables,
             download='/var/lib/fahclient/log.txt', downloadDestDir=dataDirPath+'/clientLogs', 
@@ -660,6 +743,7 @@ if __name__ == "__main__":
                         # for safety, ingest to a temp collection and then rename (with replace) when done
                         ingestFahLog( logFile, db['clientLog_temp'] )
                         db['clientLog_temp'].rename( collName, dropTarget=True )
+                        logger.info( 'ingested %s', collName )
                 except Exception as exc:
                     logger.warning( 'exception (%s) ingesting %s', type(exc), inFilePath, exc_info=False )
     elif args.action == 'terminateBad':
