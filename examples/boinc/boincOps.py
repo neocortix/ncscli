@@ -796,10 +796,14 @@ if __name__ == "__main__":
         if nToLaunch:
             logger.info( 'ingesting into %s', collName )
             ingestJson( launchedJsonFilePath, dbName, collName )
+            # remove the launchedJsonFile to avoid local accumulation of data
+            os.remove( launchedJsonFilePath )
             if not os.path.isfile( resultsLogFilePath ):
                 logger.warning( 'no results file %s', resultsLogFilePath )
             else:
                 ingestJson( resultsLogFilePath, dbName, 'startBoinc_'+dateTimeTag )
+                # remove the resultsLogFile to avoid local accumulation of data
+                os.remove( resultsLogFilePath )
             for statusRec in badStatuses:
                 statusRec['status'] = str(statusRec['status'])
                 statusRec['dateTime'] = startDateTime.isoformat()
@@ -857,6 +861,9 @@ if __name__ == "__main__":
             )
         ingestJson( resultsLogFilePath, db.name, 'checkInstances_'+dateTimeTag )
         (eventsByInstance, badIidSet) = demuxResults( resultsLogFilePath )
+        # remove the resultsLogFile to avoid local accumulation of data
+        os.remove( resultsLogFilePath )
+        # scan the results of the command
         goodIids = []
         failedIids = []
         exceptedIids = []
