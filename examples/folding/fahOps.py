@@ -418,6 +418,7 @@ if __name__ == "__main__":
         resultsLogFilePath = os.path.join( dataDirPath, 'startfah_%s.jlog' % dateTimeTag )
         collName = 'launchedInstances_' + dateTimeTag
 
+        logger.info( 'the launch filter is %s', args.filter )
         if args.count and (args.count > 0):
             nToLaunch = args.count
         elif args.target and (args.target > 0):
@@ -454,7 +455,7 @@ if __name__ == "__main__":
             logger.info( 'ingesting into %s', collName )
             ingestJson( launchedJsonFilePath, dbName, collName )
             # remove the launchedJsonFile to avoid local accumulation of data
-            #os.remove( launchedJsonFilePath )
+            os.remove( launchedJsonFilePath )
             if not os.path.isfile( resultsLogFilePath ):
                 logger.warning( 'no results file %s', resultsLogFilePath )
             else:
@@ -518,7 +519,7 @@ if __name__ == "__main__":
         ingestJson( resultsLogFilePath, db.name, 'checkInstances_'+dateTimeTag )
         (eventsByInstance, badIidSet) = demuxResults( resultsLogFilePath )
         # remove the resultsLogFile to avoid local accumulation of data
-        #os.remove( resultsLogFilePath )
+        os.remove( resultsLogFilePath )
         # scan the results of the command
         goodIids = []
         failedIids = []
@@ -623,6 +624,7 @@ if __name__ == "__main__":
         reachables = [inst for inst in checkables if inst['instanceId'] not in exceptedIids ]
 
         # query cloudserver to see if any of the excepted instances are dead
+        logger.info( 'querying to see if instances are "stopped""' )
         for iid in exceptedIids:
             response = ncs.queryNcsSc( 'instances/%s' % iid, args.authToken, maxRetries=1)
             if response['statusCode'] == 200:
@@ -637,7 +639,7 @@ if __name__ == "__main__":
         simInfoTimeLimit = 120
         resultsLogFilePath=dataDirPath+'/simInfo.jlog'
         workerCmd = "/usr/bin/FAHClient --send-command 'simulation-info 0'"
-        logger.info( 'calling tellInstances to get simulation-info on %d instances', len(goodIids))
+        logger.info( 'calling tellInstances to get simulation-info on %d instances', len(reachables))
         stepStatuses = tellInstances.tellInstances( reachables, workerCmd,
             resultsLogFilePath=resultsLogFilePath,
             sshAgent=args.sshAgent,
@@ -660,7 +662,7 @@ if __name__ == "__main__":
                     elif stdoutStr.startswith( '---'):
                         #logger.info( 'end <PyON>' )
                         inPyOn = False
-                    elif stdoutStr.startswith( '{'):
+                    elif stdoutStr.strip().startswith( '{'):
                         #logger.info( 'maybe sim-info %s', stdoutStr )
                         if not inPyOn:
                             logger.info( 'unexpected "{", not in PyOn %s', stdoutStr )
@@ -696,7 +698,51 @@ if __name__ == "__main__":
                             } },
                         upsert=True
                         )
-                
+        
+        queueInfoTimeLimit = 180
+        resultsLogFilePath=dataDirPath+'/queueInfo.jlog'
+        workerCmd = "/usr/bin/FAHClient --send-command 'queue-info'"
+        logger.info( 'calling tellInstances to get queue-info on %d instances', len(reachables))
+        stepStatuses = tellInstances.tellInstances( reachables, workerCmd,
+            resultsLogFilePath=resultsLogFilePath,
+            sshAgent=args.sshAgent,
+            timeLimit=queueInfoTimeLimit, stopOnSigterm=True
+            )
+
+        # read and parse the results
+        (eventsByInstance, badIidSet) = demuxResults( resultsLogFilePath )
+        nFoundInfo = 0
+        for iid in goodIids:
+            events = eventsByInstance[ iid ]
+            inPyOn = False
+            gotInfo = False
+            for event in events:
+                if 'stdout' in event:
+                    stdoutStr = event['stdout']
+                    if stdoutStr.startswith( 'PyON'):
+                        inPyOn = True
+                    elif stdoutStr.startswith( '---'):
+                        inPyOn = False
+                    elif stdoutStr.strip().startswith( '{'):
+                        #logger.info( 'maybe queue-info %s', stdoutStr )
+                        if not inPyOn:
+                            logger.info( 'unexpected "{", not in PyOn %s', stdoutStr )
+                        else:
+                            if gotInfo:
+                                logger.warning( 'got an unexpected second pyOn object <%s>', stdoutStr )
+                            queueInfo = None
+                            try:
+                                queueInfo = json.loads( stdoutStr )
+                            except Exception as exc:
+                                logger.info( 'exception parsing pyon (%s) %s', exc, stdoutStr )
+                            if queueInfo != None:
+                                gotInfo = True
+                                #logger.info( 'queueInfo %s', queueInfo )
+                                db['checkedInstances'].update_one( 
+                                    {'_id': iid}, { "$set": { "queueInfo": queueInfo } }
+                                    )
+                                nFoundInfo += 1
+        logger.info( 'got queueInfo from %d instances', nFoundInfo )
         logger.info( 'downloading log.txt from %d instances', len(reachables))
         stepStatuses = tellInstances.tellInstances( reachables,
             download='/var/lib/fahclient/log.txt', downloadDestDir=dataDirPath+'/clientLogs', 
