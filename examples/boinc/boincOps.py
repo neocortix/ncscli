@@ -1001,12 +1001,28 @@ if __name__ == "__main__":
         thresholdDateTime = datetime.datetime.now( datetime.timezone.utc ) \
             - datetime.timedelta( days=lookbackDays )
         for logDir in logDirs:
+            errLogPath = os.path.join( logsDirPath, logDir, 'boincerr.log' )
+            if os.path.isfile( errLogPath ):
+                fileModDateTime = datetime.datetime.fromtimestamp( os.path.getmtime( errLogPath ) )
+                fileModDateTime = universalizeDateTime( fileModDateTime )
+                if fileModDateTime <= thresholdDateTime:
+                    logger.info( 'deleting errlog %s', errLogPath )
+                    os.remove( errLogPath )
             inFilePath = os.path.join( logsDirPath, logDir, 'boinc.log' )
             if os.path.isfile( inFilePath ):
                 fileModDateTime = datetime.datetime.fromtimestamp( os.path.getmtime( inFilePath ) )
                 fileModDateTime = universalizeDateTime( fileModDateTime )
                 if fileModDateTime <= thresholdDateTime:
+                    logger.info( 'deleting log %s', inFilePath )
                     os.remove( inFilePath )
+            else:
+                # no log file in dir, so check to see if the dir is old enough to remove
+                logDirPath = os.path.join( logsDirPath, logDir )
+                dirModDateTime = datetime.datetime.fromtimestamp( os.path.getmtime( logDirPath ) )
+                dirModDateTime = universalizeDateTime( dirModDateTime )
+                if dirModDateTime <= thresholdDateTime:
+                    logger.info( 'obsolete dir %s', logDirPath )
+                    #logger.info( 'contains %s', os.listdir( logDirPath ) )
         
         # ingest all new or updated boinc logs
         loggedCollNames = db.list_collection_names(
@@ -1014,6 +1030,8 @@ if __name__ == "__main__":
         for logDir in logDirs:
             # logDir is also the instanceId
             inFilePath = os.path.join( logsDirPath, logDir, 'boinc.log' )
+            if not os.path.isfile( inFilePath ):
+                continue
             collName = 'boincLog_' + logDir
             if collName in loggedCollNames:
                 existingGenTime = lastGenDateTime( db[collName] ) - datetime.timedelta(hours=1)
