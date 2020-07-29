@@ -122,23 +122,6 @@ def demuxResults( inFilePath ):
     return byInstance, badOnes
 
 
-def getStartedInstancesFromFile( launchedJsonFilePath ):
-    launchedInstances = []
-    # get instances from the launched json file
-    with open( launchedJsonFilePath, 'r') as jsonInFile:
-        try:
-            launchedInstances = json.load(jsonInFile)  # an array
-        except Exception as exc:
-            logger.warning( 'could not load json (%s) %s', type(exc), exc )
-    exhaustedIids = [inst['instanceId'] for inst in launchedInstances if inst['state'] == 'exhausted' ]
-    if exhaustedIids:
-        logger.warning( 'terminating exhausted instances %s', exhaustedIids )
-        ncs.terminateInstances( args.authToken, exhaustedIids )
-    # proceed with instances that were actually started
-    startedInstances = [inst for inst in launchedInstances if inst['state'] == 'started' ]
-
-    return startedInstances
-
 def getStartedInstances( db ):
     collNames = db.list_collection_names( filter={ 'name': {'$regex': r'^launchedInstances_.*'} } )
     #logger.info( 'launched collections: %s', collNames )
@@ -181,6 +164,27 @@ def launchInstances( authToken, nInstances, sshClientKeyName, launchedJsonFilepa
         logger.error( 'exception while launching instances (%s) %s', type(exc), exc, exc_info=True )
         returnCode = 99
     return returnCode
+
+def terminateNcsScInstances( authToken, instanceIds ):
+    '''try to terminate instances; return list of instances terminated (empty if none confirmed)'''
+    terminationLogFilePath = os.path.join( dataDirPath, 'badTerminations.log' )  # using global dataDirPath
+    dateTimeStr = datetime.datetime.now( datetime.timezone.utc ).isoformat()
+    try:
+        ncs.terminateInstances( authToken, instanceIds )
+        logger.info( 'terminateInstances returned' )
+    except Exception as exc:
+        logger.warning( 'got exception terminating %d instances (%s) %s', 
+            len( instanceIds ), type(exc), exc )
+        try:
+            with open( terminationLogFilePath, 'a' ) as logFile:
+                for iid in instanceIds:
+                    print( dateTimeStr, iid, sep=',', file=logFile )
+        except:
+            logger.warning( 'got exception (%s) appending to terminationLogFile %s',
+                type(exc), terminationLogFilePath )
+        return []  # empty list meaning none may have been terminated
+    else:
+        return instanceIds
 
 def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted,
     resultsLogFilePath, installerFileName ):
@@ -229,11 +233,12 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted,
     nonstartedIids = [inst['instanceId'] for inst in launchedInstances if inst['state'] != 'started' ]
     if nonstartedIids:
         logger.warning( 'terminating non-started instances %s', nonstartedIids )
-        ncs.terminateInstances( args.authToken, nonstartedIids )
+        terminateNcsScInstances( args.authToken, nonstartedIids )
+        logger.info( 'done terminating non-started instances' )
     # proceed with instances that were actually started
     startedInstances = [inst for inst in launchedInstances if inst['state'] == 'started' ]
     if not startedInstances:
-        return []
+        return ([], [])
     if not sigtermSignaled():
         installerCmd = './' + installerFileName
         logger.info( 'calling tellInstances to install on %d instances', len(startedInstances))
@@ -249,8 +254,8 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted,
             logger.warning( 'no statuses returned from installer')
             startedIids = [inst['instanceId'] for inst in startedInstances]
             #logOperation( 'terminateBad', startedIids, '<recruitInstances>' )
-            ncs.terminateInstances( args.authToken, startedIids )
-            return []
+            terminateNcsScInstances( args.authToken, startedIids )
+            return ([], [])
         #(goodOnes, badOnes) = triage( stepStatuses )
         # separate good tellInstances statuses from bad ones
         goodOnes = []
@@ -271,7 +276,7 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted,
             badIids.append( status['instanceId'] )
         if badIids:
             #logOperation( 'terminateBad', badIids, '<recruitInstances>' )
-            ncs.terminateInstances( args.authToken, badIids )
+            terminateNcsScInstances( args.authToken, badIids )
 
     return goodInstances, badOnes
 
@@ -343,6 +348,8 @@ def ingestFahLog( logFile, coll ):
                 mType = 'warning'
             elif ':Upload' in msg:
                 mType = 'upload'
+            elif ':Sending unit results' in msg:
+                mType = 'upload'
             elif ':Completed' in msg:
                 mType = 'complete'
             elif 'WORK_ACK' in msg:
@@ -378,7 +385,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser( description=__doc__,
         fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( 'action', help='the action to perform', 
-        choices=['launch', 'import', 'check', 'terminateBad', 'terminateAll']
+        choices=['launch', 'import', 'check', 'terminateBad', 'terminateAll', 'reterminate']
         )
     ap.add_argument( '--authToken', help='the NCS authorization token to use (required for launch or terminate)' )
     ap.add_argument( '--count', type=int, help='the number of instances (for launch)' )
@@ -626,15 +633,20 @@ if __name__ == "__main__":
         # query cloudserver to see if any of the excepted instances are dead
         logger.info( 'querying to see if instances are "stopped""' )
         for iid in exceptedIids:
-            response = ncs.queryNcsSc( 'instances/%s' % iid, args.authToken, maxRetries=1)
-            if response['statusCode'] == 200:
-                inst = response['content']
-                if 'events' in inst:
-                    coll.update_one( {'_id': iid}, { "$set": { "events": inst['events'] } } )
-                    lastEvent = inst['events'][-1]
-                    if (lastEvent['category'] == 'instance') and ('stop' in lastEvent['event']):
-                        logger.warning( 'instance found to be stopped: %s', iid )
-                        coll.update_one( {'_id': iid}, { "$set": { "state": 'stopped' } } )
+            try:
+                response = ncs.queryNcsSc( 'instances/%s' % iid, args.authToken, maxRetries=1)
+            except Exception as exc:
+                logger.warning( 'querying instance status got exception (%s) %s',
+                    type(exc), exc )
+            else:
+                if response['statusCode'] == 200:
+                    inst = response['content']
+                    if 'events' in inst:
+                        coll.update_one( {'_id': iid}, { "$set": { "events": inst['events'] } } )
+                        lastEvent = inst['events'][-1]
+                        if (lastEvent['category'] == 'instance') and ('stop' in lastEvent['event']):
+                            logger.warning( 'instance found to be stopped: %s', iid )
+                            coll.update_one( {'_id': iid}, { "$set": { "state": 'stopped' } } )
 
         simInfoTimeLimit = 120
         resultsLogFilePath=dataDirPath+'/simInfo.jlog'
@@ -771,6 +783,8 @@ if __name__ == "__main__":
         for logDir in logDirs:
             # logDir is also the instanceId
             inFilePath = os.path.join( logsDirPath, logDir, 'log.txt' )
+            if not os.path.isfile( inFilePath ):
+                continue
             collName = 'clientLog_' + logDir
             if collName in loggedCollNames:
                 existingGenTime = lastGenDateTime( db[collName] ) - datetime.timedelta(hours=1)
@@ -798,7 +812,7 @@ if __name__ == "__main__":
         terminatedDateTimeStr = datetime.datetime.now( datetime.timezone.utc ).isoformat()
         coll = db['checkedInstances']
         wereChecked = list( coll.find() ) # fully iterates the cursor, getting all records
-        terminatedIids = []
+        toTerminate = []
         for checkedInst in wereChecked:
             state = checkedInst.get( 'state')
             #logger.info( 'checked state %s', state )
@@ -806,34 +820,36 @@ if __name__ == "__main__":
                 iid = checkedInst['_id']
                 abbrevIid = iid[0:16]
                 logger.warning( 'would terminate %s', abbrevIid )
-                terminatedIids.append( iid )
-                coll.update_one( {'_id': iid},
-                    { "$set": { "state": "terminated",
-                        'terminatedDateTime': terminatedDateTimeStr } },
-                    upsert=False
-                    )
-        logger.info( 'terminating %d instances', len( terminatedIids ))
-        ncs.terminateInstances( args.authToken, terminatedIids )
-        #sys.exit()
+                toTerminate.append( iid )
+        logger.info( 'terminating %d instances', len( toTerminate ))
+        terminated=terminateNcsScInstances( args.authToken, toTerminate )
+        logger.info( 'actually terminated %d instances', len( terminated ))
+        # update states in checkedInstances
+        for iid in terminated:
+            coll.update_one( {'_id': iid},
+                { "$set": { "state": "terminated",
+                    'terminatedDateTime': terminatedDateTimeStr } },
+                upsert=False
+                )
+
     elif args.action == 'terminateAll':
         if not args.authToken:
             sys.exit( 'error: can not terminate because no authToken was passed')
         logger.info( 'checking for instances to terminate')
         # will terminate all instances and update checkedInstances accordingly
         startedInstances = getStartedInstances( db )  # expensive, could just query for iids
-        coll = db['checkedInstances']
-        wereChecked = coll.find()
-        checkedByIid = { inst['_id']: inst for inst in wereChecked }
+        startedIids = [inst['instanceId'] for inst in startedInstances]
         terminatedDateTimeStr = datetime.datetime.now( datetime.timezone.utc ).isoformat()
-        terminatedIids = []
-        for inst in startedInstances:
-            iid = inst['instanceId']
-            #abbrevIid = iid[0:16]
-            #logger.warning( 'would terminate %s', abbrevIid )
-            terminatedIids.append( iid )
-            if iid not in checkedByIid:
-                logger.warning( 'terminating unchecked instance %s', iid )
-            else:
+        toTerminate = startedIids
+        logger.info( 'terminating %d instances', len( toTerminate ))
+        terminated=terminateNcsScInstances( args.authToken, toTerminate )
+
+        # update states in checkedInstances
+        coll = db['checkedInstances']
+        wereChecked = coll.find()  # could use a projection to make it more efficient
+        checkedByIid = { inst['_id']: inst for inst in wereChecked }
+        for iid in terminated:
+            if iid in checkedByIid:
                 checkedInst = checkedByIid[iid]
                 if checkedInst['state'] != 'terminated':
                     coll.update_one( {'_id': iid},
@@ -841,9 +857,24 @@ if __name__ == "__main__":
                             'terminatedDateTime': terminatedDateTimeStr } },
                         upsert=False
                         )
-        logger.info( 'terminating %d instances', len( terminatedIids ))
-        ncs.terminateInstances( args.authToken, terminatedIids )
-        #sys.exit()
+    elif args.action == 'reterminate':
+        '''redundantly terminate instances that are listed as already terminated'''
+        if not args.authToken:
+            sys.exit( 'error: can not terminate because no authToken was passed')
+        # get list of terminated instance IDs
+        coll = db['checkedInstances']
+        wereChecked = list( coll.find({'state': 'terminated'},
+            {'_id': 1, 'terminatedDateTime': 1 }) )
+        toTerminate = []
+        for checkedInst in wereChecked:
+            iid = checkedInst['_id']
+            abbrevIid = iid[0:16]
+            if checkedInst['terminatedDateTime'] >= '2020-07-23':
+                logger.info( 'would reterminate %s from %s', abbrevIid, checkedInst['terminatedDateTime'] )
+                toTerminate.append( iid )
+        logger.info( 'reterminating %d instances', len( toTerminate ))
+        terminated = terminateNcsScInstances( args.authToken, toTerminate )
+        logger.info( 'reterminated %d instances', len( terminated ) )
     else:
         logger.warning( 'action "%s" unimplemented', args.action )
     elapsed = time.time() - startTime
