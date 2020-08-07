@@ -181,9 +181,9 @@ def recruitInstance( launchedJsonFilePath, resultsLogFilePathIgnored ):
     if args.sshClientKeyName:
         sshClientKeyName = args.sshClientKeyName
     else:
-        keyContents = loadSshPubKey()
+        keyContents = loadSshPubKey().strip()
         randomPart = str( uuid.uuid4() )[0:13]
-        keyContents += ' #' + randomPart
+        #keyContents += ' #' + randomPart
         sshClientKeyName = 'bfr_%s' % (randomPart)
         respCode = ncs.uploadSshClientKey( args.authToken, sshClientKeyName, keyContents )
         if respCode < 200 or respCode >= 300:
@@ -324,9 +324,9 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
         if args.sshClientKeyName:
             sshClientKeyName = args.sshClientKeyName
         else:
-            keyContents = loadSshPubKey()
+            keyContents = loadSshPubKey().strip()
             randomPart = str( uuid.uuid4() )[0:13]
-            keyContents += ' #' + randomPart
+            #keyContents += ' #' + randomPart
             sshClientKeyName = 'bfr_%s' % (randomPart)
             respCode = ncs.uploadSshClientKey( args.authToken, sshClientKeyName, keyContents )
             if respCode < 200 or respCode >= 300:
