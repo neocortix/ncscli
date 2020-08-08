@@ -432,7 +432,7 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
             keyContents = loadSshPubKey().strip()
             randomPart = str( uuid.uuid4() )[0:13]
             #keyContents += ' #' + randomPart
-            sshClientKeyName = 'batch_%s' % (randomPart)
+            sshClientKeyName = 'batchRunner_%s' % (randomPart)
             respCode = ncs.uploadSshClientKey( args.authToken, sshClientKeyName, keyContents )
             if respCode < 200 or respCode >= 300:
                 logger.warning( 'ncs.uploadSshClientKey returned %s', respCode )
@@ -531,9 +531,16 @@ def rsyncToRemote( srcFilePath, destFileName, inst, timeLimit ):
             stderr = stderr.decode('utf8')
             returnCode = proc.returncode
         except subprocess.TimeoutExpired:
-            proc.kill()  #TODO need another timeout here
+            logger.warning( 'rsync took too long for instance %s', inst['instanceId'] )
+            proc.terminate()  # just sends sigterm
             returnCode = 124
-            proc.communicate()  # ignoring any additional outputs
+            try:
+                # give it a chance to respond to sigterm
+                proc.wait( timeout=timeLimit/2 )
+            except Exception as exc:
+                logger.warning( 'rsync exception after timeout (%s) %s', type(exc), exc )
+                proc.kill()  # sends sigkill as a last resort
+                logger.warning( 'killed rsync for %s', inst['instanceId'] )
         except Exception as exc:
             logger.warning( 'rsync threw exception (%s) %s', type(exc), exc )
             returnCode = -1
@@ -682,15 +689,6 @@ def renderFramesOnInstance( inst ):
 
         outFileName = getFrameOutFileName( frameNum )
         returnCode = None
-        '''
-        pyExpr = ''
-        if args.width > 0 and args.height > 0:
-            pyExpr = '--python-expr "import bpy; scene=bpy.context.scene; '\
-                'scene.render.resolution_x=%d; scene.render.resolution_y=%d; '\
-                'scene.render.resolution_percentage=100"' % (args.width, args.height)
-        '''
-        #cmd = 'blender -b -noaudio --enable-autoexec %s %s -o %s --render-format %s -f %d' % \
-        #    (blendFileName, pyExpr, g_outFilePattern, args.frameFileType, frameNum)
         cmd = getFrameCmd( frameNum )
 
         logger.info( 'commanding %s', cmd )
@@ -790,7 +788,7 @@ def renderFramesOnInstance( inst ):
     return 0
 
 def recruitAndRender():
-    '''a threadproc to recruit an instance,render frames on it, and terminate it'''
+    '''a threadproc to recruit an instance, compute frames on it, and terminate it'''
     eLoop = asyncio.new_event_loop()
     asyncio.set_event_loop( eLoop )
     
@@ -814,6 +812,7 @@ def recruitAndRender():
 
 def checkForInstances():
     '''a threadproc to check whether we have enough instances running and maybe launch more'''
+    threads = []
     while len(g_.framesFinished) < g_.nFramesWanted and sigtermNotSignaled() and time.time()< g_.deadline:
         overageFactor = 2
         nUnfinished = g_.nFramesWanted - len(g_.framesFinished)
@@ -824,27 +823,16 @@ def checkForInstances():
                 logger.warning( 'starting thread because not enough workers (%d unfinished, %d workers)',
                     nUnfinished, nWorkers )
                 rendererThread = threading.Thread( target=recruitAndRender, name='recruitAndRender' )
+                threads.add( rendererThread )
                 rendererThread.start()
 
         time.sleep( 20 )
+    logger.info( 'waiting for worker threads to finish')
+    for thread in threads:
+        thread.join( timeout = args.instTimeLimit + args.frameTimeLimit )
+        if thread.is_alive():
+            logger.warning( 'thread %s did not exit', thread.name )
     logger.info( 'finished')
-
-def encodeTo264( destDirPath, destFileName, frameRate, kbps=30000,
-    frameFileType='png', startFrame=0 ):
-    kbpsParam = str(kbps)+'k'
-    cmd = [ 'ffmpeg', '-y', '-framerate', str(frameRate),
-        '-start_number', str(startFrame),
-        '-i', destDirPath + '/rendered_frame_%%06d.%s'%(frameFileType),
-        '-c:v', 'libx264', '-preset', 'fast', '-pix_fmt', 'yuv420p', 
-        '-b:v', kbpsParam,
-        os.path.join( destDirPath, destFileName )
-    ]
-    try:
-        subprocess.check_call( cmd,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-    except Exception as exc:
-        logger.warning( 'ffmpeg call threw exception (%s) %s',type(exc), exc )
 
 def runBatch( **kwargs ):
     ncs.logger.setLevel( logger.level )
@@ -901,15 +889,15 @@ def runBatch( **kwargs ):
     startTime = time.time()
     g_.deadline = startTime + args.timeLimit
 
-    extensions = {'PNG': 'png', 'OPEN_EXR': 'exr'}
-    g_outFilePattern = 'rendered_frame_######.%s'%(extensions[args.frameFileType])
+    #extensions = {'PNG': 'png', 'OPEN_EXR': 'exr'}
 
 
     if not args.nWorkers:
         # regular case, where we pick a suitably large number to launch, based on # of frames
         nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
         nFrames = len( range(args.startFrame, args.endFrame+1, args.frameStep ) )
-        nToRecruit = min( nAvail, nFrames * 2 )  # WAS be * 3 for blender
+        overageFactor = 2  # WAS originally 3 for blender
+        nToRecruit = min( nAvail, nFrames * overageFactor )
     elif args.nWorkers > 0:
         # an override for advanced users, specifying exactly how many instances to launch
         nToRecruit = args.nWorkers
@@ -937,7 +925,6 @@ def runBatch( **kwargs ):
     logger.info( 'g_.framesToDo %s', g_.framesToDo )
 
     settingsToSave = argsToSave.copy()
-    settingsToSave['outVideoFileName'] = 'rendered_preview.mp4'
     with open( settingsJsonFilePath, 'w' ) as settingsFile:
         json.dump( settingsToSave, settingsFile )
 
@@ -982,9 +969,11 @@ def runBatch( **kwargs ):
     # this is where post-batch aggregation would occur (formerly video encoding)
 
     if checkerThread:
-        checkerThread.join( args.frameTimeLimit )  # could consider deadline
+        checkerThread.join( args.instTimeLimit + args.frameTimeLimit )  # could consider deadline
+        if checkerThread.is_alive():
+            logger.warning( 'checkerThread did not exit' )
     elapsed = time.time() - startTime
-    logger.info( 'rendered %d frames using %d "good" instances', len(g_.framesFinished), len(goodInstances) )
+    logger.info( 'computed %d frames', len(g_.framesFinished) )
     logger.info( 'finished; elapsed time %.1f seconds (%.1f minutes)', elapsed, elapsed/60 )
     logOperation( 'finished',
         {'nInstancesRecruited': len(goodInstances),
