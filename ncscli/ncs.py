@@ -395,11 +395,11 @@ def terminateNcscInstance( authToken, iid ):
     resp = requests.delete( url, headers=headers )
     if (resp.status_code < 200) or (resp.status_code >= 300):
         logger.warn( 'response code %s', resp.status_code )
-        if len( resp.text ):
-            logger.info( 'response "%s"', resp.text )
         if resp.status_code in [502, 504]:  # "bad gateway", "gateway timeout"
             time.sleep( 10 )
             return terminateNcscInstance( authToken, iid )
+        elif len( resp.text ):
+            logger.info( 'response "%s"', resp.text )
     return resp.status_code
 
 def terminateJobInstances( authToken, jobId, maxRetries=1000 ):
