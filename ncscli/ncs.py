@@ -120,6 +120,22 @@ def getAvailableDeviceCount( authToken, filtersJson=None, encryptFiles=True ):
     nAvail = respContent.get('available', 0)
     return nAvail
 
+def listSshClientKeys( authToken ):
+    headers = ncscReqHeaders( authToken )
+    url = 'https://cloud.neocortix.com/cloud-api/profile/ssh-keys'
+    logger.info( 'listing keys' )
+    resp = requests.get( url, headers=headers )
+    if (resp.status_code < 200) or (resp.status_code >= 300):
+        logger.warning( 'response code %s', resp.status_code )
+        return []
+    logger.info( 'response %s', resp.text )
+    try:
+        keys = resp.json()
+    except:
+        logger.warning( 'got bad json' )
+    else:
+        return keys
+
 def uploadSshClientKey( authToken, keyName, keyContents ):
     headers = ncscReqHeaders( authToken )
     reqData = {
