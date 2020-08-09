@@ -82,23 +82,7 @@ class frameProcessor(object):
     def frameCmd( self, frameNum ):
         return 'hostname > %s' % (self.frameOutFileName(frameNum))
 
-class pingFrameProcessor(frameProcessor):
-    '''defines details for using ping in a simplistic batch job'''
-    
-    def frameOutFileName( self, frameNum ):
-        return 'frame_%d.out' % (frameNum)
-
-    def frameCmd( self, frameNum ):
-        targetHost = 'neocortix.com'
-        nPings = 3
-        timeLimit = 60
-        interval = 5
-        pingCmd = 'ping %s -U -D -c %s -w %f -i %f > %s' \
-            % (targetHost, nPings, timeLimit,  interval, self.frameOutFileName(frameNum) )
-        return pingCmd
-
 g_.frameProcessor = frameProcessor()
-#g_.frameProcessor = pingFrameProcessor()
 
 useClass = True
 if useClass:
@@ -415,7 +399,6 @@ def triage( statuses ):
 def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, resultsLogFilePath='' ):
     '''launch instances and install prereqs on them;
         terminate those that could not install; return list of good instances'''
-    logger.info( 'recruiting up to %d instances', nWorkersWanted )
     if not g_.resultsLogFilePath:
         resultsLogFilePath = g_.dataDirPath+'/recruitInstances.jlog'
     goodInstances = []
@@ -823,7 +806,7 @@ def checkForInstances():
                 logger.warning( 'starting thread because not enough workers (%d unfinished, %d workers)',
                     nUnfinished, nWorkers )
                 rendererThread = threading.Thread( target=recruitAndRender, name='recruitAndRender' )
-                threads.add( rendererThread )
+                threads.append( rendererThread )
                 rendererThread.start()
 
         time.sleep( 20 )
@@ -858,7 +841,7 @@ def runBatch( **kwargs ):
         logger.error( 'file not found: %s', args.commonInFilePath )
         return 1
 
-    g_.dataDirPath = args.dataDir
+    g_.dataDirPath = args.outDataDir
     os.makedirs( g_.dataDirPath, exist_ok=True )
 
     signal.signal( signal.SIGTERM, sigtermHandler )
@@ -897,6 +880,7 @@ def runBatch( **kwargs ):
         nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
         nFrames = len( range(args.startFrame, args.endFrame+1, args.frameStep ) )
         overageFactor = 2  # WAS originally 3 for blender
+        logger.info( 'recruiting up to %d instances', nFrames * overageFactor )
         nToRecruit = min( nAvail, nFrames * overageFactor )
     elif args.nWorkers > 0:
         # an override for advanced users, specifying exactly how many instances to launch
@@ -910,11 +894,11 @@ def runBatch( **kwargs ):
         return 1
     onTheFlyWanted = (args.nWorkers==0)
     
-    g_.installerLogFile = open( installerLogFilePath, 'a' )
     if args.launch:
         goodInstances= recruitInstances( nToRecruit, g_.dataDirPath+'/recruitLaunched.json', True )
     else:
         goodInstances = recruitInstances( nToRecruit, g_.dataDirPath+'/survivingInstances.json', False )
+    g_.installerLogFile = open( installerLogFilePath, 'a' )
 
 
     if args.nWorkers == -1:
@@ -991,7 +975,7 @@ def createArgumentParser():
         fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( '--commonInFilePath', help='a file to upload initially to all instances' )
     ap.add_argument( '--authToken', required=True, help='the NCS authorization token to use (required)' )
-    ap.add_argument( '--dataDir', help='output data darectory', default='./aniData/' )
+    ap.add_argument( '--outDataDir', help='output data darectory', default='./aniData/' )
     ap.add_argument( '--encryptFiles', type=boolArg, default=True, help='whether to encrypt files on launched instances' )
     ap.add_argument( '--filter', help='json to filter instances for launch' )
     ap.add_argument( '--frameRate', type=int, default=24, help='the frame rate (frames per second) for video output' )
