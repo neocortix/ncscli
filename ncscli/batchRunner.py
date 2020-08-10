@@ -645,6 +645,7 @@ def renderFramesOnInstance( inst ):
         nonlocal frameProgress
         for line in proc.stdout:
             #print( '<stdout>', abbrevIid, line.strip(), file=sys.stderr )
+            # these progress-tracking details are specific for blender #TODO generalize
             if 'Path Tracing Tile' in line:
                 pass
                 # yes, this progress-parsing code does work
@@ -904,17 +905,14 @@ def runBatch( **kwargs ):
         # regular case, where we pick a suitably large number to launch, based on # of frames
         nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
         nFrames = len( range(args.startFrame, args.endFrame+1, args.frameStep ) )
-        overageFactor = 2  # WAS originally 3 for blender
+        overageFactor = 2
         logger.info( 'recruiting up to %d instances', nFrames * overageFactor )
         nToRecruit = min( nAvail, nFrames * overageFactor )
     elif args.nWorkers > 0:
         # an override for advanced users, specifying exactly how many instances to launch
         nToRecruit = args.nWorkers
-    elif args.nWorkers == -1:
-        # traditional test-user override, to launch as many instances as possible
-        nToRecruit = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
     else:
-        msg = 'invalid nWorkers arg (%d, should be >= -1)' % args.nWorkers
+        msg = 'invalid nWorkers arg (%d, should be >= 0, or omitted)' % args.nWorkers
         logger.error( msg )
         return 1
     onTheFlyWanted = (args.nWorkers==0)
@@ -926,11 +924,7 @@ def runBatch( **kwargs ):
     g_.installerLogFile = open( installerLogFilePath, 'a' )
 
 
-    if args.nWorkers == -1:
-        # for testing, do 3 frames for every well-installed instance
-        g_.framesToDo = collections.deque( range( 0, len(goodInstances) * 3) )
-    else:
-        g_.framesToDo.extend( range(args.startFrame, args.endFrame+1, args.frameStep ) )
+    g_.framesToDo.extend( range(args.startFrame, args.endFrame+1, args.frameStep ) )
     logger.info( 'g_.framesToDo %s', g_.framesToDo )
 
     settingsToSave = argsToSave.copy()
@@ -1003,24 +997,16 @@ def createArgumentParser():
     ap.add_argument( '--outDataDir', help='output data darectory', default='./aniData/' )
     ap.add_argument( '--encryptFiles', type=boolArg, default=True, help='whether to encrypt files on launched instances' )
     ap.add_argument( '--filter', help='json to filter instances for launch' )
-    ap.add_argument( '--frameRate', type=int, default=24, help='the frame rate (frames per second) for video output' )
     ap.add_argument( '--frameTimeLimit', type=int, default=8*60*60, help='amount of time (in seconds) allowed for each frame' )
     ap.add_argument( '--instTimeLimit', type=int, default=900, help='amount of time (in seconds) installer is allowed to take on instances' )
     ap.add_argument( '--jobId', help='to identify this job in log' )
     ap.add_argument( '--launch', type=boolArg, default=True, help='to launch and terminate instances' )
-    #ap.add_argument( '--nWorkers', type=int, default=1, help='the # of worker instances to launch (or zero for all available)' )
     ap.add_argument( '--sshAgent', type=boolArg, default=False, help='whether or not to use ssh agent' )
     ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use (default is random)' )
     ap.add_argument( '--nWorkers', type=int, help='to override the # of worker instances (default=0 for automatic)',
         default=0 )
     ap.add_argument( '--timeLimit', type=int, help='time limit (in seconds) for the whole job',
         default=24*60*60 )
-    ap.add_argument( '--width', type=int, help='the width (in pixels) of the output (0 for .blend file default)',
-        default=0 )
-    ap.add_argument( '--height', type=int, help='the height (in pixels) of the output (0 for .blend file default)',
-        default=0 )
-    ap.add_argument( '--frameFileType', choices=['PNG', 'OPEN_EXR'], help='the type of frame output file',
-        default='PNG' )
     ap.add_argument( '--startFrame', type=int, help='the first frame number to compute',
         default=1 )
     ap.add_argument( '--endFrame', type=int, help='the last frame number to compute',
@@ -1036,7 +1022,6 @@ if __name__ == "__main__":
     formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
     logging.basicConfig(format=logFmt, datefmt=logDateFmt)
     ncs.logger.setLevel(logging.INFO)
-    #runDistributedBlender.logger.setLevel(logging.INFO)
     logger.setLevel(logging.INFO)
     tellInstances.logger.setLevel(logging.INFO)
     logger.debug('the logger is configured')
