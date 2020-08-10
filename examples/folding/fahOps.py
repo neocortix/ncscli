@@ -201,9 +201,9 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted,
         if args.sshClientKeyName:
             sshClientKeyName = args.sshClientKeyName
         else:
-            keyContents = loadSshPubKey()
+            keyContents = loadSshPubKey().strip()
             randomPart = str( uuid.uuid4() )[0:13]
-            keyContents += ' #' + randomPart
+            #keyContents += ' #' + randomPart
             sshClientKeyName = 'fah_%s' % (randomPart)
             respCode = ncs.uploadSshClientKey( args.authToken, sshClientKeyName, keyContents )
             if respCode < 200 or respCode >= 300:
@@ -869,7 +869,7 @@ if __name__ == "__main__":
         for checkedInst in wereChecked:
             iid = checkedInst['_id']
             abbrevIid = iid[0:16]
-            if checkedInst['terminatedDateTime'] >= '2020-07-23':
+            if checkedInst['terminatedDateTime'] >= '2020-07-24':
                 logger.info( 'would reterminate %s from %s', abbrevIid, checkedInst['terminatedDateTime'] )
                 toTerminate.append( iid )
         logger.info( 'reterminating %d instances', len( toTerminate ))
