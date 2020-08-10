@@ -220,12 +220,36 @@ def purgeHostKeys( instanceRecs ):
     else:
         return 0
 
+def logLaunches( launchedJsonFilePath, launcherLogFilePath, launchDateTime ):
+    ''' append all the launched instance ids to a csv log file with timestamps
+        this is intended to enable later cleanup of potentially leaked instances'''
+    launchedInstances = []
+    # get instances from the launched json file
+    with open( launchedJsonFilePath, 'r') as jsonInFile:
+        try:
+            launchedInstances = json.load(jsonInFile)  # an array
+        except Exception as exc:
+            logger.warning( 'could not load json (%s) %s', type(exc), exc )
+    if launchedInstances:
+        try:
+            dateTimeStr = launchDateTime.isoformat()
+            with open( launcherLogFilePath, 'a') as launcherLogFile:
+                for inst in launchedInstances:
+                    iid = inst['instanceId']
+                    state = inst.get('state', '<unknown>')
+                    print( dateTimeStr, iid, state, sep=',', file=launcherLogFile )
+
+        except Exception as exc:
+            logger.warning( 'got exception (%s) appending to launcherLogFile %s',
+                type(exc), launcherLogFilePath )
+
 def launchInstances( authToken, nInstances, sshClientKeyName, launchedJsonFilepath,
         filtersJson=None, encryptFiles=True ):
     if time.time() >= g_.deadline:
         logger.warning( 'not launching, because global deadline has passed' )
         return 124
     returnCode = 13
+    launchDateTime = datetime.datetime.now( datetime.timezone.utc )
     logger.info( 'launchedJsonFilepath %s', launchedJsonFilepath )
     try:
         with open( launchedJsonFilepath, 'w' ) as launchedJsonFile:
@@ -235,13 +259,15 @@ def launchInstances( authToken, nInstances, sshClientKeyName, launchedJsonFilepa
     except Exception as exc: 
         logger.error( 'exception while launching instances (%s) %s', type(exc), exc, exc_info=True )
         returnCode = 99
+    launcherLogFilePath = os.path.join( g_.dataDirPath, 'launchedInstances.csv' )
+    logLaunches( launchedJsonFilepath, launcherLogFilePath, launchDateTime )
     return returnCode
 
 def terminateInstances( authToken, instanceIds ):
     '''try to terminate instances; return list of instances terminated (empty if none confirmed)'''
     #instanceIds = [inst['instanceId'] for inst in instanceRecs]   
     logger.info( 'terminating %d instances', len(instanceIds) )
-    terminationLogFilePath = os.path.join( g_.dataDirPath, 'badTerminations.log' )
+    terminationLogFilePath = os.path.join( g_.dataDirPath, 'badTerminations.csv' )
     dateTimeStr = datetime.datetime.now( datetime.timezone.utc ).isoformat()
     try:
         ncs.terminateInstances( authToken, instanceIds )
@@ -253,7 +279,7 @@ def terminateInstances( authToken, instanceIds ):
             with open( terminationLogFilePath, 'a' ) as logFile:
                 for iid in instanceIds:
                     print( dateTimeStr, iid, sep=',', file=logFile )
-        except:
+        except Exception as exc:
             logger.warning( 'got exception (%s) appending to terminationLogFile %s',
                 type(exc), terminationLogFilePath )
         return []  # empty list meaning none may have been terminated
@@ -847,7 +873,6 @@ def runBatch( **kwargs ):
     signal.signal( signal.SIGTERM, sigtermHandler )
     myPid = os.getpid()
     logger.info('procID: %s', myPid)
-    logger.info('jobID: %s', args.jobId)
 
     if args.frameTimeLimit > args.timeLimit:
         logger.warning('given frameTimeLimit (%d) > given job timeLimit; using %d for both',
