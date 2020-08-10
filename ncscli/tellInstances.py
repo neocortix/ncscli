@@ -375,6 +375,9 @@ def tellInstances( instancesSpec, command=None, resultsLogFilePath=None,
         statuses = []
     #json.dump( statuses, sys.stdout, default=repr, indent=2 )
 
+    if resultsLogFile:
+        resultsLogFile.close()
+
     mainTiming.finish()
     eventTimings.append(mainTiming)
 
