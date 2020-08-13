@@ -253,7 +253,7 @@ def launchInstances( authToken, nInstances, sshClientKeyName, launchedJsonFilepa
     logger.info( 'launchedJsonFilepath %s', launchedJsonFilepath )
     try:
         with open( launchedJsonFilepath, 'w' ) as launchedJsonFile:
-            returnCode = ncs.launchScInstances( authToken, encryptFiles, numReq=nInstances,
+            returnCode = ncs.launchScInstances( authToken, encryptFiles, numReq=int(nInstances),
                 sshClientKeyName=sshClientKeyName, jsonFilter=filtersJson,
                 okToContinueFunc=sigtermNotSignaled, jsonOutFile=launchedJsonFile )
     except Exception as exc: 
@@ -680,10 +680,9 @@ def renderFramesOnInstance( inst ):
         except IndexError:
             #logger.info( 'empty g_.framesToDo' )
             time.sleep(10)
-            overageFactor = 3
             nUnfinished = g_.nFramesWanted - len(g_.framesFinished)
             nWorkers = len( g_.workingInstances )
-            if nWorkers > (nUnfinished * overageFactor):
+            if nWorkers > round( nUnfinished * g_.autoscaleMax ):
                 logger.warning( 'exiting thread because not many left to do (%d unfinished, %d workers)',
                     nUnfinished, nWorkers )
                 logOperation( 'terminateExcessWorker', iid, '<master>')
@@ -824,10 +823,9 @@ def checkForInstances():
     '''a threadproc to check whether we have enough instances running and maybe launch more'''
     threads = []
     while len(g_.framesFinished) < g_.nFramesWanted and sigtermNotSignaled() and time.time()< g_.deadline:
-        overageFactor = 2
         nUnfinished = g_.nFramesWanted - len(g_.framesFinished)
         nWorkers = len( g_.workingInstances )
-        if nWorkers < (nUnfinished * overageFactor):
+        if nWorkers < round(nUnfinished * g_.autoscaleMin):
             nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
             if nAvail >= 2:
                 logger.warning( 'starting thread because not enough workers (%d unfinished, %d workers)',
@@ -873,7 +871,7 @@ def runBatch( **kwargs ):
 
     signal.signal( signal.SIGTERM, sigtermHandler )
     myPid = os.getpid()
-    logger.info('procID: %s', myPid)
+    logger.debug('procID: %s', myPid)
 
     if args.frameTimeLimit > args.timeLimit:
         logger.warning('given frameTimeLimit (%d) > given job timeLimit; using %d for both',
@@ -900,14 +898,40 @@ def runBatch( **kwargs ):
 
     #extensions = {'PNG': 'png', 'OPEN_EXR': 'exr'}
 
+    # validate the authToken
+    resp = ncs.queryNcsSc( 'instances', args.authToken )
+    if resp['statusCode'] == 403:
+        logger.error( 'the given authToken was not accepted' )
+        return 1
+    if not args.nWorkers:
+        # check consistency of autoscale settings
+        if args.autoscaleMax <= 0:
+            logger.error( 'bad autoscaleMax' )
+            return 1
+        elif args.autoscaleMin < 0:
+            logger.error( 'bad autoscaleMin' )
+            return 1
+        elif args.autoscaleInit < 0:
+            logger.error( 'bad autoscaleInit' )
+            return 1
+        elif args.autoscaleMax <  args.autoscaleMin:
+            logger.error( 'conflicting autoscaleMin and autoscaleMax' )
+            return 1
+        else:
+            logger.info( 'autoscale settings, init: %.2f, min: %.2f, max: %.2f',
+                args.autoscaleInit, args.autoscaleMin, args.autoscaleMax )
+            g_.autoscaleInit = args.autoscaleInit
+            g_.autoscaleMin = args.autoscaleMin
+            g_.autoscaleMax = args.autoscaleMax
 
     if not args.nWorkers:
         # regular case, where we pick a suitably large number to launch, based on # of frames
-        nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
+        nAvail = round( ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter ) * .9 )
+        logger.info( 'args.filter: %s', args.filter )
+        logger.info( '%d filtered devices available', nAvail )
         nFrames = len( range(args.startFrame, args.endFrame+1, args.frameStep ) )
-        overageFactor = 2
-        logger.info( 'recruiting up to %d instances', nFrames * overageFactor )
-        nToRecruit = min( nAvail, nFrames * overageFactor )
+        logger.info( 'recruiting up to %d instances', nFrames * g_.autoscaleInit )
+        nToRecruit = min( nAvail, nFrames * g_.autoscaleInit )
     elif args.nWorkers > 0:
         # an override for advanced users, specifying exactly how many instances to launch
         nToRecruit = args.nWorkers
@@ -1005,6 +1029,12 @@ def createArgumentParser():
     ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use (default is random)' )
     ap.add_argument( '--nWorkers', type=int, help='to override the # of worker instances (default=0 for automatic)',
         default=0 )
+    ap.add_argument( '--autoscaleInit', type=float, help='multiple (instances per frame) to launch initially',
+        default=1 )
+    ap.add_argument( '--autoscaleMax', type=float, help='maximum multiple (instances per frame) to keep active',
+        default=1 )
+    ap.add_argument( '--autoscaleMin', type=float, help='minimum multiple (instances per frame) to keep active',
+        default=1 )
     ap.add_argument( '--timeLimit', type=int, help='time limit (in seconds) for the whole job',
         default=24*60*60 )
     ap.add_argument( '--startFrame', type=int, help='the first frame number to compute',
