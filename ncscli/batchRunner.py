@@ -211,7 +211,7 @@ def loadSshPubKey():
 
 def purgeHostKeys( instanceRecs ):
     '''try to purgeKnownHosts; warn if any exception'''
-    logger.info( 'purgeKnownHosts for %d instances', len(instanceRecs) )
+    logger.debug( 'purgeKnownHosts for %d instances', len(instanceRecs) )
     try:
         purgeKnownHosts.purgeKnownHosts( instanceRecs )
     except Exception as exc: 
@@ -250,7 +250,7 @@ def launchInstances( authToken, nInstances, sshClientKeyName, launchedJsonFilepa
         return 124
     returnCode = 13
     launchDateTime = datetime.datetime.now( datetime.timezone.utc )
-    logger.info( 'launchedJsonFilepath %s', launchedJsonFilepath )
+    logger.debug( 'launchedJsonFilepath %s', launchedJsonFilepath )
     try:
         with open( launchedJsonFilepath, 'w' ) as launchedJsonFile:
             returnCode = ncs.launchScInstances( authToken, encryptFiles, numReq=int(nInstances),
@@ -271,7 +271,7 @@ def terminateInstances( authToken, instanceIds ):
     dateTimeStr = datetime.datetime.now( datetime.timezone.utc ).isoformat()
     try:
         ncs.terminateInstances( authToken, instanceIds )
-        logger.info( 'terminateInstances returned' )
+        logger.debug( 'terminateInstances returned' )
     except Exception as exc:
         logger.warning( 'got exception terminating %d instances (%s) %s', 
             len( instanceIds ), type(exc), exc )
@@ -311,7 +311,7 @@ def recruitInstance( launchedJsonFilePath, resultsLogFilePathIgnored ):
         logger.debug( 'launchInstances returned %d', rc )
     # delete sshClientKey only if we just uploaded it
     if sshClientKeyName != args.sshClientKeyName:
-        logger.info( 'deleting sshClientKey %s', sshClientKeyName)
+        logger.debug( 'deleting sshClientKey %s', sshClientKeyName)
         ncs.deleteSshClientKey( args.authToken, sshClientKeyName )
     if rc:
         return None
@@ -457,7 +457,7 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
             logger.debug( 'launchInstances returned %d', rc )
         # delete sshClientKey only if we just uploaded it
         if sshClientKeyName != args.sshClientKeyName:
-            logger.info( 'deleting sshClientKey %s', sshClientKeyName)
+            logger.debug( 'deleting sshClientKey %s', sshClientKeyName)
             ncs.deleteSshClientKey( args.authToken, sshClientKeyName )
         if rc:
             return []
@@ -567,7 +567,7 @@ def scpFromRemote( srcFileName, destFilePath, inst, timeLimit=120 ):
     cmd = [ 'scp', '-P', str(port), user+'@'+host+':~/'+srcFileName,
         destFilePathFull
     ]
-    logger.info( 'SCPing from %s', inst['instanceId'] )
+    logger.debug( 'retrieving from %s', inst['instanceId'] )
     #logger.debug( 'SCPing %s', cmd )  # would spill the full path
     returnCode = None
     stderr=''
@@ -683,7 +683,7 @@ def renderFramesOnInstance( inst ):
             nUnfinished = g_.nFramesWanted - len(g_.framesFinished)
             nWorkers = len( g_.workingInstances )
             if nWorkers > round( nUnfinished * g_.autoscaleMax ):
-                logger.warning( 'exiting thread because not many left to do (%d unfinished, %d workers)',
+                logger.info( 'exiting thread because not many left to do (%d unfinished, %d workers)',
                     nUnfinished, nWorkers )
                 logOperation( 'terminateExcessWorker', iid, '<master>')
                 g_.workingInstances.remove( iid )
@@ -700,7 +700,7 @@ def renderFramesOnInstance( inst ):
         returnCode = None
         cmd = getFrameCmd( frameNum )
 
-        logger.info( 'commanding %s', cmd )
+        logger.debug( 'commanding %s', cmd )
         sshSpecs = inst['ssh']
 
         curFrameRendered = False
@@ -828,7 +828,7 @@ def checkForInstances():
         if nWorkers < round(nUnfinished * g_.autoscaleMin):
             nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
             if nAvail >= 2:
-                logger.warning( 'starting thread because not enough workers (%d unfinished, %d workers)',
+                logger.info( 'starting thread because not enough workers (%d unfinished, %d workers)',
                     nUnfinished, nWorkers )
                 rendererThread = threading.Thread( target=recruitAndRender, name='recruitAndRender' )
                 threads.append( rendererThread )
@@ -918,7 +918,7 @@ def runBatch( **kwargs ):
             logger.error( 'conflicting autoscaleMin and autoscaleMax' )
             return 1
         else:
-            logger.info( 'autoscale settings, init: %.2f, min: %.2f, max: %.2f',
+            logger.debug( 'autoscale settings, init: %.2f, min: %.2f, max: %.2f',
                 args.autoscaleInit, args.autoscaleMin, args.autoscaleMax )
             g_.autoscaleInit = args.autoscaleInit
             g_.autoscaleMin = args.autoscaleMin
@@ -927,10 +927,10 @@ def runBatch( **kwargs ):
     if not args.nWorkers:
         # regular case, where we pick a suitably large number to launch, based on # of frames
         nAvail = round( ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter ) * .9 )
-        logger.info( 'args.filter: %s', args.filter )
+        logger.debug( 'args.filter: %s', args.filter )
         logger.info( '%d filtered devices available', nAvail )
         nFrames = len( range(args.startFrame, args.endFrame+1, args.frameStep ) )
-        logger.info( 'recruiting up to %d instances', nFrames * g_.autoscaleInit )
+        logger.debug( 'recruiting up to %d instances', nFrames * g_.autoscaleInit )
         nToRecruit = min( nAvail, nFrames * g_.autoscaleInit )
     elif args.nWorkers > 0:
         # an override for advanced users, specifying exactly how many instances to launch
@@ -949,7 +949,7 @@ def runBatch( **kwargs ):
 
 
     g_.framesToDo.extend( range(args.startFrame, args.endFrame+1, args.frameStep ) )
-    logger.info( 'g_.framesToDo %s', g_.framesToDo )
+    logger.debug( 'g_.framesToDo %s', g_.framesToDo )
 
     settingsToSave = argsToSave.copy()
     with open( settingsJsonFilePath, 'w' ) as settingsFile:
@@ -971,7 +971,7 @@ def runBatch( **kwargs ):
                 checkerThread = threading.Thread( target=checkForInstances, name='checkForInstances' )
                 checkerThread.start()
             parResultList = list( parIter )
-        logger.info( 'finished initial thread pool')
+        logger.debug( 'finished initial thread pool')
         # wait until it is time to exit
         while len(g_.framesFinished) < g_.nFramesWanted and sigtermNotSignaled() and time.time()< g_.deadline:
             logger.info( 'waiting for frames to finish')
@@ -1000,7 +1000,7 @@ def runBatch( **kwargs ):
         if checkerThread.is_alive():
             logger.warning( 'checkerThread did not exit' )
     elapsed = time.time() - startTime
-    logger.info( 'computed %d frames', len(g_.framesFinished) )
+    logger.info( 'computed %d frames out of %d', nFramesFinished, g_.nFramesWanted )
     logger.info( 'finished; elapsed time %.1f seconds (%.1f minutes)', elapsed, elapsed/60 )
     logOperation( 'finished',
         {'nInstancesRecruited': len(goodInstances),
