@@ -404,18 +404,29 @@ def launchScInstances( authToken, encryptFiles, numReq=1,
     logger.info( 'finished')
     return 0 # no err
 
-def terminateNcscInstance( authToken, iid ):
+def terminateNcscInstance( authToken, iid, maxRetries=1000 ):
     headers = ncscReqHeaders( authToken )
     url = 'https://cloud.neocortix.com/cloud-api/sc/instances/' + iid
     #logger.debug( 'deleting instance %s', iid )
-    resp = requests.delete( url, headers=headers )
-    if (resp.status_code < 200) or (resp.status_code >= 300):
-        logger.warn( 'response code %s', resp.status_code )
-        if resp.status_code in [502, 504]:  # "bad gateway", "gateway timeout"
-            time.sleep( 10 )
-            return terminateNcscInstance( authToken, iid )
-        elif len( resp.text ):
-            logger.info( 'response "%s"', resp.text )
+    try:
+        resp = requests.delete( url, headers=headers )
+    except Exception as exc:
+        wouldRetry = True
+        logger.warning( 'got exception terminating %s (%s) %s', iid, type(exc), exc )
+    else:
+        if (resp.status_code < 200) or (resp.status_code >= 300):
+            logger.warn( 'response code %s terminating %s', resp.status_code, iid )
+            wouldRetry = resp.status_code in [502, 504]  # "bad gateway", "gateway timeout"
+        else:
+            wouldRetry = False
+    if wouldRetry and maxRetries > 0:
+        time.sleep( 10 )
+        logger.info( 'retrying %s (up to %d retries)', iid, maxRetries )
+        return terminateNcscInstance( authToken, iid, maxRetries-1 )
+    elif wouldRetry:
+        # giving up
+        logger.error( 'could not terminate %s within maximum retries', iid )
+        return 503  # "service unavailable", but maybe should be different if gotException
     return resp.status_code
 
 def terminateJobInstances( authToken, jobId, maxRetries=1000 ):
