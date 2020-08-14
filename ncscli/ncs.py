@@ -53,7 +53,7 @@ def ncscReqHeaders( authToken ):
         "X-Neocortix-Cloud-API-AuthToken": authToken
     }
 
-def queryNcsSc( urlTail, authToken, reqParams=None, maxRetries=5 ):
+def queryNcsSc( urlTail, authToken, reqParams=None, maxRetries=20 ):
     #if random.random() > .75:
     #    raise requests.exceptions.RequestException( 'simulated exception' )
     # set long timeouts for requests.get() as a tuple (connection timeout, read timeout) in seconds
@@ -79,7 +79,7 @@ def queryNcsSc( urlTail, authToken, reqParams=None, maxRetries=5 ):
     if (resp.status_code < 200) or (resp.status_code >= 300):
         logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
         logger.info( 'error url "%s"', url )
-        if resp.status_code not in [401, 403]:  # resp.status_code in [500, 502, 504]:
+        if resp.status_code in range( 500, 600 ):
             if maxRetries > 0:
                 time.sleep( 10 )
                 return queryNcsSc( urlTail, authToken, reqParams, maxRetries-1 )
@@ -144,13 +144,13 @@ def uploadSshClientKey( authToken, keyName, keyContents ):
         }
     reqDataStr = json.dumps( reqData )
     url = 'https://cloud.neocortix.com/cloud-api/profile/ssh-keys'
-    logger.info( 'uploading key "%s" %s...', keyName, keyContents[0:16] )
+    logger.debug( 'uploading key "%s" %s...', keyName, keyContents[0:16] )
     resp = requests.post( url, headers=headers, data=reqDataStr )
     if (resp.status_code < 200) or (resp.status_code >= 300):
         logger.warning( 'response code %s', resp.status_code )
     return resp.status_code
 
-def deleteSshClientKey( authToken, keyName, maxRetries=1 ):
+def deleteSshClientKey( authToken, keyName, maxRetries=20 ):
     headers = ncscReqHeaders( authToken )
     reqData = {
         'title': keyName,
@@ -163,7 +163,7 @@ def deleteSshClientKey( authToken, keyName, maxRetries=1 ):
         logger.warn( 'response code %s', resp.status_code )
         if len( resp.text ):
             logger.info( 'response "%s"', resp.text )
-        if (maxRetries > 0) and (resp.status_code == 502):  # "bad gateway"
+        if (maxRetries > 0) and (resp.status_code in range( 500, 600 ) ):  # any server-side eror
             time.sleep( 10 )
             return deleteSshClientKey( authToken, keyName, maxRetries-1 )
     return resp.status_code
@@ -240,7 +240,7 @@ def launchScInstancesAsync( authToken, encryptFiles, numReq=1,
     while queryNeeded:
         jobId = resp.json()['id']
         try:
-            logger.info( 'getting instance list for job %s', jobId )
+            logger.debug( 'getting instance list for job %s', jobId )
             resp2 = queryNcsSc( 'jobs/'+jobId, authToken, maxRetries=20 )
         except Exception as exc:
             logger.error( 'exception getting list of instances (%s) "%s"',
@@ -258,7 +258,7 @@ def launchScInstancesAsync( authToken, encryptFiles, numReq=1,
                 if not queryNeeded:
                     return resp2['content']['instances']
                 nAllocated = len(resp2['content']['instances'])
-                logger.info( "resp2['content']['launching']: %s", resp2['content']['launching'] )
+                logger.debug( "resp2['content']['launching']: %s", resp2['content']['launching'] )
                 if shouldBreak() and nAllocated == 0:
                     logger.info( 'breaking wait-allocate loop because not shouldBreak and no instances' )
                     return {'serverError': 404, 'reqId': jobId}
@@ -416,7 +416,8 @@ def terminateNcscInstance( authToken, iid, maxRetries=1000 ):
     else:
         if (resp.status_code < 200) or (resp.status_code >= 300):
             logger.warn( 'response code %s terminating %s', resp.status_code, iid )
-            wouldRetry = resp.status_code in [502, 504]  # "bad gateway", "gateway timeout"
+            wouldRetry = resp.status_code in range( 500, 600 )  # 5xx responses are server errors
+            #wouldRetry = resp.status_code in [502, 504]  # "bad gateway", "gateway timeout"
         else:
             wouldRetry = False
     if wouldRetry and maxRetries > 0:
@@ -438,7 +439,7 @@ def terminateJobInstances( authToken, jobId, maxRetries=1000 ):
         logger.warn( 'response code %s', resp.status_code )
         if len( resp.text ):
             logger.info( 'response "%s; maxRetries %d"', resp.text, maxRetries-1 )
-        if maxRetries and resp.status_code not in [403, 404]:
+        if maxRetries and resp.status_code in range( 500, 600 ):
             time.sleep( 10 )
             return terminateJobInstances( authToken, jobId )
     return resp.status_code
@@ -680,7 +681,7 @@ def doCmdList( args ):
 
 def terminateInstances( authToken, instanceIds ):
     def terminateOne( iid ):
-        logger.info( 'terminating %s', iid )
+        logger.debug( 'terminating %s', iid )
         terminateNcscInstance( authToken, iid )
     if instanceIds and (len(instanceIds) >0) and (isinstance(instanceIds[0], str )):
         nWorkers = 3
