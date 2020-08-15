@@ -181,7 +181,7 @@ def logOperation( op, value, instanceId ):
         g_.resultsLogFile.flush()
 
 def logInstallerEvent( key, value, instanceId ):
-    logger.info( 'logging %s', locals() )
+    logger.debug( 'logging %s', locals() )
     if g_.installerLogFile:
         toLog = {key: value, 'instanceId': instanceId,
             'dateTime': datetime.datetime.now(datetime.timezone.utc).isoformat() }
@@ -930,8 +930,8 @@ def runBatch( **kwargs ):
         logger.debug( 'args.filter: %s', args.filter )
         logger.info( '%d filtered devices available', nAvail )
         nFrames = len( range(args.startFrame, args.endFrame+1, args.frameStep ) )
-        logger.debug( 'recruiting up to %d instances', nFrames * g_.autoscaleInit )
-        nToRecruit = min( nAvail, nFrames * g_.autoscaleInit )
+        nToRecruit = min( nAvail, round( nFrames * g_.autoscaleInit ) )
+        logger.debug( 'recruiting up to %d instances', nToRecruit )
     elif args.nWorkers > 0:
         # an override for advanced users, specifying exactly how many instances to launch
         nToRecruit = args.nWorkers
@@ -1023,7 +1023,7 @@ def createArgumentParser():
     ap.add_argument( '--filter', help='json to filter instances for launch' )
     ap.add_argument( '--frameTimeLimit', type=int, default=8*60*60, help='amount of time (in seconds) allowed for each frame' )
     ap.add_argument( '--instTimeLimit', type=int, default=900, help='amount of time (in seconds) installer is allowed to take on instances' )
-    ap.add_argument( '--jobId', help='to identify this job in log' )
+    ap.add_argument( '--batchId', help='to help identify this batch in a process list or log' )
     ap.add_argument( '--launch', type=boolArg, default=True, help='to launch and terminate instances' )
     ap.add_argument( '--sshAgent', type=boolArg, default=False, help='whether or not to use ssh agent' )
     ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use (default is random)' )
