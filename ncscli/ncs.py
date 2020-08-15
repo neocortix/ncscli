@@ -136,7 +136,7 @@ def listSshClientKeys( authToken ):
     else:
         return keys
 
-def uploadSshClientKey( authToken, keyName, keyContents ):
+def uploadSshClientKey( authToken, keyName, keyContents, maxRetries=20 ):
     headers = ncscReqHeaders( authToken )
     reqData = {
         'title': keyName,
@@ -145,9 +145,25 @@ def uploadSshClientKey( authToken, keyName, keyContents ):
     reqDataStr = json.dumps( reqData )
     url = 'https://cloud.neocortix.com/cloud-api/profile/ssh-keys'
     logger.debug( 'uploading key "%s" %s...', keyName, keyContents[0:16] )
-    resp = requests.post( url, headers=headers, data=reqDataStr )
-    if (resp.status_code < 200) or (resp.status_code >= 300):
-        logger.warning( 'response code %s', resp.status_code )
+    try:
+        resp = requests.post( url, headers=headers, data=reqDataStr )
+    except Exception as exc:
+        wouldRetry = True
+        logger.warning( 'got exception uploading %s (%s) %s', keyName, type(exc), exc )
+    else:
+        if (resp.status_code < 200) or (resp.status_code >= 300):
+            logger.warn( 'response code %s uploading %s', resp.status_code, keyName )
+            wouldRetry = resp.status_code in range( 500, 600 )  # 5xx responses are server errors
+        else:
+            wouldRetry = False
+    if wouldRetry and maxRetries > 0:
+        time.sleep( 10 )
+        logger.info( 'retrying %s (up to %d retries)', keyName, maxRetries )
+        return uploadSshClientKey( authToken, keyName, keyContents, maxRetries-1 )
+    elif wouldRetry:
+        # giving up
+        logger.error( 'could not upload %s within maximum retries', keyName )
+        return 503  # "service unavailable", but maybe should be different if gotException
     return resp.status_code
 
 def deleteSshClientKey( authToken, keyName, maxRetries=20 ):
@@ -158,14 +174,25 @@ def deleteSshClientKey( authToken, keyName, maxRetries=20 ):
     reqDataStr = json.dumps( reqData )
     url = 'https://cloud.neocortix.com/cloud-api/profile/ssh-keys/'
     logger.debug( 'deleting SshClientKey %s', keyName )
-    resp = requests.delete( url, headers=headers, data=reqDataStr )
-    if (resp.status_code < 200) or (resp.status_code >= 300):
-        logger.warn( 'response code %s', resp.status_code )
-        if len( resp.text ):
-            logger.info( 'response "%s"', resp.text )
-        if (maxRetries > 0) and (resp.status_code in range( 500, 600 ) ):  # any server-side eror
-            time.sleep( 10 )
-            return deleteSshClientKey( authToken, keyName, maxRetries-1 )
+    try:
+        resp = requests.delete( url, headers=headers, data=reqDataStr )
+    except Exception as exc:
+        wouldRetry = True
+        logger.warning( 'got exception (%s) %s', type(exc), exc )
+    else:
+        if (resp.status_code < 200) or (resp.status_code >= 300):
+            logger.warn( 'response code %s', resp.status_code )
+            wouldRetry = resp.status_code in range( 500, 600 )  # 5xx responses are server errors
+        else:
+            wouldRetry = False
+    if wouldRetry and maxRetries > 0:
+        time.sleep( 10 )
+        logger.info( 'retrying %s (up to %d retries)', keyName, maxRetries )
+        return deleteSshClientKey( authToken, keyName, maxRetries-1 )
+    elif wouldRetry:
+        # giving up
+        logger.error( 'could not succeed within maximum retries' )
+        return 503  # "service unavailable", but maybe should be different if gotException
     return resp.status_code
 
 def launchScInstancesAsync( authToken, encryptFiles, numReq=1,
