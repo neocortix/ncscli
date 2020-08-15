@@ -32,10 +32,10 @@ outDataDir = 'data/ping_' + dateTimeTag
 rc = batchRunner.runBatch(
     frameProcessor = pingFrameProcessor(),
     authToken = 'YourAuthTokenHere',
-    timeLimit = 300,
+    timeLimit = 720,  # seconds
     frameTimeLimit = 120,
-    filter = '{"dpr": ">=24"}',
     outDataDir = outDataDir,
+    autoscaleMax = 1.5,
     startFrame = 1,
     endFrame = 3
  )
