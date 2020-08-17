@@ -131,8 +131,9 @@ def listSshClientKeys( authToken ):
     logger.info( 'response %s', resp.text )
     try:
         keys = resp.json()
-    except:
+    except Exception:
         logger.warning( 'got bad json' )
+        return []
     else:
         return keys
 
@@ -261,7 +262,7 @@ def launchScInstancesAsync( authToken, encryptFiles, numReq=1,
     else:
         logger.info( 'job request returned (%s) %s', resp.status_code, resp.text )
     queryNeeded = resp.status_code == 200
-    logger.info( 'resp.status_code %d; queryNeeded %s ', resp.status_code, queryNeeded )
+    logger.debug( 'resp.status_code %d; queryNeeded %s ', resp.status_code, queryNeeded )
     timeLimit = 600 # seconds
     deadline = time.time() + timeLimit
     while queryNeeded:
@@ -296,7 +297,7 @@ def launchScInstancesAsync( authToken, encryptFiles, numReq=1,
                     else:
                         return {'serverError': 404, 'reqId': jobId}
                 logger.info( 'waiting for server (%d instances allocated)', nAllocated )
-                time.sleep( 5 )
+                time.sleep( 10 )
     return resp.json()
 
 def launchScInstances( authToken, encryptFiles, numReq=1,
@@ -386,7 +387,7 @@ def launchScInstances( authToken, encryptFiles, numReq=1,
             if shouldBreak():
                 logger.warning( 'incomplete launch due to okToContinueFunc' )
                 break
-            time.sleep( 5 )
+            time.sleep( 10 )
     except KeyboardInterrupt:
         logger.info( 'caught SIGINT (ctrl-c), skipping ahead' )
 
@@ -428,7 +429,7 @@ def launchScInstances( authToken, encryptFiles, numReq=1,
             break
     if jsonOutFile:
         print( ']', file=jsonOutFile)
-    logger.info( 'finished')
+    logger.debug( 'finished')
     return 0 # no err
 
 def terminateNcscInstance( authToken, iid, maxRetries=1000 ):
@@ -461,16 +462,26 @@ def terminateJobInstances( authToken, jobId, maxRetries=1000 ):
     headers = ncscReqHeaders( authToken )
     url = 'https://cloud.neocortix.com/cloud-api/sc/jobs/' + jobId
     logger.info( 'deleting instances for job %s', jobId )
-    resp = requests.delete( url, headers=headers )
-    if (resp.status_code < 200) or (resp.status_code >= 300):
-        logger.warn( 'response code %s', resp.status_code )
-        if len( resp.text ):
-            logger.info( 'response "%s; maxRetries %d"', resp.text, maxRetries-1 )
-        if maxRetries and resp.status_code in range( 500, 600 ):
-            time.sleep( 10 )
-            return terminateJobInstances( authToken, jobId )
+    try:
+        resp = requests.delete( url, headers=headers )
+    except Exception as exc:
+        wouldRetry = True
+        logger.warning( 'got exception (%s) %s', type(exc), exc )
+    else:
+        if (resp.status_code < 200) or (resp.status_code >= 300):
+            logger.warn( 'response code %s', resp.status_code )
+            wouldRetry = resp.status_code in range( 500, 600 )  # 5xx responses are server errors
+        else:
+            wouldRetry = False
+    if wouldRetry and maxRetries > 0:
+        time.sleep( 10 )
+        logger.info( 'retrying %s (up to %d retries)', jobId, maxRetries )
+        return terminateJobInstances( authToken, jobId, maxRetries-1 )
+    elif wouldRetry:
+        # giving up
+        logger.error( 'could not succeed within maximum retries' )
+        return 503  # "service unavailable", but maybe should be different if gotException
     return resp.status_code
-
 
 def doCmdLaunch( args ):
     authToken = args.authToken
@@ -560,7 +571,7 @@ def doCmdLaunch( args ):
             if sigtermSignaled():
                 logger.warning( 'incomplete launch due to sigterm' )
                 break
-            time.sleep( 5 )
+            time.sleep( 10 )
     except KeyboardInterrupt:
         logger.info( 'caught SIGINT (ctrl-c), skipping ahead' )
 
@@ -604,7 +615,7 @@ def doCmdLaunch( args ):
             break
     if args.json:
         print( ']')
-    logger.info( 'finished')
+    logger.debug( 'finished')
     return 0 # no err
 
 def listNcsScInstances( authToken ):
