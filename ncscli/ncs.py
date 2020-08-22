@@ -247,62 +247,58 @@ def launchScInstancesAsync( authToken, encryptFiles, numReq=1,
     url = 'https://cloud.neocortix.com/cloud-api/sc/jobs'
     #logger.info( 'posting with auth %s', authToken )
     try:
-        try:
-            resp = requests.post( url, headers=headers, data=reqDataStr )
-        except requests.ConnectionError:
-            #TODO improve exception handling to enable more retries when appropriate
-            logger.warning( 'got ConnectionError, retrying')
-            time.sleep( 10 )
-            resp = requests.post( url, headers=headers, data=reqDataStr )
+        resp = requests.post( url, headers=headers, data=reqDataStr )
+    except requests.ConnectionError:
+        #TODO improve exception handling to enable more retries when appropriate
+        logger.warning( 'got ConnectionError, retrying')
+        time.sleep( 10 )
+        resp = requests.post( url, headers=headers, data=reqDataStr )
 
-        #logger.info( 'response code %s', resp.status_code )
-        if (resp.status_code < 200) or (resp.status_code >= 300):
-            logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
-            #TODO need retry code here, but only for specific response codes
-            return {'serverError': resp.status_code, 'reqId': reqId}
+    #logger.info( 'response code %s', resp.status_code )
+    if (resp.status_code < 200) or (resp.status_code >= 300):
+        logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
+        #TODO need retry code here, but only for specific response codes
+        return {'serverError': resp.status_code, 'reqId': reqId}
+    else:
+        logger.info( 'job request returned (%s) %s', resp.status_code, resp.text )
+    queryNeeded = resp.status_code == 200
+    logger.debug( 'resp.status_code %d; queryNeeded %s ', resp.status_code, queryNeeded )
+    timeLimit = 600 # seconds
+    deadline = time.time() + timeLimit
+    while queryNeeded:
+        jobId = resp.json()['id']
+        try:
+            logger.debug( 'getting instance list for job %s', jobId )
+            resp2 = queryNcsSc( 'jobs/'+jobId, authToken, maxRetries=20 )
+        except Exception as exc:
+            # the caller must be responsible for killing these
+            logger.warning( 'exception getting list of instances (%s) "%s"',
+                type(exc), exc )
+            return {'serverError': 503, 'reqId': jobId}  # service not available
         else:
-            logger.info( 'job request returned (%s) %s', resp.status_code, resp.text )
-        queryNeeded = resp.status_code == 200
-        logger.debug( 'resp.status_code %d; queryNeeded %s ', resp.status_code, queryNeeded )
-        timeLimit = 600 # seconds
-        deadline = time.time() + timeLimit
-        while queryNeeded:
-            jobId = resp.json()['id']
-            try:
-                logger.debug( 'getting instance list for job %s', jobId )
-                resp2 = queryNcsSc( 'jobs/'+jobId, authToken, maxRetries=20 )
-            except Exception as exc:
-                # the caller must be responsible for killing these
-                logger.warning( 'exception getting list of instances (%s) "%s"',
-                    type(exc), exc )
-                return {'serverError': 503, 'reqId': jobId}  # service not available
+            if (resp2['statusCode'] < 200) or (resp2['statusCode'] >= 300):
+                # in case of persistent error, return the last error code
+                logger.info( 'returning server error')
+                return {'serverError': resp2['statusCode'], 'reqId': jobId}
             else:
-                if (resp2['statusCode'] < 200) or (resp2['statusCode'] >= 300):
-                    # in case of persistent error, return the last error code
-                    logger.info( 'returning server error')
-                    return {'serverError': resp2['statusCode'], 'reqId': jobId}
-                else:
-                    #logger.info( 'resp2 content %s', resp2['content'].keys() )
-                    queryNeeded = resp2['content']['launching']
-                    if not queryNeeded:
+                #logger.info( 'resp2 content %s', resp2['content'].keys() )
+                queryNeeded = resp2['content']['launching']
+                if not queryNeeded:
+                    return resp2['content']['instances']
+                nAllocated = len(resp2['content']['instances'])
+                logger.debug( "resp2['content']['launching']: %s", resp2['content']['launching'] )
+                if shouldBreak() and nAllocated == 0:
+                    logger.info( 'breaking wait-allocate loop because not shouldBreak and no instances' )
+                    return {'serverError': 404, 'reqId': jobId}
+                if time.time() >= deadline:
+                    logger.info( 'breaking wait-allocate loop because of time limit' )
+                    if nAllocated > 0:
                         return resp2['content']['instances']
-                    nAllocated = len(resp2['content']['instances'])
-                    logger.debug( "resp2['content']['launching']: %s", resp2['content']['launching'] )
-                    if shouldBreak() and nAllocated == 0:
-                        logger.info( 'breaking wait-allocate loop because not shouldBreak and no instances' )
+                    else:
                         return {'serverError': 404, 'reqId': jobId}
-                    if time.time() >= deadline:
-                        logger.info( 'breaking wait-allocate loop because of time limit' )
-                        if nAllocated > 0:
-                            return resp2['content']['instances']
-                        else:
-                            return {'serverError': 404, 'reqId': jobId}
-                    logger.info( 'waiting for server (%d instances allocated)', nAllocated )
-                    time.sleep( 10 )
-        return resp.json()
-    except KeyboardInterrupt:
-        logger.warning( 'a launch request was interrupted; %d instances may have been launched', numReq )
-        return {'serverError': 418, 'reqId': reqId}  # "teapot" code indicates interrupt
+                logger.info( 'waiting for server (%d instances allocated)', nAllocated )
+                time.sleep( 10 )
+    return resp.json()
 
 def launchScInstances( authToken, encryptFiles, numReq=1,
         regions=[], abis=[], sshClientKeyName=None, jsonFilter=None,
@@ -322,17 +318,12 @@ def launchScInstances( authToken, encryptFiles, numReq=1,
                 regions=regions, abis=abis, jsonFilter=jsonFilter,
                 jobId=jobId, okToContinueFunc=okToContinueFunc )
             if 'serverError' in infos:
-                if infos['serverError'] == 418:
-                    logger.warning( 'launch sequence was interrupted')
-                else:
-                    logger.error( 'got error %d', infos['serverError'])
+                logger.error( 'got error %d', infos['serverError'])
                 logger.info( 'attempting to terminate launched instances (please wait)' )
                 time.sleep(30)  # possible race condition here
                 terminateJobInstances( authToken, infos['reqId'] )
                 if jsonOutFile:
                     print( '[]', file=jsonOutFile)
-                if infos['serverError'] == 418:
-                    raise KeyboardInterrupt
                 return infos['serverError']
         except Exception as exc:
             logger.error( 'exception launching instances (%s) "%s"',
