@@ -64,6 +64,7 @@ class g_:
     resultsLogFilePath = None
     progressFilePath = None
     deadline = None
+    interrupted = False
     workingInstances = collections.deque()
     progressFileLock = threading.Lock()
 
@@ -266,7 +267,7 @@ def launchInstances( authToken, nInstances, sshClientKeyName, launchedJsonFilepa
 def terminateInstances( authToken, instanceIds ):
     '''try to terminate instances; return list of instances terminated (empty if none confirmed)'''
     #instanceIds = [inst['instanceId'] for inst in instanceRecs]   
-    logger.info( 'terminating %d instances', len(instanceIds) )
+    logger.debug( 'terminating %d instances', len(instanceIds) )
     terminationLogFilePath = os.path.join( g_.dataDirPath, 'badTerminations.csv' )
     dateTimeStr = datetime.datetime.now( datetime.timezone.utc ).isoformat()
     try:
@@ -383,6 +384,8 @@ def recruitInstance( launchedJsonFilePath, resultsLogFilePathIgnored ):
                     break
                 if sigtermSignaled():
                     break
+                if g_.interrupted:
+                    break
                 time.sleep(30)
             proc.poll()
             returnCode = proc.returncode if proc.returncode != None else 124 # declare timeout if no rc
@@ -428,96 +431,122 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
     if not g_.resultsLogFilePath:
         resultsLogFilePath = g_.dataDirPath+'/recruitInstances.jlog'
     goodInstances = []
-    if launchWanted:
-        logger.info( 'recruiting %d instances', nWorkersWanted )
-        nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
-        if nWorkersWanted > (nAvail + 0):
-            logger.error( 'not enough devices available (%d requested, %d avail)', nWorkersWanted, nAvail )
-            raise ValueError( 'not enough devices available')
-        # prepare sshClientKey for launch
-        if args.sshClientKeyName:
-            sshClientKeyName = args.sshClientKeyName
-        else:
-            keyContents = loadSshPubKey().strip()
-            randomPart = str( uuid.uuid4() )[0:13]
-            #keyContents += ' #' + randomPart
-            sshClientKeyName = 'batchRunner_%s' % (randomPart)
-            respCode = ncs.uploadSshClientKey( args.authToken, sshClientKeyName, keyContents )
-            if respCode < 200 or respCode >= 300:
-                logger.warning( 'ncs.uploadSshClientKey returned %s', respCode )
+    rc = None
+    launchedInstances = None
+    sshClientKeyName = args.sshClientKeyName
+    try:
+        if launchWanted:
+            logger.info( 'recruiting %d instances', nWorkersWanted )
+            nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
+            if nWorkersWanted > (nAvail + 0):
+                logger.error( 'not enough devices available (%d requested, %d avail)', nWorkersWanted, nAvail )
+                raise ValueError( 'not enough devices available')
+            # prepare sshClientKey for launch
+            if args.sshClientKeyName:
+                sshClientKeyName = args.sshClientKeyName
+            else:
+                keyContents = loadSshPubKey().strip()
+                randomPart = str( uuid.uuid4() )[0:13]
+                #keyContents += ' #' + randomPart
+                sshClientKeyName = 'batchRunner_%s' % (randomPart)
+                respCode = ncs.uploadSshClientKey( args.authToken, sshClientKeyName, keyContents )
+                if respCode < 200 or respCode >= 300:
+                    logger.warning( 'ncs.uploadSshClientKey returned %s', respCode )
+                    return []
+            #launch
+            #logResult( 'operation', {'launchInstances': nWorkersWanted}, '<recruitInstances>' )
+            logOperation( 'launchInstances', nWorkersWanted, '<recruitInstances>' )
+            rc = launchInstances( args.authToken, nWorkersWanted,
+                sshClientKeyName, launchedJsonFilePath, filtersJson=args.filter,
+                encryptFiles = args.encryptFiles
+                )
+            if rc:
+                logger.debug( 'launchInstances returned %d', rc )
+            # delete sshClientKey only if we just uploaded it
+            if sshClientKeyName != args.sshClientKeyName:
+                logger.debug( 'deleting sshClientKey %s', sshClientKeyName)
+                time.sleep(10)
+                ncs.deleteSshClientKey( args.authToken, sshClientKeyName )
+            if rc:
                 return []
-        #launch
-        #logResult( 'operation', {'launchInstances': nWorkersWanted}, '<recruitInstances>' )
-        logOperation( 'launchInstances', nWorkersWanted, '<recruitInstances>' )
-        rc = launchInstances( args.authToken, nWorkersWanted,
-            sshClientKeyName, launchedJsonFilePath, filtersJson=args.filter,
-            encryptFiles = args.encryptFiles
-            )
-        if rc:
-            logger.debug( 'launchInstances returned %d', rc )
+        launchedInstances = []
+        # get instances from the launched json file
+        with open( launchedJsonFilePath, 'r') as jsonInFile:
+            try:
+                launchedInstances = json.load(jsonInFile)  # an array
+            except Exception as exc:
+                logger.warning( 'could not load json (%s) %s', type(exc), exc )
+        if len( launchedInstances ) < nWorkersWanted:
+            logger.warning( 'could not launch as many instances as wanted (%d vs %d)',
+                len( launchedInstances ), nWorkersWanted )
+        nonstartedIids = [inst['instanceId'] for inst in launchedInstances if inst['state'] != 'started' ]
+        if nonstartedIids:
+            logger.warning( 'terminating non-started instances %s', nonstartedIids )
+            terminateInstances( args.authToken, nonstartedIids )
+        # proceed with instances that were actually started
+        startedInstances = [inst for inst in launchedInstances if inst['state'] == 'started' ]
+        # add instances to knownHosts
+        with open( os.path.expanduser('~/.ssh/known_hosts'), 'a' ) as khFile:
+            jsonToKnownHosts.jsonToKnownHosts( startedInstances, khFile )
+        # install something on startedInstances, if required, else just return startedInstances
+        if not getInstallerCmd():
+            return startedInstances
+        if not sigtermSignaled():
+            installerCmd = getInstallerCmd()
+            logger.info( 'calling tellInstances to install on %d instances', len(startedInstances))
+            stepStatuses = tellInstances.tellInstances( startedInstances, installerCmd,
+                resultsLogFilePath=resultsLogFilePath,
+                download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
+                timeLimit=min(args.instTimeLimit, args.timeLimit), upload=None, stopOnSigterm=not True,
+                knownHostsOnly=True
+                )
+            # SHOULD restore our handler because tellInstances may have overridden it
+            #signal.signal( signal.SIGTERM, sigtermHandler )
+            if not stepStatuses:
+                logger.warning( 'no statuses returned from installer')
+                startedIids = [inst['instanceId'] for inst in startedInstances]
+                logOperation( 'terminateBad', startedIids, '<recruitInstances>' )
+                terminateInstances( args.authToken, startedIids )
+                return []
+            (goodOnes, badOnes) = triage( stepStatuses )
+            #stepTiming.finish()
+            #eventTimings.append(stepTiming)
+            logger.info( '%d good installs, %d bad installs', len(goodOnes), len(badOnes) )
+            logger.info( 'stepStatuses %s', stepStatuses )
+            goodInstances = [inst for inst in startedInstances if inst['instanceId'] in goodOnes ]
+            badIids = []
+            for status in badOnes:
+                badIids.append( status['instanceId'] )
+            if badIids:
+                logOperation( 'terminateBad', badIids, '<recruitInstances>' )
+                terminateInstances( args.authToken, badIids )
+                badInstances = [inst for inst in startedInstances if inst['instanceId'] in badIids ]
+                logger.info( 'purging host keys')
+                purgeHostKeys( badInstances )
+            #if goodInstances:
+            #    recycleInstances( goodInstances )
+        return goodInstances
+    except KeyboardInterrupt:
+        logger.warning( 'recruitInstances was interrupted' )
+        if rc == 0:
+            # read back launchedInstances, if possible and not already done
+            if (not launchedInstances) and os.path.isfile( launchedJsonFilePath ):
+                with open( launchedJsonFilePath, 'r') as jsonInFile:
+                    try:
+                        launchedInstances = json.load(jsonInFile)  # an array
+                    except Exception as exc:
+                        logger.warning( 'could not load json (%s) %s', type(exc), exc )
+            # terminate all instances, if any launched
+            if launchedInstances:
+                jobId = launchedInstances[0].get('job')
+                if jobId:
+                    ncs.terminateJobInstances( args.authToken, jobId )
         # delete sshClientKey only if we just uploaded it
         if sshClientKeyName != args.sshClientKeyName:
             logger.debug( 'deleting sshClientKey %s', sshClientKeyName)
             ncs.deleteSshClientKey( args.authToken, sshClientKeyName )
-        if rc:
-            return []
-    launchedInstances = []
-    # get instances from the launched json file
-    with open( launchedJsonFilePath, 'r') as jsonInFile:
-        try:
-            launchedInstances = json.load(jsonInFile)  # an array
-        except Exception as exc:
-            logger.warning( 'could not load json (%s) %s', type(exc), exc )
-    if len( launchedInstances ) < nWorkersWanted:
-        logger.warning( 'could not launch as many instances as wanted (%d vs %d)',
-            len( launchedInstances ), nWorkersWanted )
-    nonstartedIids = [inst['instanceId'] for inst in launchedInstances if inst['state'] != 'started' ]
-    if nonstartedIids:
-        logger.warning( 'terminating non-started instances %s', nonstartedIids )
-        terminateInstances( args.authToken, nonstartedIids )
-    # proceed with instances that were actually started
-    startedInstances = [inst for inst in launchedInstances if inst['state'] == 'started' ]
-    # add instances to knownHosts
-    with open( os.path.expanduser('~/.ssh/known_hosts'), 'a' ) as khFile:
-        jsonToKnownHosts.jsonToKnownHosts( startedInstances, khFile )
-    # install something on startedInstances, if required, else just return startedInstances
-    if not getInstallerCmd():
-        return startedInstances
-    if not sigtermSignaled():
-        installerCmd = getInstallerCmd()
-        logger.info( 'calling tellInstances to install on %d instances', len(startedInstances))
-        stepStatuses = tellInstances.tellInstances( startedInstances, installerCmd,
-            resultsLogFilePath=resultsLogFilePath,
-            download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
-            timeLimit=min(args.instTimeLimit, args.timeLimit), upload=None, stopOnSigterm=not True,
-            knownHostsOnly=True
-            )
-        # SHOULD restore our handler because tellInstances may have overridden it
-        #signal.signal( signal.SIGTERM, sigtermHandler )
-        if not stepStatuses:
-            logger.warning( 'no statuses returned from installer')
-            startedIids = [inst['instanceId'] for inst in startedInstances]
-            logOperation( 'terminateBad', startedIids, '<recruitInstances>' )
-            terminateInstances( args.authToken, startedIids )
-            return []
-        (goodOnes, badOnes) = triage( stepStatuses )
-        #stepTiming.finish()
-        #eventTimings.append(stepTiming)
-        logger.info( '%d good installs, %d bad installs', len(goodOnes), len(badOnes) )
-        logger.info( 'stepStatuses %s', stepStatuses )
-        goodInstances = [inst for inst in startedInstances if inst['instanceId'] in goodOnes ]
-        badIids = []
-        for status in badOnes:
-            badIids.append( status['instanceId'] )
-        if badIids:
-            logOperation( 'terminateBad', badIids, '<recruitInstances>' )
-            terminateInstances( args.authToken, badIids )
-            badInstances = [inst for inst in startedInstances if inst['instanceId'] in badIids ]
-            logger.info( 'purging host keys')
-            purgeHostKeys( badInstances )
-        #if goodInstances:
-        #    recycleInstances( goodInstances )
-    return goodInstances
+        raise
+
 
 def rsyncToRemote( srcFilePath, destFileName, inst, timeLimit ):
     sshSpecs = inst['ssh']
@@ -610,6 +639,9 @@ def saveProgress():
 
 
 def renderFramesOnInstance( inst ):
+    if g_.interrupted:
+        logger.warning( 'exiting because g_.interrupted')
+        return 0
     timeLimit = min( args.frameTimeLimit, args.timeLimit )
     rsyncTimeLimit = min( 18000, timeLimit )  # was 240; have used 1800 for big files
     iid = inst['instanceId']
@@ -664,10 +696,12 @@ def renderFramesOnInstance( inst ):
     while len( g_.framesFinished) < g_.nFramesWanted:
         if sigtermSignaled():
             break
+        if g_.interrupted:
+            logger.warning( 'breaking loop because g_.interrupted')
+            break
         if time.time() >= g_.deadline:
             logger.warning( 'exiting thread because global deadline has passed' )
             break
-
         if nFailures >= 3:
             logger.warning( 'exiting thread because instance has encountered %d failures', nFailures )
             logOperation( 'terminateFailedWorker', iid, '<master>')
@@ -744,6 +778,9 @@ def renderFramesOnInstance( inst ):
                     break
                 if sigtermSignaled():
                     break
+                if g_.interrupted:
+                    logger.info( 'exiting polling loop because interrupted' )
+                    break
                 time.sleep(10)
             returnCode = proc.returncode if proc.returncode != None else 124
             if returnCode:
@@ -777,7 +814,7 @@ def renderFramesOnInstance( inst ):
             if returnCode == 0:
                 g_.framesFinished.append( frameNum )
                 logFrameState( frameNum, 'retrieved', iid )
-                logger.info( 'retrieved frame %d', frameNum )
+                logger.debug( 'retrieved frame %d', frameNum )
                 logger.info( 'finished %d frames out of %d', len( g_.framesFinished), g_.nFramesWanted )
                 rightNow = datetime.datetime.now(datetime.timezone.utc)
                 frameDetails[ 'lastDateTime' ] = rightNow.isoformat()
@@ -823,6 +860,10 @@ def checkForInstances():
     '''a threadproc to check whether we have enough instances running and maybe launch more'''
     threads = []
     while len(g_.framesFinished) < g_.nFramesWanted and sigtermNotSignaled() and time.time()< g_.deadline:
+        if g_.interrupted:
+            logger.warning( 'breaking loop because g_.interrupted')
+            break
+
         nUnfinished = g_.nFramesWanted - len(g_.framesFinished)
         nWorkers = len( g_.workingInstances )
         if nWorkers < round(nUnfinished * g_.autoscaleMin):
@@ -940,42 +981,52 @@ def runBatch( **kwargs ):
         logger.error( msg )
         return 1
     onTheFlyWanted = (args.nWorkers==0)
-    
-    if args.launch:
-        goodInstances= recruitInstances( nToRecruit, g_.dataDirPath+'/recruitLaunched.json', True )
-    else:
-        goodInstances = recruitInstances( nToRecruit, g_.dataDirPath+'/survivingInstances.json', False )
-    g_.installerLogFile = open( installerLogFilePath, 'a' )
-
-
-    g_.framesToDo.extend( range(args.startFrame, args.endFrame+1, args.frameStep ) )
-    logger.debug( 'g_.framesToDo %s', g_.framesToDo )
-
-    settingsToSave = argsToSave.copy()
-    with open( settingsJsonFilePath, 'w' ) as settingsFile:
-        json.dump( settingsToSave, settingsFile )
-
     checkerThread = None
-    if not len(goodInstances):
-        logger.error( 'no good instances were recruited')
-    else:
+    goodInstances = None
+    try:
+        if args.launch:
+            goodInstances= recruitInstances( nToRecruit, g_.dataDirPath+'/recruitLaunched.json', True )
+        else:
+            goodInstances = recruitInstances( nToRecruit, g_.dataDirPath+'/survivingInstances.json', False )
+        g_.installerLogFile = open( installerLogFilePath, 'a' )
+
+        g_.framesToDo.extend( range(args.startFrame, args.endFrame+1, args.frameStep ) )
         g_.nFramesWanted = len( g_.framesToDo )
-        saveProgress()
-        logOperation( 'parallelRender',
-            {'commonInFilePath': args.commonInFilePath, 'nInstances': len(goodInstances),
-                'nFramesReq': g_.nFramesWanted },
-            '<master>' )
-        with futures.ThreadPoolExecutor( max_workers=len(goodInstances) ) as executor:
-            parIter = executor.map( renderFramesOnInstance, goodInstances )
-            if onTheFlyWanted:
-                checkerThread = threading.Thread( target=checkForInstances, name='checkForInstances' )
-                checkerThread.start()
-            parResultList = list( parIter )
-        logger.debug( 'finished initial thread pool')
-        # wait until it is time to exit
-        while len(g_.framesFinished) < g_.nFramesWanted and sigtermNotSignaled() and time.time()< g_.deadline:
-            logger.info( 'waiting for frames to finish')
-            time.sleep( 10 )
+        logger.debug( 'g_.framesToDo %s', g_.framesToDo )
+
+        settingsToSave = argsToSave.copy()
+        with open( settingsJsonFilePath, 'w' ) as settingsFile:
+            json.dump( settingsToSave, settingsFile )
+
+        if not len(goodInstances):
+            logger.error( 'no good instances were recruited')
+        else:
+            saveProgress()
+            logOperation( 'parallelRender',
+                {'commonInFilePath': args.commonInFilePath, 'nInstances': len(goodInstances),
+                    'nFramesReq': g_.nFramesWanted },
+                '<master>' )
+            with futures.ThreadPoolExecutor( max_workers=len(goodInstances) ) as executor:
+                parIter = executor.map( renderFramesOnInstance, goodInstances )
+                if onTheFlyWanted:
+                    checkerThread = threading.Thread( target=checkForInstances, name='checkForInstances' )
+                    checkerThread.start()
+                #parResultList = list( parIter )
+                try:
+                    for x in parIter:
+                        time.sleep( .1 )
+                except KeyboardInterrupt:
+                    logger.warning( 'interrupted 1, setting flag')
+                    g_.interrupted = True
+                    raise
+            logger.debug( 'finished initial thread pool')
+            # wait until it is time to exit
+            while len(g_.framesFinished) < g_.nFramesWanted and sigtermNotSignaled() and time.time()< g_.deadline:
+                logger.info( 'waiting for frames to finish')
+                time.sleep( 10 )
+    except KeyboardInterrupt:
+        logger.warning( 'interrupted, setting flag')
+        g_.interrupted = True
 
 
     if args.launch:
@@ -999,6 +1050,9 @@ def runBatch( **kwargs ):
         checkerThread.join( args.instTimeLimit + args.frameTimeLimit )  # could consider deadline
         if checkerThread.is_alive():
             logger.warning( 'checkerThread did not exit' )
+    if g_.interrupted:
+        raise KeyboardInterrupt
+
     elapsed = time.time() - startTime
     logger.info( 'computed %d frames out of %d', nFramesFinished, g_.nFramesWanted )
     logger.info( 'finished; elapsed time %.1f seconds (%.1f minutes)', elapsed, elapsed/60 )
