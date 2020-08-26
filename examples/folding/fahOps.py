@@ -769,6 +769,10 @@ if __name__ == "__main__":
         lookbackDays = 7
         thresholdDateTime = datetime.datetime.now( datetime.timezone.utc ) \
             - datetime.timedelta( days=lookbackDays )
+        lookBackHours = 24
+        newerThresholdDateTime = datetime.datetime.now( datetime.timezone.utc ) \
+            - datetime.timedelta( hours=lookBackHours )
+
         for logDir in logDirs:
             inFilePath = os.path.join( logsDirPath, logDir, 'log.txt' )
             if os.path.isfile( inFilePath ):
@@ -776,6 +780,8 @@ if __name__ == "__main__":
                 fileModDateTime = universalizeDateTime( fileModDateTime )
                 if fileModDateTime <= thresholdDateTime:
                     os.remove( inFilePath )
+                elif fileModDateTime <= newerThresholdDateTime:
+                    logger.warning( 'old fileModDateTime for %s (%s)', logDir, fileModDateTime )
         
         # ingest all new or updated client logs
         loggedCollNames = db.list_collection_names(
