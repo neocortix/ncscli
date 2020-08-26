@@ -14,12 +14,19 @@ logger = logging.getLogger(__name__)
 
 def purgeKnownHost( host, port ):
     # purge an entry from known_hosts
-    cmd = 'ssh-keygen -q -R [%s]:%s' % (host, port )
+    cmd = 'ssh-keygen -q -R [%s]:%s > /dev/null 2> /dev/null' % (host, port )
     #logger.debug( 'cmd: %s', cmd )
     retCode = subprocess.call( cmd, shell=True )
     if retCode != 0:
         logger.error( 'returnd error code %s', retCode )
 
+def purgeKnownHosts( inRecs ):
+    for inRec in inRecs:
+        if 'ssh' in inRec:
+            host = inRec['ssh'].get('host')
+            port = inRec['ssh'].get('port')
+            if host and port:
+                purgeKnownHost( host, port )
 
 if __name__ == "__main__":
     logging.basicConfig()

@@ -13,6 +13,7 @@ import os
 import shutil
 import sys
 import time
+import uuid
 
 # third-party modules
 import dateutil.parser
@@ -63,15 +64,15 @@ def demuxResults( collection ):
         if 'returncode' in decoded:
             rc = decoded['returncode']
             if rc:
-                logger.info( 'returncode %d for %s', rc, iid )
+                #logger.info( 'returncode %d for %s', rc, iid )
                 badOnes.add( iid )
         if 'exception' in decoded:
-            logger.info( 'exception %s for %s', decoded['exception'], iid )
+            #logger.info( 'exception %s for %s', decoded['exception'], iid )
             badOnes.add( iid )
         if 'timeout' in decoded:
             #logger.info( 'timeout %s for %s', decoded['timeout'], iid )
             badOnes.add( iid )
-    logger.info( 'topLevelKeys %s', topLevelKeys )
+    #logger.info( 'topLevelKeys %s', topLevelKeys )
     return byInstance, badOnes
 
 def getCountryCodeGoogle( lat, lon ):
@@ -134,7 +135,7 @@ def summarizeInstallerLog( eventsByInstance, instancesByIid, installerCollName )
                 tellInstancesDateTime = interpretDateTimeField( event['dateTime'] )
                 try:
                     launchedIids = event["operation"][1]["args"]["instanceIds"]
-                    logger.info( '%d instances were launched', len(launchedIids) )
+                    #logger.info( '%d instances were launched', len(launchedIids) )
                 except Exception as exc:
                     logger.info( 'exception ignored for tellInstances op (%s)', type(exc) )
             if 'operation' in event and 'connect' in event['operation']:
@@ -185,8 +186,8 @@ def summarizeInstallerLog( eventsByInstance, instancesByIid, installerCollName )
                 nTimeout += 1
                 instancesByIid[iid]['state'] = 'installerTimeout'
                 instancesByIid[iid]['instCode'] = installerCode
-    logger.info( '%d succeeded, %d failed, %d timeout, %d exceptions',
-        nSucceeded, nFailed, nTimeout, nExceptions)
+    #logger.info( '%d succeeded, %d failed, %d timeout, %d exceptions',
+    #    nSucceeded, nFailed, nTimeout, nExceptions)
     sumRecs = []
     for iid in instancesAllocated:
         inst = instancesAllocated[iid]
@@ -284,8 +285,11 @@ def summarizeRenderingLog( instancesAllocated, rendererCollName, tag=None ):
         #logger.info( '%s had %d events', iid, len(events) )
         if iid in instancesAllocated:
             devId = instancesAllocated[iid].get( 'device-id' )
-        else:
+        elif iid.startswith( '<' ):
             devId = 0
+        else:
+            logger.info( 'IID UUID? %s', iid )
+            devId = uuid.UUID(iid).int
         seemedSlow = False
         startDateTime = None
         frameStartTimes = {}
@@ -300,8 +304,11 @@ def summarizeRenderingLog( instancesAllocated, rendererCollName, tag=None ):
                     logger.info( 'parallelRender %s', parallelRenderOp )
                     if blendFilePath != '<unknown>':
                         logger.warning( 'replacing blendFilePath %s' )
-                    blendFilePath = parallelRenderOp['blendFilePath']
-                    logger.info( 'blendFilePath %s', blendFilePath )
+                    if 'origBlendFilePath' in parallelRenderOp:
+                        blendFilePath = parallelRenderOp['origBlendFilePath']
+                    else:
+                        blendFilePath = parallelRenderOp['blendFilePath']
+                    #logger.info( 'blendFilePath %s', blendFilePath )
                     prStartDateTime = interpretDateTimeField( event['dateTime'] )
             elif eventType == 'stderr':
                 stderrEvents.append( event )
@@ -373,7 +380,15 @@ def summarizeWorkers( _workerIids, instances, frameSummaries ):
         #if len( iid ) > 1:
         #    logger.warning( 'more than one instanceId for device %d in frameSummaries', devId)
         iid = iid[0]
-        dpr = instances[iid].get('dpr')
+        dpr = 0
+        ramTotal = 0
+        if iid not in instances:
+            inst = {}
+        else:
+            inst = instances[iid]
+            dpr = inst.get('dpr')
+            if 'ram' in inst:
+                ramTotal = inst['ram'].get('total', 0) / 1000000
         blendFilePaths = subset.blendFilePath.unique()
         if len( blendFilePaths ) > 1:
             logger.warning( 'more than one blendFilePath in frameSummaries')
@@ -397,13 +412,156 @@ def summarizeWorkers( _workerIids, instances, frameSummaries ):
             meanDurGood
             )
         '''
-        sumRec = { 'devId': devId, 'dpr': dpr, 'blendFilePath': blendFilePath,
+        sumRec = { 'devId': devId, 'instanceId': iid, 'dpr': dpr,
+            'blendFilePath': blendFilePath,
             'nAttempts': nAttempts, 'nGood': len(successes), 'nRenderFailed': nRenderFailed,
             'nRetrieveFailed': nRetrieveFailed, 'nRsyncFailed': nRsyncFailed, 'nSlow': nSlow,
-            'meanDurGood': meanDurGood, 'earliest':earliest, 'latest':latest
+            'meanDurGood': meanDurGood, 'earliest':earliest, 'latest':latest,
+            'ramTotal': ramTotal
         }
         sumRecs.append( sumRec )
     return sumRecs
+
+def summarizeInstanceTiming( instancesByIid, terminationOps, installerSumRecs, frameSumRecs ):
+    sumRecs = {}
+    for iid, inst in instancesByIid.items():
+        if inst['state'] in ['exhausted']:  #TODO define a better test
+            logger.warning( 'instance %s not started (%s)', iid, inst['state'] )
+            continue
+        sumRec = { 'instanceId': iid, 'devId': inst['device-id'],
+            'state': inst['state'],
+            'rsyncDur': 0, 'renderDur': 0, 'retrievingDur': 0, 'idleDur': float('NaN')
+             }
+        sumRec['started-at'] = inst['started-at']
+        sumRec['launchDateTime'] = universalizeDateTime( dateutil.parser.parse( inst['started-at'], ignoretz=False ) )
+
+        sumRecs[iid] = sumRec
+    # incorporate termination times, keeping track of the latest
+    latestTermDateTime = datetime.datetime.fromtimestamp( 0, datetime.timezone.utc ) # wayyy in the past
+    for iid, termOp in terminationOps.items():
+        if iid not in sumRecs:
+            logger.warning( 'termninated iid %s not found in sumRecs', iid )
+            continue
+        termDateTime = termOp['dateTime']
+        latestTermDateTime = max( latestTermDateTime, termDateTime )
+        sumRecs[iid]['termDateTime'] = termDateTime
+        sumRecs[iid]['instanceDur'] = (termOp['dateTime'] - sumRecs[iid]['launchDateTime']).total_seconds()
+
+    # incorporate installer timing
+    for installerRec in installerSumRecs:
+        iid = installerRec['instanceId']
+        if iid not in sumRecs:
+            logger.warning( 'installer iid %s not found in sumRecs', iid )
+            continue
+        installerDateTime = universalizeDateTime( dateutil.parser.parse( installerRec['dateTime'], ignoretz=False ) )
+        sumRecs[iid]['installerDateTime'] = installerDateTime
+        installerDur = installerRec['dur']
+        sumRecs[iid]['installerDur'] = installerDur
+    
+    # incorporate frame timing
+    for frameRec in frameSumRecs:
+        iid = frameRec['instanceId']
+        if iid not in sumRecs:
+            logger.warning( 'frame iid %s not found in sumRecs', iid )
+            continue
+        sumRec = sumRecs[iid]
+        if frameRec['frameState'] in ['rsynced', 'rsyncFailed']:
+            sumRec['rsyncDur'] += frameRec['dur']
+        elif frameRec['frameState'] in ['retrieved', 'retrieveFailed', 'renderFailed']:
+            sumRec['renderDur'] += frameRec['dur']
+            if frameRec.get('retrievingDur'):
+                sumRec['retrievingDur'] += frameRec.get('retrievingDur', 0)
+        else:
+            logger.info( 'frameState %s', frameRec['frameState'] )
+
+    # revisit to compute final metrics and fill in missing items
+    for iid, sumRec in sumRecs.items():
+        if 'termDateTime' not in sumRec:
+            logger.warning( 'patching termDateTime for %s', sumRec )
+            sumRec['termDateTime'] = latestTermDateTime
+        if 'instanceDur' not in sumRec:
+            logger.warning( 'patching dur for %s', sumRec )
+            sumRec['instanceDur'] = (sumRec['termDateTime'] - sumRec['launchDateTime']).total_seconds()
+        workingDur = sumRec['installerDur'] + sumRec['rsyncDur'] + sumRec['renderDur']
+        idleDur = sumRec['instanceDur'] - workingDur
+        sumRec['workingDur'] = workingDur
+        sumRec['idleDur'] = idleDur
+
+    #logger.info( 'sumRecs: %s', sumRecs )
+    return sumRecs
+
+def retrieveTerminations( rendererColl, instancesByIid ):
+    '''finds termination operations and returns dict by iid of dicts '''
+    terminations = {}  # collects termination operations by iid
+
+    # look for terminations due to bad install
+    termEvents = rendererColl.find(
+        {'args.terminateBad': {'$exists':True}, 'instanceId': '<recruitInstances>'}
+        )
+    for termEvent in termEvents:
+        for iid in termEvent['args']['terminateBad']:
+            tdt = universalizeDateTime( dateutil.parser.parse( termEvent['dateTime'], ignoretz=False ) )
+            #logger.info( 'terminateBad %s at %s', iid, tdt )
+            if iid in instancesByIid:
+                devId = instancesByIid[iid].get( 'device-id' )
+            else:
+                devId = 0
+            terminations[ iid ] = { 'opType': 'terminateBad',
+                'dateTime': tdt, 'devId': devId }
+
+    # look for terminations due to failed workers
+    termEvents = rendererColl.find(
+        {'args.terminateFailedWorker': {'$exists':True}, 'instanceId': '<master>'}
+        )
+    for termEvent in termEvents:
+        iid = termEvent['args']['terminateFailedWorker']
+        tdt = universalizeDateTime( dateutil.parser.parse( termEvent['dateTime'], ignoretz=False ) )
+        #logger.info( 'terminateFailedWorker %s at %s', iid, tdt )
+        if iid in instancesByIid:
+            devId = instancesByIid[iid].get( 'device-id' )
+        else:
+            devId = 0
+        if iid in terminations:
+            logger.warning( 'terminateFailedWorker already had a termination %s', terminations[iid] )
+        else:
+            terminations[ iid ] = { 'opType': 'terminateFailedWorker',
+                'dateTime': tdt, 'devId': devId }
+
+    # look for terminations due to excess workers
+    termEvents = rendererColl.find(
+        {'args.terminateExcessWorker': {'$exists':True}, 'instanceId': '<master>'}
+        )
+    for termEvent in termEvents:
+        iid = termEvent['args']['terminateExcessWorker']
+        tdt = universalizeDateTime( dateutil.parser.parse( termEvent['dateTime'], ignoretz=False ) )
+        #logger.info( 'terminateExcessWorker %s at %s (%s)', iid, tdt, termEvent['dateTime'] )
+        if iid in terminations:
+            logger.warning( 'terminateExcessWorker already had a termination %s', terminations[iid] )
+        else:
+            if iid in instancesByIid:
+                devId = instancesByIid[iid].get( 'device-id' )
+            else:
+                devId = 0
+            terminations[ iid ] = { 'opType': 'terminateExcessWorker',
+                'dateTime': tdt, 'devId': devId }
+    #logger.info( 'early terminations (%d) %s', len(terminations), terminations )
+    # look for "final" terminations
+    termEvents = rendererColl.find(
+        {'args.terminateFinal': {'$exists':True}, 'instanceId': '<master>'}
+        )
+    for termEvent in termEvents:
+        for iid in termEvent['args']['terminateFinal']:
+            tdt = universalizeDateTime( dateutil.parser.parse( termEvent['dateTime'], ignoretz=False ) )
+            #logger.info( 'terminateFinal %s at %s', iid, tdt )
+            if iid in instancesByIid:
+                devId = instancesByIid[iid].get( 'device-id' )
+            else:
+                devId = 0
+            # only add it if instance wasn't already teminated
+            if iid not in terminations:
+                terminations[ iid ] = { 'opType': 'terminateFinal',
+                    'dateTime': tdt, 'devId': devId }
+    return terminations
 
 def plotRenderTimes( framesDf, terminationOps, outFilePath ):
     '''plots rendering job timings based on frame summaries'''
@@ -427,13 +585,6 @@ def plotRenderTimes( framesDf, terminationOps, outFilePath ):
     rowHeight = 1
     yMargin = .25
     yMax = nDevices*rowHeight + yMargin
-    ax.set_ylim( 0, yMax )
-    yTickLocs = np.arange( rowHeight/2, nDevices*rowHeight, rowHeight)
-    plt.yticks( yTickLocs, devIds )
-    tickLocator10 = mpl.ticker.MultipleLocator(60)
-    ax.xaxis.set_minor_locator( tickLocator10 )
-    ax.xaxis.set_major_locator( mpl.ticker.MultipleLocator(600) )
-    ax.xaxis.set_ticks_position( 'both' )
     alpha = .6
     
     # get the xMin and xMax from the union of all device time ranges
@@ -451,13 +602,21 @@ def plotRenderTimes( framesDf, terminationOps, outFilePath ):
     xMax = max( xMax, pdTimeToSeconds( allStartTimes.max() ) ) # + 40
     ax.set_xlim( xMin, xMax )
     ax.set_xlim( 0, xMax-xMin )
-    
+
+    ax.set_ylim( 0, yMax )
+    yTickLocs = np.arange( rowHeight/2, nDevices*rowHeight, rowHeight)
+    plt.yticks( yTickLocs, devIds )
+    tickLocator1 = mpl.ticker.MultipleLocator(600)
+    ax.xaxis.set_minor_locator( tickLocator1 )
+    ax.xaxis.set_major_locator( mpl.ticker.MultipleLocator(1800) )
+    ax.xaxis.set_ticks_position( 'both' )
+
     jobColors = { 'retrieved': 'tab:cyan', 'rsynced': 'tab:blue',
                  'renderFailed': 'tab:red', 'rsyncFailed': 'tab:orange', 'retrieveFailed': 'tab:pink' }
     jiggers = { 'renderFailed': .1, 'rsyncFailed': .1, 'retrieveFailed': .1 }
   
     jobColor0 = mpl.colors.to_rgb( 'gray' )
-    fontsize = 8
+    fontsize = 4  # was 8
    
     jobBottom = yMargin
     boxHeight = rowHeight*.7
@@ -517,9 +676,11 @@ def plotRenderTimes( framesDf, terminationOps, outFilePath ):
         jobBottom += rowHeight
 
     plt.gca().grid( True, axis='x')
+    #ax.labelsize = 4  # does not work for tick labels
+    ax.tick_params(axis='both', which='major', labelsize=6)
     plt.tight_layout()
     if outFilePath:
-        plt.savefig( outFilePath, dpi=150 )
+        plt.savefig( outFilePath, dpi=250 )
     else:
         plt.show()
 
@@ -531,6 +692,7 @@ def plotTestHistory( testsDf, plotOutFilePath ):
         ax.set_ylim( bottom=0 )
         box = ax.get_position()
         ax.set_position([box.x0, box.y0, box.width * 0.7, box.height])
+        ax.tick_params(axis='x', which='major', labelsize=4)
         plt.legend(bbox_to_anchor=(1.0, 0.5), loc='center left')
 
     figsize = (8.5, 4.8)
@@ -540,10 +702,13 @@ def plotTestHistory( testsDf, plotOutFilePath ):
     # plot the main counting metrics as line graphs
     _ax = testsDf.plot.line(x='tag', rot=90, style=':o', xticks=ticks,
                     title='historic rendering metrics', fontsize=fontsize, figsize=figsize,
+                    markersize=3, linewidth=0.5,
                     y=['nInstancesReq', 'nInstallerTimeout', 'nInstalled', 
                     'nInstallerException', 'nInstallerFailed', 'nRendering'] )
     prettify()
-    plt.savefig( plotOutFilePath, dpi=150 )
+    plt.savefig( plotOutFilePath, dpi=250 )
+    plt.savefig( plotOutFilePath+'.pdf', dpi=250 )
+    #plt.savefig( plotOutFilePath+'.svg', dpi=250 ) # works, but would need visual tweaking
 
     # additional plots disabled for now
     '''
@@ -588,6 +753,7 @@ if __name__ == "__main__":
     installerSummariesFilePath = args.outDir + '/installerSummaries.csv'
     frameSummariesFilePath = args.outDir + '/frameSummaries.csv'
     workerSummariesFilePath = args.outDir + '/workerSummaries.csv'
+    instanceTimingFilePath = args.outDir + '/instanceTiming.csv'
     rendererTimingPlotFilePath = args.outDir + '/rendererTiming.png'
     isoFormat = '%Y-%m-%dT%H:%M:%S.%f%z'
 
@@ -663,12 +829,15 @@ if __name__ == "__main__":
             testsDf.loc[ row.tag, 'installerMeanDurGood'] = \
                 installerSummaries[installerSummaries.state=='installed'].dur.mean()
 
-
             allInstancesById.update( instancesAllocated )
+
             frameSummaryRecs = summarizeRenderingLog( instancesAllocated, row.rendererLog, row.tag )
             frameSummaries = pd.DataFrame( frameSummaryRecs )
             logger.info( 'frameSummaryRecs %d', len(frameSummaryRecs) )
             allFrameSummaries = allFrameSummaries.append( frameSummaryRecs )
+
+            nFramesFinished = len( frameSummaries[frameSummaries.frameState == 'retrieved'] )
+            testsDf.loc[ row.tag, 'nFramesFinished'] = nFramesFinished
 
             workerIids = frameSummaries.instanceId.unique()
             sumRecs = summarizeWorkers( workerIids, instancesAllocated, frameSummaries )
@@ -678,8 +847,8 @@ if __name__ == "__main__":
 
         #print( allFrameSummaries.info() )
         allInstallerSummaries.to_csv( installerSummariesFilePath, index=False, date_format=isoFormat )
-        print( testsDf.info() )
-        print( testsDf )
+        #print( testsDf.info() )
+        #print( testsDf )
         testsDf.to_csv( testSummariesFilePath, index=False, date_format=isoFormat )
         plotTestHistory( testsDf, testSummariesPngFilePath )
 
@@ -713,6 +882,8 @@ if __name__ == "__main__":
             logger.warning( 'no instance ID in input record')
             continue
         iid = inRec['instanceId']
+        dpr = instanceDpr( inRec )
+        inRec['dpr'] = dpr
         instancesAllocated[ iid ] = inRec
     logger.info( 'found %d instances in collection %s', len(instancesAllocated), launchedCollName )
     
@@ -743,61 +914,24 @@ if __name__ == "__main__":
         {'instanceId': '<master>'}, hint=[('dateTime', pymongo.ASCENDING)] 
         )
     startDateTime = interpretDateTimeField( startingEvent['dateTime'] )
+
+    # get the parallelRender operation event
+    prEvent = logsDb[rendererCollName].find_one( 
+        {'args.parallelRender': {'$exists':True}, 'instanceId': '<master>'} 
+        )
+    prOp = prEvent['args']['parallelRender']
+    nFramesReq = prOp['nFramesReq']
+
     finishedEvent = logsDb[rendererCollName].find_one( 
         {'args.finished': {'$exists':True}, 'instanceId': '<master>'} 
         )
     #logger.info( 'finishedEvent %s', finishedEvent )
     endDateTime = interpretDateTimeField( finishedEvent['dateTime'] )
 
-    # as a fallback, use endDateTime as terminationDateTime (in case terminateFinal is missing)
-    terminationDateTime = endDateTime
-    # query for the terminateFinal operation, which occurs after all rendering has finished
-    terminationEvent = logsDb[rendererCollName].find_one(
-        {'args.terminateFinal': {'$exists':True}, 'instanceId': '<master>'}
-        )
-    if terminationEvent:
-        terminationDateTime = interpretDateTimeField( terminationEvent['dateTime'] )
-        logger.info( 'terminationDateTime %s', terminationDateTime )
-
-    startDateTime = interpretDateTimeField( startingEvent['dateTime'] )
-
-    terminationCredit = 0
-    terminations = {}  # collects termination operations by iid
-
-    # look for terminations due to failed workers
-    termEvents = logsDb[rendererCollName].find(
-        {'args.terminateFailedWorker': {'$exists':True}, 'instanceId': '<master>'}
-        )
-    for termEvent in termEvents:
-        iid = termEvent['args']['terminateFailedWorker']
-        tdt = universalizeDateTime( dateutil.parser.parse( termEvent['dateTime'], ignoretz=False ) )
-        #logger.info( 'terminated %s at %s', iid, tdt )
-        terminations[ iid ] = { 'opType': 'terminateFailedWorker',
-            'dateTime': tdt, 'devId': instancesAllocated[iid].get( 'device-id' )  }
-        terminationCredit += (terminationDateTime - tdt).total_seconds()
-    logger.info( 'terminationCredit: %.1f seconds (%.1f minutes)',
-        terminationCredit, terminationCredit/60 )
-
-    # look for terminations due to excess workers
-    termEvents = logsDb[rendererCollName].find(
-        {'args.terminateExcessWorker': {'$exists':True}, 'instanceId': '<master>'}
-        )
-    for termEvent in termEvents:
-        iid = termEvent['args']['terminateExcessWorker']
-        tdt = universalizeDateTime( dateutil.parser.parse( termEvent['dateTime'], ignoretz=False ) )
-        #logger.info( 'terminateExcessWorker %s at %s (%s)', iid, tdt, termEvent['dateTime'] )
-        if iid in terminations:
-            logger.warning( 'terminateExcessWorker already had a termination %s', terminations[iid] )
-        terminations[ iid ] = { 'opType': 'terminateExcessWorker',
-            'dateTime': tdt, 'devId': instancesAllocated[iid].get( 'device-id' ) }
-        terminationCredit += (terminationDateTime - tdt).total_seconds()
-    logger.info( 'terminationCredit: %.1f seconds (%.1f minutes)',
-        terminationCredit, terminationCredit/60 )
-    logger.info( 'early terminations (%d) %s', len(terminations), terminations )
 
     # summarize renderer events into a table
-    sumRecs = summarizeRenderingLog( instancesAllocated, rendererCollName, tag=args.tag )
-    frameSummaries = pd.DataFrame( sumRecs )
+    frameSumRecs = summarizeRenderingLog( instancesAllocated, rendererCollName, tag=args.tag )
+    frameSummaries = pd.DataFrame( frameSumRecs )
     if frameSummariesFilePath:
         frameSummaries.to_csv( frameSummariesFilePath, index=False, date_format=isoFormat )
 
@@ -808,35 +942,70 @@ if __name__ == "__main__":
     workerIids = list( frameSummaries.instanceId.unique() )
     #workerIids = [iid for iid in byInstance.keys() if '<' not in iid]
 
-    # traverse the workers and generate a summary table
-    sumRecs = []
-    for iid in sorted( workerIids ):
-        devId = instancesAllocated[iid].get( 'device-id' )
-        dpr = instancesAllocated[iid].get( 'dpr' )
-        subset = frameSummaries[ frameSummaries.instanceId == iid ]
-        #nAttempts = len( subset )
-        nAttempts = len( frameSummaries[ (frameSummaries.instanceId == iid) & (frameSummaries.frameNum >=0) ]  )
-        nRenderFailed = (subset.frameState=='renderFailed').sum()
-        nRetrieveFailed = (subset.frameState=='retrieveFailed').sum()
-        nRsyncFailed = (subset.frameState=='rsyncFailed').sum()
-        successes = subset[ subset.frameState == 'retrieved']
-        meanDurGood = successes.dur.mean()
-        if math.isnan( meanDurGood ):
-            meanDurGood = 0  # force nans to zero
-        '''
-        logger.debug( '%s dev %d, %d attempts, %d good, %d renderFailed, %d other, %.1f meanDurGood',
-            iid[0:16], devId, nAttempts, len(successes),
-            nRenderFailed, nRetrieveFailed+nRsyncFailed,
-            meanDurGood
-            )
-        '''
-        sumRec = { 'instanceId': iid, 'devId': devId, 'dpr': dpr,
-            'blendFilePath': blendFilePath,
-            'nAttempts': nAttempts, 'nGood': len(successes), 'nRenderFailed': nRenderFailed,
-            'nRetrieveFailed': nRetrieveFailed, 'nRsyncFailed': nRsyncFailed,
-            'meanDurGood': meanDurGood
-        }
-        sumRecs.append( sumRec )
+    rsyncStartDateTime = frameSummaries.startDateTime.min() # actually first rsync start
+    logger.info( 'rsyncStartDateTime: %s', rsyncStartDateTime )
+
+    # as a fallback, use endDateTime as terminationDateTime (in case terminateFinal is missing)
+    terminationDateTime = endDateTime
+    # query for the terminateFinal operation, which occurs after all rendering has finished
+    terminationEvent = logsDb[rendererCollName].find_one(
+        {'args.terminateFinal': {'$exists':True}, 'instanceId': '<master>'}
+        )
+    if terminationEvent:
+        terminationDateTime = interpretDateTimeField( terminationEvent['dateTime'] )
+        logger.info( 'initial terminateFinal %s', terminationDateTime )
+
+    terminations = retrieveTerminations( logsDb[rendererCollName], instancesAllocated )
+    #terminationsTable = pd.DataFrame.from_dict( terminations, orient='index' )
+    #terminationsTable.to_csv( 'terminations.csv', index=False, date_format=isoFormat )
+
+    terminationCredit = 0
+    for iid, termOp in terminations.items():
+        if termOp['opType'] != 'terminateBad':
+            tdt = termOp['dateTime'] 
+            terminationCredit += (terminationDateTime - tdt).total_seconds()
+    logger.info( 'terminationCredit: %.1f seconds (%.1f minutes)',
+        terminationCredit, terminationCredit/60 )
+    
+    iTimingRecs = summarizeInstanceTiming( instancesAllocated, terminations, installerSumRecs, frameSumRecs )
+    instanceTimingSummaries = pd.DataFrame.from_dict( iTimingRecs, orient='index' )
+    #print( df.info() )
+    instanceTimingSummaries.to_csv( instanceTimingFilePath, index=False, date_format=isoFormat )
+    totalIdleDur = instanceTimingSummaries.idleDur.sum()
+
+    #sys.exit( 'DEBUGGING')
+    if True:
+        sumRecs = summarizeWorkers( None, instancesAllocated, frameSummaries )
+    else:
+        # traverse the workers and generate a summary table
+        sumRecs = []
+        for iid in sorted( workerIids ):
+            devId = instancesAllocated[iid].get( 'device-id' )
+            dpr = instancesAllocated[iid].get( 'dpr' )
+            subset = frameSummaries[ frameSummaries.instanceId == iid ]
+            #nAttempts = len( subset )
+            nAttempts = len( frameSummaries[ (frameSummaries.instanceId == iid) & (frameSummaries.frameNum >=0) ]  )
+            nRenderFailed = (subset.frameState=='renderFailed').sum()
+            nRetrieveFailed = (subset.frameState=='retrieveFailed').sum()
+            nRsyncFailed = (subset.frameState=='rsyncFailed').sum()
+            successes = subset[ subset.frameState == 'retrieved']
+            meanDurGood = successes.dur.mean()
+            if math.isnan( meanDurGood ):
+                meanDurGood = 0  # force nans to zero
+            '''
+            logger.debug( '%s dev %d, %d attempts, %d good, %d renderFailed, %d other, %.1f meanDurGood',
+                iid[0:16], devId, nAttempts, len(successes),
+                nRenderFailed, nRetrieveFailed+nRsyncFailed,
+                meanDurGood
+                )
+            '''
+            sumRec = { 'instanceId': iid, 'devId': devId, 'dpr': dpr,
+                'blendFilePath': blendFilePath,
+                'nAttempts': nAttempts, 'nGood': len(successes), 'nRenderFailed': nRenderFailed,
+                'nRetrieveFailed': nRetrieveFailed, 'nRsyncFailed': nRsyncFailed,
+                'meanDurGood': meanDurGood
+            }
+            sumRecs.append( sumRec )
     workerSummaries = pd.DataFrame( sumRecs )
     if workerSummariesFilePath:
         workerSummaries.to_csv( workerSummariesFilePath, index=False )
@@ -882,12 +1051,15 @@ if __name__ == "__main__":
         nWorking = len(workerSummaries[workerSummaries.nGood > 0] )
         frameStateCounts = frameSummaries.frameState.value_counts()
         failureTypeCounts = frameSummaries[frameSummaries.frameState == 'renderFailed'].rc.value_counts()
+        nFramesFinished = len( frameSummaries[frameSummaries.frameState == 'retrieved'] )
         #logger.info( 'frameStateCounts %s', frameStateCounts )
         body += '%d did some rendering (%.1f %% of requested instances)\n' % \
             (nWorking, nWorking*100/nRequested )
         body += '\n'
-        body += '%d frame(s) rendered from %s\n' % \
-            (len(frameSummaries[frameSummaries.frameState == 'retrieved'] ), blendFilePath )
+        body += '%d frame(s) requested\n' % nFramesReq
+        body += '%d frame(s) rendered from %s\n' % (nFramesFinished, blendFilePath )
+        if nFramesFinished < nFramesReq:
+            body += '%d frame(s) were not finished\n' % (nFramesReq - nFramesFinished)
         body += '%d frame-render failure(s)\n' % frameStateCounts.get('renderFailed', 0)
         body += '(including %d timeout and %d ssh)\n' % (failureTypeCounts.get(124, 0), failureTypeCounts.get(255, 0))
         body += '%d frame-retrieve failure(s)\n' % frameStateCounts.get('retrieveFailed', 0)
@@ -898,14 +1070,19 @@ if __name__ == "__main__":
         body += 'mean duration of good frame-render was %.1f minutes\n' % (meanDurGood/60)
 
         totWorkerTime = frameSummaries.dur.sum()
-        body += 'overall cost of rendering was %.1f worker-minutes per frame (including failures but not idle time)\n' % \
-            ((totWorkerTime/60) / frameStateCounts.get('retrieved', 0))
+        if frameStateCounts.get('retrieved', 0):
+            body += 'overall cost of rendering was %.1f worker-minutes per frame (including failures but not idle time)\n' % \
+                ((totWorkerTime/60) / frameStateCounts.get('retrieved', 0))
 
-        renderingElapsedTime = (frameSummaries.endDateTime.max() - frameSummaries.endDateTime.min()).total_seconds()
-        totInstSecs = (renderingElapsedTime*stateCounts['installed']) - terminationCredit
-        body += 'overall cost of rendering was %.1f worker-minutes per frame (including failures and idle time)\n' % \
-            ((totInstSecs/60) / frameStateCounts.get('retrieved', 0))
+        renderingElapsedTime = (frameSummaries.endDateTime.max() - frameSummaries.startDateTime.min()).total_seconds()
+        logger.info( 'renderingElapsedTime %d secs (%.1f minutes)', renderingElapsedTime, renderingElapsedTime/60)
+        #totInstSecs = (renderingElapsedTime*stateCounts['installed']) - terminationCredit
+        #if frameStateCounts.get('retrieved', 0):
+        #    body += 'overall cost of rendering was %.1f worker-minutes per frame (including failures and idle time)\n' % \
+        #        ((totInstSecs/60) / frameStateCounts.get('retrieved', 0))
 
+        body += 'total idle time was %.1f instance-minutes (including installer-idle time)\n' % (totalIdleDur/60)
+        
         body += '\nTiming Summary (durations in minutes)\n'
         eventTimings.append( eventTiming.eventTiming( 
             'launching', startDateTime,

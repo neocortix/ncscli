@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-##!/opt/anaconda/miniconda3/bin/python
-##!/usr/bin/env python
+print( 'runLocust.py starting' )
 
 import os
 import sys
+sys.stdout.flush()
 
+print( 'import zmq' )
+sys.stdout.flush()
 import zmq
+print( 'imported zmq' )
+sys.stdout.flush()
 
 with open( 'runLocust.log', 'w') as outFile:
     print( 'running locust', file=outFile )

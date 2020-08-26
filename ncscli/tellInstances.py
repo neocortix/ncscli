@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -122,7 +123,7 @@ async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.
         #sshAgent = os.getenv( 'SSH_AUTH_SOCK' )
         #async with asyncssh.connect(host, port=port, username=user, password=password, known_hosts=None) as conn:
         async with asyncssh.connect(host, port=port, username=user,
-            keepalive_interval=10, keepalive_count_max=3,
+            keepalive_interval=15, keepalive_count_max=4,
             known_hosts=known_hosts, agent_path=sshAgent ) as conn:
             serverHostKey = conn.get_server_host_key()
             #logger.info( 'got serverHostKey (%s) %s', type(serverHostKey), serverHostKey )
@@ -146,17 +147,17 @@ async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.
                 async with conn.create_process(cmd) as proc:
                     async for line in proc.stdout:
                         logger.info('stdout[%s] %s', iidAbbrev, line.strip() )
-                        logResult( 'stdout', line.strip(), iid )
+                        logResult( 'stdout', line.rstrip(), iid )
 
                     async for line in proc.stderr:
                         logger.info('stderr[%s] %s', iidAbbrev, line.strip() )
-                        logResult( 'stderr', line.strip(), iid )
+                        logResult( 'stderr', line.rstrip(), iid )
                 await proc.wait_closed()
                 logResult( 'returncode', proc.returncode, iid )
                 if proc.returncode is None:
                     logger.warning( 'returncode[%s] NONE', iidAbbrev )
-                elif proc.returncode:
-                    logger.warning( 'returncode %s for %s', proc.returncode, iidAbbrev )
+                #elif proc.returncode:
+                #    logger.warning( 'returncode %s for %s', proc.returncode, iidAbbrev )
 
             if dlFileName:
                 destDirPath = '%s/%s' % (dlDirPath, iid)
@@ -254,6 +255,10 @@ async def run_multiple_clients( instances, cmd, timeLimit=None, sshAgent=None,
             nExceptions += 1
             logger.warning('connection refused for %s', abbrevIid )
             inst['commandState'] = 'unreachable'
+        elif isinstance(result, socket.gaierror):  # another type of Exception
+            nExceptions += 1
+            logger.warning('gaierror "%s" for %s (%s)', result, abbrevIid, inst['ssh'].get('host') )
+            inst['commandState'] = 'gaierror'
         elif isinstance(result, asyncio.CancelledError):  # another type of Exception (sort of)
             nExceptions += 1
             logger.warning('task cancelled for %s', abbrevIid )
@@ -272,8 +277,11 @@ async def run_multiple_clients( instances, cmd, timeLimit=None, sshAgent=None,
         nGood, nExceptions, nFailed, nTimedOut, nOther )
     return statuses
 
-def tellInstances( instancesSpec, command, resultsLogFilePath, download, downloadDestDir,
-    jsonOut, sshAgent, timeLimit, upload, knownHostsOnly=False ):
+def tellInstances( instancesSpec, command=None, resultsLogFilePath=None,
+    download=None, downloadDestDir=None,
+    jsonOut=None, sshAgent=False, timeLimit=3600, upload=None,
+    knownHostsOnly=False, stopOnSigterm=False
+    ):
     '''tellInstances to upload, execute, and/or download, things'''
     args = locals().copy()
 
@@ -353,7 +361,8 @@ def tellInstances( instancesSpec, command, resultsLogFilePath, download, downloa
     # the main loop
     eventLoop = asyncio.get_event_loop()
     eventLoop.set_debug(True)
-    #eventLoop.add_signal_handler(signal.SIGTERM, sigtermHandler)
+    if stopOnSigterm:
+        eventLoop.add_signal_handler(signal.SIGTERM, sigtermHandler)
     try:
         statuses = eventLoop.run_until_complete(run_multiple_clients(
             startedInstances, program, scpSrcFilePath=upload,
@@ -365,6 +374,9 @@ def tellInstances( instancesSpec, command, resultsLogFilePath, download, downloa
         logger.warning( 'run_until_complete gave exception (%s) %s', type(exc), exc )
         statuses = []
     #json.dump( statuses, sys.stdout, default=repr, indent=2 )
+
+    if resultsLogFile:
+        resultsLogFile.close()
 
     mainTiming.finish()
     eventTimings.append(mainTiming)

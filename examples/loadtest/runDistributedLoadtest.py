@@ -546,6 +546,8 @@ if __name__ == "__main__":
     #logger.info( '--filter arg <%s>', args.filter )
 
     dataDirPath = 'data'
+    os.makedirs( dataDirPath, exist_ok=True )
+
     launchedJsonFilePath = 'launched.json'
 
     argsFilePath = os.path.join( dataDirPath, 'runDistributedLoadtest_args.json' )
@@ -565,8 +567,6 @@ if __name__ == "__main__":
     rampUpRate = args.rampUpRate
     if not rampUpRate:
         rampUpRate = args.nWorkers
-
-    os.makedirs( dataDirPath, exist_ok=True )
 
     os.environ['ANSIBLE_CONFIG'] = os.path.join( scriptDirPath(), 'ansible.cfg' )
     #logger.info( 'ANSIBLE_CONFIG: %s', os.getenv('ANSIBLE_CONFIG') )

@@ -33,6 +33,9 @@ def sigtermHandler( sig, frame ):
 def sigtermSignaled():
     return g_.signaled
 
+def sigtermNotSignaled():
+    return not sigtermSignaled()
+
 
 def boolArg( v ):
     if v.lower() == 'true':
@@ -50,7 +53,7 @@ def ncscReqHeaders( authToken ):
         "X-Neocortix-Cloud-API-AuthToken": authToken
     }
 
-def queryNcsSc( urlTail, authToken, reqParams=None, maxRetries=5 ):
+def queryNcsSc( urlTail, authToken, reqParams=None, maxRetries=20 ):
     #if random.random() > .75:
     #    raise requests.exceptions.RequestException( 'simulated exception' )
     # set long timeouts for requests.get() as a tuple (connection timeout, read timeout) in seconds
@@ -76,7 +79,7 @@ def queryNcsSc( urlTail, authToken, reqParams=None, maxRetries=5 ):
     if (resp.status_code < 200) or (resp.status_code >= 300):
         logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
         logger.info( 'error url "%s"', url )
-        if resp.status_code not in [401, 403]:  # resp.status_code in [500, 502, 504]:
+        if resp.status_code in range( 500, 600 ):
             if maxRetries > 0:
                 time.sleep( 10 )
                 return queryNcsSc( urlTail, authToken, reqParams, maxRetries-1 )
@@ -117,7 +120,24 @@ def getAvailableDeviceCount( authToken, filtersJson=None, encryptFiles=True ):
     nAvail = respContent.get('available', 0)
     return nAvail
 
-def uploadSshClientKey( authToken, keyName, keyContents ):
+def listSshClientKeys( authToken ):
+    headers = ncscReqHeaders( authToken )
+    url = 'https://cloud.neocortix.com/cloud-api/profile/ssh-keys'
+    logger.info( 'listing keys' )
+    resp = requests.get( url, headers=headers )
+    if (resp.status_code < 200) or (resp.status_code >= 300):
+        logger.warning( 'response code %s', resp.status_code )
+        return []
+    logger.info( 'response %s', resp.text )
+    try:
+        keys = resp.json()
+    except Exception:
+        logger.warning( 'got bad json' )
+        return []
+    else:
+        return keys
+
+def uploadSshClientKey( authToken, keyName, keyContents, maxRetries=20 ):
     headers = ncscReqHeaders( authToken )
     reqData = {
         'title': keyName,
@@ -125,13 +145,29 @@ def uploadSshClientKey( authToken, keyName, keyContents ):
         }
     reqDataStr = json.dumps( reqData )
     url = 'https://cloud.neocortix.com/cloud-api/profile/ssh-keys'
-    logger.info( 'uploading key "%s" %s...', keyName, keyContents[0:16] )
-    resp = requests.post( url, headers=headers, data=reqDataStr )
-    if (resp.status_code < 200) or (resp.status_code >= 300):
-        logger.warning( 'response code %s', resp.status_code )
+    logger.debug( 'uploading key "%s" %s...', keyName, keyContents[0:16] )
+    try:
+        resp = requests.post( url, headers=headers, data=reqDataStr )
+    except Exception as exc:
+        wouldRetry = True
+        logger.warning( 'got exception uploading %s (%s) %s', keyName, type(exc), exc )
+    else:
+        if (resp.status_code < 200) or (resp.status_code >= 300):
+            logger.warn( 'response code %s uploading %s', resp.status_code, keyName )
+            wouldRetry = resp.status_code in range( 500, 600 )  # 5xx responses are server errors
+        else:
+            wouldRetry = False
+    if wouldRetry and maxRetries > 0:
+        time.sleep( 10 )
+        logger.info( 'retrying %s (up to %d retries)', keyName, maxRetries )
+        return uploadSshClientKey( authToken, keyName, keyContents, maxRetries-1 )
+    elif wouldRetry:
+        # giving up
+        logger.error( 'could not upload %s within maximum retries', keyName )
+        return 503  # "service unavailable", but maybe should be different if gotException
     return resp.status_code
 
-def deleteSshClientKey( authToken, keyName, maxRetries=1 ):
+def deleteSshClientKey( authToken, keyName, maxRetries=20 ):
     headers = ncscReqHeaders( authToken )
     reqData = {
         'title': keyName,
@@ -139,18 +175,35 @@ def deleteSshClientKey( authToken, keyName, maxRetries=1 ):
     reqDataStr = json.dumps( reqData )
     url = 'https://cloud.neocortix.com/cloud-api/profile/ssh-keys/'
     logger.debug( 'deleting SshClientKey %s', keyName )
-    resp = requests.delete( url, headers=headers, data=reqDataStr )
-    if (resp.status_code < 200) or (resp.status_code >= 300):
-        logger.warn( 'response code %s', resp.status_code )
-        if len( resp.text ):
-            logger.info( 'response "%s"', resp.text )
-        if (maxRetries > 0) and (resp.status_code == 502):  # "bad gateway"
-            time.sleep( 10 )
-            return deleteSshClientKey( authToken, keyName, maxRetries-1 )
+    try:
+        resp = requests.delete( url, headers=headers, data=reqDataStr )
+    except Exception as exc:
+        wouldRetry = True
+        logger.warning( 'got exception (%s) %s', type(exc), exc )
+    else:
+        if (resp.status_code < 200) or (resp.status_code >= 300):
+            logger.warn( 'response code %s', resp.status_code )
+            wouldRetry = resp.status_code in range( 500, 600 )  # 5xx responses are server errors
+        else:
+            wouldRetry = False
+    if wouldRetry and maxRetries > 0:
+        time.sleep( 10 )
+        logger.info( 'retrying %s (up to %d retries)', keyName, maxRetries )
+        return deleteSshClientKey( authToken, keyName, maxRetries-1 )
+    elif wouldRetry:
+        # giving up
+        logger.error( 'could not succeed within maximum retries' )
+        return 503  # "service unavailable", but maybe should be different if gotException
     return resp.status_code
 
-def launchNcscInstances( authToken, encryptFiles, numReq=1,
-        regions=[], abis=[], sshClientKeyName=None, jsonFilter=None, jobId=None ):
+def launchScInstancesAsync( authToken, encryptFiles, numReq=1,
+        regions=[], abis=[], sshClientKeyName=None, jsonFilter=None,
+        jobId=None, okToContinueFunc=None ):
+    def shouldBreak():
+        if okToContinueFunc and not okToContinueFunc():
+            #logger.warning( 'not okToContinue')
+            return True
+        return False
     appVersions = getAppVersions( authToken )
     if not appVersions:
         # something is very wrong
@@ -205,23 +258,23 @@ def launchNcscInstances( authToken, encryptFiles, numReq=1,
     if (resp.status_code < 200) or (resp.status_code >= 300):
         logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
         #TODO need retry code here, but only for specific response codes
-        return {'serverError': resp.status_code, 'reqId': jobId}
+        return {'serverError': resp.status_code, 'reqId': reqId}
     else:
         logger.info( 'job request returned (%s) %s', resp.status_code, resp.text )
     queryNeeded = resp.status_code == 200
-    logger.info( 'resp.status_code %d; queryNeeded %s ', resp.status_code, queryNeeded )
+    logger.debug( 'resp.status_code %d; queryNeeded %s ', resp.status_code, queryNeeded )
     timeLimit = 600 # seconds
     deadline = time.time() + timeLimit
     while queryNeeded:
         jobId = resp.json()['id']
         try:
-            logger.info( 'getting instance list for job %s', jobId )
+            logger.debug( 'getting instance list for job %s', jobId )
             resp2 = queryNcsSc( 'jobs/'+jobId, authToken, maxRetries=20 )
         except Exception as exc:
-            logger.error( 'exception getting list of instances (%s) "%s"',
+            # the caller must be responsible for killing these
+            logger.warning( 'exception getting list of instances (%s) "%s"',
                 type(exc), exc )
-            # in case of excption, return the original error code
-            return {'serverError': resp.status_code, 'reqId': jobId}
+            return {'serverError': 503, 'reqId': jobId}  # service not available
         else:
             if (resp2['statusCode'] < 200) or (resp2['statusCode'] >= 300):
                 # in case of persistent error, return the last error code
@@ -233,9 +286,9 @@ def launchNcscInstances( authToken, encryptFiles, numReq=1,
                 if not queryNeeded:
                     return resp2['content']['instances']
                 nAllocated = len(resp2['content']['instances'])
-                logger.info( "resp2['content']['launching']: %s", resp2['content']['launching'] )
-                if sigtermSignaled() and nAllocated == 0:
-                    logger.info( 'breaking wait-allocate loop because sigterm and no instances' )
+                logger.debug( "resp2['content']['launching']: %s", resp2['content']['launching'] )
+                if shouldBreak() and nAllocated == 0:
+                    logger.info( 'breaking wait-allocate loop because not shouldBreak and no instances' )
                     return {'serverError': 404, 'reqId': jobId}
                 if time.time() >= deadline:
                     logger.info( 'breaking wait-allocate loop because of time limit' )
@@ -244,37 +297,197 @@ def launchNcscInstances( authToken, encryptFiles, numReq=1,
                     else:
                         return {'serverError': 404, 'reqId': jobId}
                 logger.info( 'waiting for server (%d instances allocated)', nAllocated )
-                time.sleep( 5 )
+                time.sleep( 10 )
     return resp.json()
 
-def terminateNcscInstance( authToken, iid ):
+def launchScInstances( authToken, encryptFiles, numReq=1,
+        regions=[], abis=[], sshClientKeyName=None, jsonFilter=None,
+        jsonOutFile=None, jobId=None, okToContinueFunc=None ):
+    def shouldBreak():
+        if okToContinueFunc and not okToContinueFunc():
+            logger.warning( 'not okToContinue')
+            return True
+        return False
+    if not jobId:
+        jobId = str( uuid.uuid4() )
+    instances = []
+    try:
+        try:
+            infos = launchScInstancesAsync( authToken, encryptFiles, numReq,
+                sshClientKeyName=sshClientKeyName,
+                regions=regions, abis=abis, jsonFilter=jsonFilter,
+                jobId=jobId, okToContinueFunc=okToContinueFunc )
+            if 'serverError' in infos:
+                logger.error( 'got error %d', infos['serverError'])
+                logger.info( 'attempting to terminate launched instances (please wait)' )
+                time.sleep(30)  # possible race condition here
+                terminateJobInstances( authToken, infos['reqId'] )
+                if jsonOutFile:
+                    print( '[]', file=jsonOutFile)
+                return infos['serverError']
+        except Exception as exc:
+            logger.error( 'exception launching instances (%s) "%s"',
+                type(exc), exc, exc_info=True )
+            return 13  # error 13
+        for info in infos:
+            instances.append( info )
+
+        # collect the ID of the created instances
+        iids = []
+        for inst in instances:
+            iids.append( inst['id'] )
+            #logger.debug( 'created instance %s', inst['id'] )
+        logger.info( 'allocated %d instances', len(iids) )
+
+        reqParams = {"show-device-info":True}
+        startedInstances = {}
+        # wait while instances are still starting, but with a timeout
+        timeLimit = 600 # seconds
+        deadline = time.time() + timeLimit
+        startedSet = set()
+        failedSet = set()
+        while True:
+            starting = False
+            launcherStates = collections.Counter()
+            for iid in iids:
+                if shouldBreak():
+                    logger.warning( 'incomplete launch due to okToContinueFunc' )
+                    break
+                if iid in startedSet:
+                    continue
+                if iid in failedSet:
+                    continue
+                try:
+                    details = queryNcsSc( 'instances/%s' % iid, authToken, reqParams )['content']
+                except Exception as exc:
+                    logger.warning( 'exception checking instance state (%s) "%s"',
+                        type(exc), exc )
+                    continue
+                if 'state' in details:
+                    iState = details['state']
+                else:
+                    iState = '<unknown>'
+                    logger.warning( 'no "state" in content of response (%s)', details )
+                launcherStates[ iState ] += 1
+                if iState == 'started':
+                    startedSet.add( iid )
+                    startedInstances[ iid ] = details
+                if iState in ['exhausted', 'ise', 'timedout']:
+                    failedSet.add( iid )
+                    logger.warning( 'instance state %s for %s', iState, iid )
+                if iState == 'initial':
+                    logger.debug( '%s %s', iState, iid )
+                #if iState in ['initial', 'starting']:
+                if iState != 'started':
+                    starting = True
+                    #logger.debug( '%s %s', iState, iid )
+            logger.info( '%d instance(s) launched so far; %s',
+                len( startedSet ), launcherStates )
+            if not starting:
+                break
+            if time.time() > deadline:
+                logger.warning( 'took too long for some instances to start' )
+                break
+            if shouldBreak():
+                logger.warning( 'incomplete launch due to okToContinueFunc' )
+                break
+            time.sleep( 10 )
+
+
+        #nStillStarting = len(iids) - (len(startedSet) + len(failedSet))
+        logger.info( 'started %d Instances; %s',
+            len(startedSet), launcherStates )
+
+        logger.info( 'querying for device-info')
+        # print details of created instances to a json output file
+        if jsonOutFile:
+            print( '[', file=jsonOutFile )
+            jsonFirstElem=True
+        for iid in iids:
+            try:
+                #reqParams = {"show-device-info":True}
+                if iid in startedInstances:
+                    #logger.debug( 'reusing instance info')
+                    details = startedInstances[iid]
+                else:
+                    logger.info( 're-querying instance info for %s', iid )
+                    details = queryNcsSc( 'instances/%s' % iid, authToken, reqParams )['content']
+            except Exception as exc:
+                logger.error( 'exception getting instance details (%s) "%s"',
+                    type(exc), exc )
+                continue
+            #logger.debug( 'NCSC Inst details %s', details )
+            if jsonOutFile:
+                outRec = details.copy()
+                outRec['instanceId'] = iid
+                if jsonFirstElem:
+                    jsonFirstElem = False
+                else:
+                    print( ',', end=' ', file=jsonOutFile)
+                print( json.dumps( outRec ), file=jsonOutFile )
+            if shouldBreak():
+                break
+        if jsonOutFile:
+            print( ']', file=jsonOutFile)
+        logger.debug( 'finished')
+        return 0 # no err
+    except KeyboardInterrupt:
+        logger.warning( 'a launch request was interrupted; %d instances may have been launched', numReq )
+        logger.info( 'attempting to terminate launched instances (please wait a half minute)' )
+        time.sleep(30)  # possible race condition here
+        terminateJobInstances( authToken, jobId )
+        raise
+
+def terminateNcscInstance( authToken, iid, maxRetries=1000 ):
     headers = ncscReqHeaders( authToken )
     url = 'https://cloud.neocortix.com/cloud-api/sc/instances/' + iid
     #logger.debug( 'deleting instance %s', iid )
-    resp = requests.delete( url, headers=headers )
-    if (resp.status_code < 200) or (resp.status_code >= 300):
-        logger.warn( 'response code %s', resp.status_code )
-        if len( resp.text ):
-            logger.info( 'response "%s"', resp.text )
-        if resp.status_code == 502:  # "bad gateway"
-            time.sleep( 10 )
-            return terminateNcscInstance( authToken, iid )
+    try:
+        resp = requests.delete( url, headers=headers )
+    except Exception as exc:
+        wouldRetry = True
+        logger.warning( 'got exception terminating %s (%s) %s', iid, type(exc), exc )
+    else:
+        if (resp.status_code < 200) or (resp.status_code >= 300):
+            logger.warn( 'response code %s terminating %s', resp.status_code, iid )
+            wouldRetry = resp.status_code in range( 500, 600 )  # 5xx responses are server errors
+            #wouldRetry = resp.status_code in [502, 504]  # "bad gateway", "gateway timeout"
+        else:
+            wouldRetry = False
+    if wouldRetry and maxRetries > 0:
+        time.sleep( 10 )
+        logger.info( 'retrying %s (up to %d retries)', iid, maxRetries )
+        return terminateNcscInstance( authToken, iid, maxRetries-1 )
+    elif wouldRetry:
+        # giving up
+        logger.error( 'could not terminate %s within maximum retries', iid )
+        return 503  # "service unavailable", but maybe should be different if gotException
     return resp.status_code
 
 def terminateJobInstances( authToken, jobId, maxRetries=1000 ):
     headers = ncscReqHeaders( authToken )
     url = 'https://cloud.neocortix.com/cloud-api/sc/jobs/' + jobId
     logger.info( 'deleting instances for job %s', jobId )
-    resp = requests.delete( url, headers=headers )
-    if (resp.status_code < 200) or (resp.status_code >= 300):
-        logger.warn( 'response code %s', resp.status_code )
-        if len( resp.text ):
-            logger.info( 'response "%s; maxRetries %d"', resp.text, maxRetries-1 )
-        if maxRetries and resp.status_code not in [403, 404]:
-            time.sleep( 10 )
-            return terminateJobInstances( authToken, jobId )
+    try:
+        resp = requests.delete( url, headers=headers )
+    except Exception as exc:
+        wouldRetry = True
+        logger.warning( 'got exception (%s) %s', type(exc), exc )
+    else:
+        if (resp.status_code < 200) or (resp.status_code >= 300):
+            logger.warn( 'response code %s', resp.status_code )
+            wouldRetry = resp.status_code in range( 500, 600 )  # 5xx responses are server errors
+        else:
+            wouldRetry = False
+    if wouldRetry and maxRetries > 0:
+        time.sleep( 10 )
+        logger.info( 'retrying %s (up to %d retries)', jobId, maxRetries )
+        return terminateJobInstances( authToken, jobId, maxRetries-1 )
+    elif wouldRetry:
+        # giving up
+        logger.error( 'could not succeed within maximum retries' )
+        return 503  # "service unavailable", but maybe should be different if gotException
     return resp.status_code
-
 
 def doCmdLaunch( args ):
     authToken = args.authToken
@@ -287,10 +500,10 @@ def doCmdLaunch( args ):
 
     instances = []
     try:
-        infos = launchNcscInstances( authToken, args.encryptFiles, args.count,
+        infos = launchScInstancesAsync( authToken, args.encryptFiles, args.count,
             sshClientKeyName=args.sshClientKeyName,
             regions=args.region, abis=instanceAbis, jsonFilter=args.filter,
-            jobId=args.jobId )
+            jobId=args.jobId, okToContinueFunc=sigtermNotSignaled )
         if 'serverError' in infos:
             logger.error( 'got serverError %d', infos['serverError'])
             if args.json:
@@ -364,7 +577,7 @@ def doCmdLaunch( args ):
             if sigtermSignaled():
                 logger.warning( 'incomplete launch due to sigterm' )
                 break
-            time.sleep( 5 )
+            time.sleep( 10 )
     except KeyboardInterrupt:
         logger.info( 'caught SIGINT (ctrl-c), skipping ahead' )
 
@@ -408,7 +621,7 @@ def doCmdLaunch( args ):
             break
     if args.json:
         print( ']')
-    logger.info( 'finished')
+    logger.debug( 'finished')
     return 0 # no err
 
 def listNcsScInstances( authToken ):
@@ -512,7 +725,7 @@ def doCmdList( args ):
 
 def terminateInstances( authToken, instanceIds ):
     def terminateOne( iid ):
-        logger.info( 'terminating %s', iid )
+        logger.debug( 'terminating %s', iid )
         terminateNcscInstance( authToken, iid )
     if instanceIds and (len(instanceIds) >0) and (isinstance(instanceIds[0], str )):
         nWorkers = 4

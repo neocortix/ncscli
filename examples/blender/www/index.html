@@ -4,9 +4,10 @@
     <title>Neocortix Rendering with Blender</title>
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.0/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css">
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
-    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.0/js/bootstrap.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/js/bootstrap.min.js"></script>
+    <script src="sorttable.js"></script>
 
     <link href="footer.css" rel="stylesheet" type="text/css">
     <style>
@@ -14,6 +15,7 @@
         .margined {
             margin: 2px;
         }
+        .table-condensed { font-size: 80%; }
         @media (min-width: 576px) {
             .container-fluid{
                 max-width: 576px;
@@ -77,10 +79,10 @@
     # of available devices: <span id="nAvail">x</span>
     <br>
     <br>
-    # of workers: <input id="nWorkers", class="margined" size=6 value = 10 />
-    <br>
     Start Frame # <input id="startFrame", class="margined" size=4 value=1 >
     End Frame # <input id="endFrame", class="margined" size=4 value=1 >
+    <br>
+    Frame Rate <input id="frameRate", class="margined" size=3 value=30 > (frames per second)
     <br><br>
     Blender .blend file to render:
     <br>
@@ -89,9 +91,9 @@
     <br>
     <a href="#parameters" data-toggle="collapse"><span class="glyphicon glyphicon-cog"></span> Settings</a>
     <div id="parameters" class ="collapse" >
-        Width: <input id="width", class="margined" size=4 value=0 /> (zero for .blend-file default)
+        Width: <input id="width", class="margined" size=4 value=0 />
         <br>
-        Height: <input id="height", class="margined" size=4 value=0 > (zero for .blend-file default)
+        Height: <input id="height", class="margined" size=4 value=0 >
         <br>
         <label for="fileType" hidden >
             Output File Type:
@@ -100,15 +102,8 @@
             <option selected="selected" value="MP4" >h.264 in mp4 container</option>
             <option value="other" >coming soon</option>
         </select>
-        <input id="seed" hidden size=6 value=0 >
-        <div class="checkbox" hidden>
-            <label for="useCompositor" >
-                <input id="useCompositor" type="checkbox" checked disabled >Use Compositor
-            </label>
-        </div>
         <div>
-            Minimum device performance: <input id="minDpr", class="margined" size=4 value=0 >
-            (zero for default)
+            Minimum Device Performance Rating: <input id="minDpr", class="margined" size=4 value=0 >
         </div>
         <br>
         <div>
@@ -118,16 +113,16 @@
         </div>
         <div>
             Frame Time Limit: 
-            <input id="frameTimeLimit" class="margined" size=3 >
+            <input id="frameTimeLimit" class="margined" size=3 value ="" >
             (minutes)
         </div>
-        <br><br>
-  
-        <label for="regions" >
+        <div hidden >
+            # of workers: <input id="nWorkers" class="margined" size=6 value = 0 />
+        </div>
+        <label for="regions" hidden>
             Choose one or more regions (or select none, to allow all regions):
         </label>
-        <br>
-        <select id="regions" multiple size=7 >
+        <select id="regions" hidden multiple size=7 >
             <option value="usa" >United States of America</option>
             <option value="asia" >Asia</option>
             <option value="europe" >Europe</option>
@@ -145,21 +140,23 @@
     <hr/>
     Job ID: <input id="jobId", size=37 /> 
     <button id="statusBut" >Get Status</button>
+    <br><br>
 
-    <div id="results">
-        <video id="outputVideo" width="640" hidden controls >
-            Your browser does not support the video tag
-        </video>
-        <div id="plotDiv">
-            <img id="plotImg" style="width: 100%; padding: 4px;" hidden src="favicon.ico" >
+    <div id="resultsDiv" hidden >
+        <div id="outputDiv" hidden >
+            <video id="outputVideo" width="640" controls >
+                Your browser does not support the video tag
+            </video>
+            <br>
+            <a id="zippedFramesBut" href="" ><span class="glyphicon glyphicon-download-alt"></span> Download zipped frames</a>
         </div>
-        <h4>state</h4>
-        <pre id="state">(no query done)</pre>
+        <p id="state"></p>
+        <p id="stdout"></p>
         <progress id="progress" max="100" style="width: 100%;" hidden ></progress>
-        <h4>stdout</h4>
-        <pre id="stdout"></pre>
-        <h4>stderr log</h4>
-        <pre id="stderr" style="overflow-y: auto; height: 20em; font-size: 65%; font-family:'Lucida Console', monospace;" 
+        <div id="progressTableDiv" style="overflow-y: auto; max-height: 33em;" ></div>
+
+        <a id="stderrToggle" data-toggle="collapse" data-target="#stderr" ><span class="glyphicon glyphicon-menu-up"></span> Diagnostic log</a>
+        <pre id="stderr" class="collapse in" style="overflow-y: auto; max-height: 20em; font-size: 65%; font-family:'Lucida Console', monospace;" 
         ></pre>
 
     </div>
@@ -218,8 +215,6 @@
 </div>
 
 
-<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
-
 <script>
 //"use strict";
 var g_checkerTask = null;
@@ -236,12 +231,45 @@ function getMinDpr() {
     return minDpr;
 }
 
+function createProgressTable( data, destDiv ) {
+    var table = $('<table>').addClass("table table-striped table-condensed sortable").appendTo(destDiv);
+    var header = $('<thead />').appendTo(table);
+    var hrow = $('<tr />').appendTo(header);
+    var thFrame = $('<th />', { text: "Frame" }).appendTo(hrow);
+    $('<th />', { text: "Progress" }).appendTo(hrow);
+    $('<th />', { text: "Time (minutes)" }).appendTo(hrow);
+    $('<th />', { text: "Updated" }).appendTo(hrow);
+    var tBody = $('<tbody />').appendTo(table);
+
+    options = {
+        year: 'numeric', month: 'numeric', day: 'numeric',
+        hour: 'numeric', minute: 'numeric', second: 'numeric',
+        timeZoneName: 'short'
+    };
+    formatter = new Intl.DateTimeFormat(navigator.languages, options);
+
+    $.each( data, function( index, value ) {
+        var row = $('<tr />').appendTo(tBody);
+        $('<td />', { text: value.frameNum }).appendTo(row);
+        $('<td />', { text: (value.progress*100).toFixed(1) + '%' }).appendTo(row);
+        $('<td />', { text: (value.elapsedTime/60).toFixed(1)}).appendTo(row);
+        var dateTimeIso = value.lastDateTime;
+        var dateTime = new Date( dateTimeIso );
+        formatted = formatter.format( dateTime );
+        $('<td />', { text: formatted }).appendTo(row);
+    });
+    // make it sortable, and sort it by the Frame column
+    sorttable.makeSortable( table.get()[0] );
+    sorttable.innerSortFunction.apply(thFrame.get()[0], []);
+  }
+
 function onStatusBut() {
     var jobId = $('#jobId').val();
     if (jobId.length <= 0) {
         return;
     }
     saveSettings();
+    $('#resultsDiv').show();
 
     var urlPrefix='./api/jobs/';
     var queryParams = jobId
@@ -256,11 +284,17 @@ function onStatusBut() {
         //console.log( "jx responseJSON", jqxhr.responseJSON );
         if( typeof data === 'object' && data !== null && data.hasOwnProperty("state") ) {
             $('#state').text( data["state"])
-            //$('#stdout').text( data["stdout"])
             var nFramesFinished = 0;
             var nFramesWanted = 0;
             if( data.hasOwnProperty("progress") ) {
-                $('#stdout').text( JSON.stringify( data["progress"] ) )
+                var msg = data.progress.nFramesWanted + " frames wanted; " 
+                    + Math.round(data.progress.nFramesFinished) + " frames finished; "
+                    ;
+                if( data["state"] == 'running' ) {
+                    msg +=  data.progress.nWorkersWorking + " worker(s) assigned";
+                }
+                $('#stdout').text( msg );
+                //$('#stdout').text( JSON.stringify( data["progress"] ) )
                 var progress = data["progress"];
                 nFramesFinished = progress["nFramesFinished"];
                 nFramesWanted = progress["nFramesWanted"];
@@ -268,7 +302,23 @@ function onStatusBut() {
                     $('#progress').attr( "max", nFramesWanted );
                     $('#progress').attr( "value", nFramesFinished );
                 }
+                $('#progressTableDiv').empty();
+                /**
+                fakeFrameProgress = [
+                    {frameNum: 21, elapsedTime: 66, lastDateTime:"2020-02-14T22:03:57.123456+00:00", progress: 0.919},
+                    {frameNum: 22, elapsedTime: 150, lastDateTime:"2020-02-14T22:04:58.123456+00:00", progress: 0.9886}
+                ]
+                */
+                if( progress.hasOwnProperty("frameDetails") ) {
+                    var frameDetails = progress['frameDetails'];
+                    if( frameDetails.length > 0 ) {
+                        createProgressTable( frameDetails, '#progressTableDiv' );
+                    }
+                }
             }
+            if( data["state"] == 'running' )
+                $('#stopBut').prop( 'disabled', false );
+
             if( (data["state"] == 'stopped') && (nFramesWanted<=0) ) {
                 $('#progress').attr( "value", 0 );  // makes sure it is not "indeterminate"
             }
@@ -280,24 +330,30 @@ function onStatusBut() {
                 var imgUrl = urlPrefix + jobId + '/rendered.mp4'; // fallback
                 if( data["outputVidUrl"] ) {
                     imgUrl = './' + data["outputVidUrl"];
-                    console.log( "outputVidUrl", imgUrl )
+                    //console.log( "outputVidUrl", imgUrl )
+                }
+                var outputZipUrl = urlPrefix + jobId + '/rendered_frames.zip'; // fallback
+                if( data["outputZipUrl"] ) {
+                    imgUrl = './' + data["outputZipUrl"];
+                    console.log( "outputZipUrl", outputZipUrl )
                 }
                 if( nFramesFinished > 0 ) {
                     $('#outputVideo').attr( "src", imgUrl );
-                    //var absUrlStr = new URL(imgUrl, window.location.href).href
-                    //$('#outputVideo').attr( "alt", absUrlStr );
-                    $('#outputVideo').show();
+                    var absUrlStr = new URL(outputZipUrl, window.location.href).href
+                    $('#zippedFramesBut').attr( "href", absUrlStr );
+                    $('#outputDiv').show();
                 }
             }
             else {
-                $('#outputVideo').hide();
+                $('#outputDiv').hide();
             }
         }
         else {
-            $('#state').empty()
-            $('#stdout').empty()
-            $('#stderr').text( data)
-            $('#outputVideo').hide();
+            $('#state').empty();
+            $('#progressTableDiv').empty();
+            $('#stdout').empty();
+            $('#stderr').text( data);
+            $('#outputDiv').hide();
         }
     })
     jx.fail(function( jqxhr, textStatus, error ) {
@@ -306,15 +362,17 @@ function onStatusBut() {
         //console.log( "jx text", textStatus );
         //console.log( "jqxhr", jqxhr );
         //console.log( "jx responseJSON", jqxhr.responseJSON );
-        $('#state').text( 'could not get status from rendering master')
+        $('#state').text( 'could not get status from rendering master');
         })
 }
 
 function onLaunchBut() {
+    /*
     var nWorkers = $('#nWorkers').val();
     if (nWorkers.length <= 0) {
         return;
     }
+    */
     var authToken = $('#authToken').val();
     if (authToken.length <= 0) {
         return;
@@ -327,20 +385,27 @@ function onLaunchBut() {
     if (endFrame.length <= 0) {
         return;
     }
+    var frameRate = $('#frameRate').val();
+    if (frameRate.length <= 0) {
+        return;
+    }
     var width = $('#width').val();
     if (width.length <= 0) {
-        return;
+        width = 0;
     }
     var height = $('#height').val();
     if (height.length <= 0) {
+        height = 0;
+    }
+    // check that width and height ar non-negative numbers
+    if( isNaN(width) || width<0 || isNaN(height) || height<0 ) {
+        alert( 'please enter both width and height as positive numbers (or leave both blank)');
         return;
     }
-    var seed = $('#seed').val();
-    if (seed.length > 0) {
-        seed = seed.trim();
-    }
-    if (seed.length <= 0) {
-        seed = 0;
+    // check that both (or neither) of width and height were provided
+    if( (width==0) != (height==0) ) {
+        alert( 'please enter both width and height as positive numbers (or leave both blank)');
+        return;
     }
     var fileType = $('#fileType').val();
     if (! fileType) {
@@ -364,7 +429,7 @@ function onLaunchBut() {
     else {
         frameTimeLimit = frameTimeLimit * 60;  // converts minutes to seconds
     }
-    console.log( "frameTimeLimit", frameTimeLimit, "seconds" )
+    //console.log( "frameTimeLimit", frameTimeLimit, "seconds" )
 
     var jobTimeLimit = $('#jobTimeLimit').val();
     if (jobTimeLimit.length > 0) {
@@ -381,7 +446,6 @@ function onLaunchBut() {
     }
     console.log( "jobTimeLimit", jobTimeLimit, "seconds" )
 
-    var useCompositor = $('#useCompositor').prop( 'checked' );
     var minDpr = getMinDpr();
     var regions = $('#regions').val();
     var filterObj = {"regions": regions, "dpr": ">="+String(minDpr) };
@@ -390,19 +454,23 @@ function onLaunchBut() {
 
     // reset the output elements
     $('#progress').attr( "value", 0 );  // makes sure it has the attribute, before removing it
+    $('#jobId').empty("");
+    $('#progressTableDiv').empty();
     $('#stderr').empty("");
     $('#stdout').empty("");
-    $('#outputVideo').hide();
+    $('#outputDiv').hide();
 
     var url='./api/jobs/';
     var args = {
         authToken: authToken,
         filter: filterArg,
+        origBlendFilePath: blendFile.name,
         startFrame: startFrame,
         endFrame: endFrame,
+        frameRate: frameRate,
         height: height,
-        width: width,
-        nParFrames: nWorkers
+        width: width
+        //nWorkers: nWorkers
     }
     if (frameTimeLimit > 0) {
         args.frameTimeLimit = frameTimeLimit;
@@ -422,7 +490,6 @@ function onLaunchBut() {
         console.log( "onerror" )
         deferred.reject(e.target.error);
     }
-    console.log( blendFile )
     
     reader.readAsDataURL(blendFile);
     var prom = deferred.promise();
@@ -435,8 +502,9 @@ function onLaunchBut() {
         argsStr = JSON.stringify( args );
 
         console.log( "posting" )
+        $('#state').text( 'uploading')
         var jx = $.post(url, argsStr);  // argsStr
-        //console.log( "posting starting" )
+        console.log( "posting starting" )
         jx.done(function( data, textStatus, jqxhr ) {
             console.log( "posting done" )
             var jobId = data.id
@@ -470,7 +538,7 @@ function onRegionsChanged() {
 }
 
 function onDprChanged() {
-    console.log( "onDprChanged()" );
+    //console.log( "onDprChanged()" );
     var dpr = $('#minDpr').val();
     if (dpr.length > 0) {
         dpr = dpr.trim();
@@ -548,8 +616,8 @@ function checkAvail() {
 function checkJob() {
     // this version stops when the status is no longer 'running'
     onStatusBut()
-    if( $('#state').text() != 'running' ) {
-        $('#stopBut').prop( 'disabled', true )
+    if( $('#state').text() == 'stopped' ) {
+        //$('#stopBut').prop( 'disabled', true );
         clearInterval( g_checkerTask )
         g_checkerTask = null;
     }
@@ -570,12 +638,9 @@ function saveSettings() {
     localStorage.setItem("minDpr", $('#minDpr').val() );
     localStorage.setItem("nWorkers", $('#nWorkers').val() );
     localStorage.setItem("regions", $('#regions').val() );
-    if( $('#seed').val().length ) {
-        localStorage.setItem("seed", $('#seed').val() );
-    }
     localStorage.setItem("startFrame", $('#startFrame').val() );
     localStorage.setItem("endFrame", $('#endFrame').val() );
-    localStorage.setItem("useCompositor", $('#useCompositor').prop('checked') );
+    localStorage.setItem("frameRate", $('#frameRate').val() );
     localStorage.setItem("width", $('#width').val() );
 }
 
@@ -594,26 +659,18 @@ function loadSettings() {
     if( localStorage.getItem("regions") ) {
         $('#regions').val( localStorage.getItem("regions").split(",") );
     }
-    if( localStorage.getItem("width") ) {
+    if( localStorage.getItem("width") !== null ) {
         $('#width').val( localStorage.getItem("width") );
     }
     $('#jobId').val( localStorage.getItem("jobId") );
-    if( localStorage.getItem("height") ) {
+    if( localStorage.getItem("height") !== null ) {
         $('#height').val( localStorage.getItem("height") );
-    }
-    $('#seed').val( localStorage.getItem("seed") );
-    if( localStorage.getItem("startFrame") ) {
-        $('#startFrame').val( localStorage.getItem("startFrame") );
     }
     if( localStorage.getItem("endFrame") ) {
         $('#endFrame').val( localStorage.getItem("endFrame") );
     }
-    if( localStorage.getItem("useCompositor") == "false" ) {
-        $('#useCompositor').prop('checked', false);
-    }
-    else {
-        $('#useCompositor').prop('checked', true);
-    }
+    if( localStorage.getItem("frameRate") !== null )
+        $('#frameRate').val( localStorage.getItem("frameRate") );
 }
 
 function isUrlValid( arg ){
@@ -638,6 +695,18 @@ function splitTextarea( elemId ){
     return lines
 }
 
+function on_stderr_collapsed( event ) {
+    //console.log( 'stderr collapsed' );
+    
+    $(this).parent().find(".glyphicon-menu-up").removeClass("glyphicon-menu-up").addClass("glyphicon-menu-down")
+    //$(this).parent().find(".glyphicon-minus").removeClass("glyphicon-minus").addClass("glyphicon-plus")
+}
+function on_stderr_shown( event ) {
+    //console.log( 'stderr shown' );
+    $(this).parent().find(".glyphicon-menu-down").removeClass("glyphicon-menu-down").addClass("glyphicon-menu-up")
+    //$(this).parent().find(".glyphicon-plus").removeClass("glyphicon-plus").addClass("glyphicon-minus");
+}
+
 function on_ready() {
     // Check for FileReader API (HTML5) support.
     if (!window.FileReader) {
@@ -648,6 +717,9 @@ function on_ready() {
     $('#stopBut').click(onStopBut);
     $('#regions').change(onRegionsChanged);
     $('#minDpr').change(onDprChanged);
+    $('#stderr').on('hidden.bs.collapse', on_stderr_collapsed);
+    $('#stderr').on('shown.bs.collapse', on_stderr_shown);
+   
     loadSettings();
     onDprChanged();  // should only need checkAvail();
     g_availTask = setInterval( checkAvail, 15 * 1000 )
