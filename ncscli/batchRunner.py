@@ -903,7 +903,7 @@ def runBatch( **kwargs ):
     global args
     args = batchArgs
     #logger.debug('args: %s', args)
-    if args.commonInFilePath and not os.path.isfile( args.commonInFilePath ):
+    if args.commonInFilePath and not os.path.isfile( args.commonInFilePath ) and not os.path.isdir( args.commonInFilePath ):
         logger.error( 'file not found: %s', args.commonInFilePath )
         return 1
 
@@ -944,6 +944,7 @@ def runBatch( **kwargs ):
     if resp['statusCode'] == 403:
         logger.error( 'the given authToken was not accepted' )
         return 1
+    g_.autoscaleMax = 1
     if not args.nWorkers:
         # check consistency of autoscale settings
         if args.autoscaleMax <= 0:
