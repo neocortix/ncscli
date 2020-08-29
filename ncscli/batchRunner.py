@@ -939,6 +939,19 @@ def runBatch( **kwargs ):
 
     #extensions = {'PNG': 'png', 'OPEN_EXR': 'exr'}
 
+    # check that they have a public key for ssh
+    try:
+        loadSshPubKey()
+    except FileNotFoundError as exc:
+        logger.error( 'you do not have an ssh public key in ~/.ssh/id_rsa.pub')
+        logger.info( ' to fix this, on command line, run ssh-keygen -t rsa' )
+        logger.info( 'exception details (%s) %s', type(exc), exc )
+        return 1
+    except Exception as exc:
+        logger.error( 'there was a problem reading your ssh public key')
+        logger.info( 'exception was (%s) %s', type(exc), exc )
+        return 1
+
     # validate the authToken
     resp = ncs.queryNcsSc( 'instances', args.authToken )
     if resp['statusCode'] == 403:
