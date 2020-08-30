@@ -7,7 +7,7 @@ import batchRunner
 
 
 class locustFrameProcessor(batchRunner.frameProcessor):
-    '''defines details for using Locust for a simplistic lkoad test'''
+    '''defines details for using Locust for a simplistic load test'''
 
     def installerCmd( self ):
         return 'curl -L https://github.com/locustio/locust/archive/0.12.2.tar.gz > locust.tar.gz && tar -xf locust.tar.gz && mv locust-0.12.2/ locust'
@@ -36,7 +36,7 @@ logging.basicConfig(format=logFmt, datefmt=logDateFmt)
 #batchRunner.logger.setLevel(logging.DEBUG)  # for more verbosity
 
 dateTimeTag = datetime.datetime.now().strftime( '%Y-%m-%d_%H%M%S' )
-outDataDir = 'data/locust_' + dateTimeTag
+outDataDir = 'data/loadtest_' + dateTimeTag
 
 try:
     rc = batchRunner.runBatch(
@@ -46,7 +46,7 @@ try:
         encryptFiles=False,
         timeLimit = 14*60,
         frameTimeLimit = 240,
-        filter = '{"dpr": ">=12"}',
+        filter = '{"dpr": ">=24"}',
         outDataDir = outDataDir,
         startFrame = 1,
         endFrame = 5,
