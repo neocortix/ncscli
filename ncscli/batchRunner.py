@@ -386,6 +386,8 @@ def recruitInstance( launchedJsonFilePath, resultsLogFilePathIgnored ):
                     break
                 if g_.interrupted:
                     break
+                if (g_.nFramesWanted - len(g_.framesFinished)) <= 0:
+                    break
                 time.sleep(30)
             proc.poll()
             returnCode = proc.returncode if proc.returncode != None else 124 # declare timeout if no rc
