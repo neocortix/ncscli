@@ -44,7 +44,7 @@ if __name__ == "__main__":
     rc = batchRunner.runBatch(
         frameProcessor = blenderFrameProcessor(),
         commonInFilePath = blenderFrameProcessor.blendFilePath,
-        authToken = 'YourAuthTokenHere',
+        authToken = 'YourAuthToken',
         timeLimit = 4*3600,
         instTimeLimit = 1200,
         frameTimeLimit = 2100,
@@ -54,8 +54,8 @@ if __name__ == "__main__":
         filter = '{"dpr": ">=48","ram:":">=2800000000","app-version": ">=2.1.11"}',
         outDataDir = outDataDirPath,
         encryptFiles = False,
-        startFrame = 1,
-        endFrame = 6
+        startFrame = 0,
+        endFrame = 5
     )
     # this part is "extra credit" if you want to encode the output as video (and ffmpeg is installed)
     if rc == 0:
@@ -78,7 +78,7 @@ if __name__ == "__main__":
             except Exception as exc:
                 logger.warning( 'ffmpeg call threw exception (%s) %s',type(exc), exc )
 
-        if subprocess.call( ['ffmpeg', '-version'], stdout=subprocess.DEVNULL ) == 0:
+        if subprocess.call( ['which', 'ffmpeg'], stdout=subprocess.DEVNULL ) == 0:
             encodeTo264( outDataDirPath, 'rendered.mp4', 30, startFrame=1 )
 
     sys.exit( rc )
