@@ -12,7 +12,7 @@ class pythonFrameProcessor(batchRunner.frameProcessor):
     def installerCmd( self ):
         return 'sudo apt-get -qq -y install python3-matplotlib > /dev/null' 
    
-    workerScriptPath = 'plot_sine_001.py'
+    workerScriptPath = 'plotFrame.py'
     frameFileType = 'png'
     outFilePattern = 'sine_######.%s'%(frameFileType)
  
@@ -41,7 +41,7 @@ if __name__ == "__main__":
         timeLimit = 1200,
         instTimeLimit = 600,
         frameTimeLimit = 300,
-        filter = '{"dpr": ">=38"}',
+        filter = '{"dpr": ">=12"}',
         outDataDir = outDataDirPath,
         encryptFiles = False,
         autoscaleMin=0.8,
