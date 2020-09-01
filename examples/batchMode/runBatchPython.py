@@ -41,7 +41,7 @@ if __name__ == "__main__":
         timeLimit = 1200,
         instTimeLimit = 600,
         frameTimeLimit = 300,
-        filter = '{"dpr": ">=12"}',
+        filter = '{"dpr": ">=24"}',
         outDataDir = outDataDirPath,
         encryptFiles = False,
         autoscaleMin=0.8,

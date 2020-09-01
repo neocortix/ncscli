@@ -13,7 +13,6 @@ class pingFrameProcessor(batchRunner.frameProcessor):
         return 'frame_%d.out' % (frameNum)
 
     def frameCmd( self, frameNum ):
-        #return 'rm NOSUCHFILE'
         targetHost = 'neocortix.com'
         nPings = 3
         timeLimit = 60
