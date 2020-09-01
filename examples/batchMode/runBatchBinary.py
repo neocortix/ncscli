@@ -12,15 +12,15 @@ class binaryFrameProcessor(batchRunner.frameProcessor):
     def installerCmd( self ):
         return None
 
-    workerScriptPath = 'helloFrame_aarch64'  # binary to copy to instance
+    workerBinFilePath = 'helloFrame_aarch64'  # binary to copy to instance
  
     def frameOutFileName( self, frameNum ):
         return 'frame_%d.out' % (frameNum)
 
     def frameCmd( self, frameNum ):
-        workerScriptFileName = os.path.basename( self.workerScriptPath )
+        workerBinFileName = os.path.basename( self.workerBinFilePath )
         cmd = './%s %d > %s' % \
-            (workerScriptFileName, frameNum, self.frameOutFileName(frameNum))
+            (workerBinFileName, frameNum, self.frameOutFileName(frameNum))
         return cmd
  
 if __name__ == "__main__":
@@ -31,7 +31,7 @@ if __name__ == "__main__":
 
     rc = batchRunner.runBatch(
         frameProcessor = binaryFrameProcessor(),
-        commonInFilePath = binaryFrameProcessor.workerScriptPath,
+        commonInFilePath = binaryFrameProcessor.workerBinFilePath,
         filter = '{"cpu-arch": "aarch64", "dpr": ">=24"}',
         authToken = 'YourAuthTokenHere',
         timeLimit = 1200,
