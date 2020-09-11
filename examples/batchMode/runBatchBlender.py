@@ -4,7 +4,7 @@ import logging
 import os
 import sys
  
-import batchRunner
+import ncscli.batchRunner as batchRunner
  
 class blenderFrameProcessor(batchRunner.frameProcessor):
     '''defines details for using blender in a simple batch job'''

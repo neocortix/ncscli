@@ -4,7 +4,7 @@ import logging
 import os
 import sys
  
-import batchRunner
+import ncscli.batchRunner as batchRunner
  
 class pythonFrameProcessor(batchRunner.frameProcessor):
     '''defines details for using python in a simple batch job'''
