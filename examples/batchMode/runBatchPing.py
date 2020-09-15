@@ -3,7 +3,7 @@ import datetime
 import logging
 import sys
 
-import batchRunner
+import ncscli.batchRunner as batchRunner
 
 
 class pingFrameProcessor(batchRunner.frameProcessor):

@@ -4,7 +4,7 @@ import logging
 import os
 import sys
  
-import batchRunner
+import ncscli.batchRunner as batchRunner
  
 class binaryFrameProcessor(batchRunner.frameProcessor):
     '''defines details for using a binary executable in a simple batch job'''

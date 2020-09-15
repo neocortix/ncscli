@@ -32,17 +32,10 @@ import uuid
 import requests
 
 # neocortix modules
-try:
-    import ncs
-except ImportError:
-    # set system and python paths for default places, since path seems to be not set properly
-    ncscliPath = os.path.expanduser('~/ncscli/ncscli')
-    sys.path.append( ncscliPath )
-    os.environ["PATH"] += os.pathsep + ncscliPath
-    import ncs
-import jsonToKnownHosts
-import purgeKnownHosts
-import tellInstances
+from . import ncs
+from . import jsonToKnownHosts
+from . import purgeKnownHosts
+from . import tellInstances
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
