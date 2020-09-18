@@ -51,6 +51,7 @@ class g_:
     frameProcessor = None
     framesToDo = collections.deque()
     nFramesWanted = None
+    limitOneFramePerWorker = False
     framesFinished = collections.deque()
     installerLogFile = None
     resultsLogFile = None
@@ -823,6 +824,10 @@ def renderFramesOnInstance( inst ):
             saveProgress()
         if returnCode:
             nFailures += 1
+        if g_.limitOneFramePerWorker:
+            if len( g_.framesFinished) < g_.nFramesWanted:
+                logger.warning( 'breaking loop because of limitOneFramePerWorker')
+            break
     if iid in g_.workingInstances:
         g_.workingInstances.remove( iid )
         saveProgress()
@@ -952,6 +957,7 @@ def runBatch( **kwargs ):
     if resp['statusCode'] == 403:
         logger.error( 'the given authToken was not accepted' )
         return 1
+    g_.limitOneFramePerWorker = args.limitOneFramePerWorker
     g_.autoscaleMax = 1
     if not args.nWorkers:
         # check consistency of autoscale settings
@@ -1029,10 +1035,11 @@ def runBatch( **kwargs ):
                     g_.interrupted = True
                     raise
             logger.debug( 'finished initial thread pool')
-            # wait until it is time to exit
-            while len(g_.framesFinished) < g_.nFramesWanted and sigtermNotSignaled() and time.time()< g_.deadline:
-                logger.info( 'waiting for frames to finish')
-                time.sleep( 10 )
+            if onTheFlyWanted:
+                # wait until it is time to exit
+                while len(g_.framesFinished) < g_.nFramesWanted and sigtermNotSignaled() and time.time()< g_.deadline:
+                    logger.info( 'waiting for frames to finish')
+                    time.sleep( 10 )
     except KeyboardInterrupt:
         logger.warning( 'interrupted, setting flag')
         g_.interrupted = True
@@ -1092,6 +1099,8 @@ def createArgumentParser():
     ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use (default is random)' )
     ap.add_argument( '--nWorkers', type=int, help='to override the # of worker instances (default=0 for automatic)',
         default=0 )
+    ap.add_argument( '--limitOneFramePerWorker', type=boolArg, help='prevent any worker from doing multiple frames',
+        default=False )
     ap.add_argument( '--autoscaleInit', type=float, help='multiple (instances per frame) to launch initially',
         default=1 )
     ap.add_argument( '--autoscaleMax', type=float, help='maximum multiple (instances per frame) to keep active',
