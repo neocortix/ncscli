@@ -826,7 +826,7 @@ def renderFramesOnInstance( inst ):
             nFailures += 1
         if g_.limitOneFramePerWorker:
             if len( g_.framesFinished) < g_.nFramesWanted:
-                logger.warning( 'breaking loop because of limitOneFramePerWorker')
+                logger.info( 'breaking loop because of limitOneFramePerWorker')
             break
     if iid in g_.workingInstances:
         g_.workingInstances.remove( iid )
