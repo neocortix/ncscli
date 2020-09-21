@@ -109,6 +109,10 @@ if __name__ == "__main__":
     jlogFilePath = outputDir + "/batchRunner_results.jlog"
     print("jlogFilePath = %s\n" % jlogFilePath)
 
+    if not os.path.isfile( launchedJsonFilePath ):
+        logger.error( 'file not found: %s', launchedJsonFilePath )
+        sys.exit( 1 )
+
     launchedInstances = []
     with open( launchedJsonFilePath, 'r') as jsonInFile:
         try:
@@ -162,6 +166,9 @@ if __name__ == "__main__":
         inFilePath = outputDir + "/" + resultFileNames[i]
         # lines = getLinesFromFileName(inFilePath)    
         fields = getFieldsFromFileNameCSV3(inFilePath) 
+        if not fields:
+            logger.info( 'no fields in %s', inFilePath )
+            continue
         frameNum = int(resultFileNames[i].lstrip("TestPlan_results_").rstrip(".csv"))
         startTimes = []
         elapsedTimes = []
@@ -171,12 +178,13 @@ if __name__ == "__main__":
                 elapsedTimes.append(int(fields[j][1])/1000.0)         
         # startTimes = [int(ii)/1000.0 for ii in getColumn(fields,0) if getColumn(fields,3) != "200"] 
         # elapsedTimes = [int(ii)/1000.0 for ii in getColumn(fields,1) if getColumn(fields,3) != "200"]
-        minStartTimeForDevice = min(startTimes)
-        jIndex = -1
-        for j in range (0,len(mappedFrameNumLocation)):
-            if frameNum == mappedFrameNumLocation[j][0]:
-                jIndex = j            
-        responseData.append([frameNum,minStartTimeForDevice,startTimes,elapsedTimes,mappedFrameNumLocation[jIndex]])
+        if startTimes:
+            minStartTimeForDevice = min(startTimes)
+            jIndex = -1
+            for j in range (0,len(mappedFrameNumLocation)):
+                if frameNum == mappedFrameNumLocation[j][0]:
+                    jIndex = j
+            responseData.append([frameNum,minStartTimeForDevice,startTimes,elapsedTimes,mappedFrameNumLocation[jIndex]])
     globalMinStartTime = min(getColumn(responseData,1))
 
     if False:
