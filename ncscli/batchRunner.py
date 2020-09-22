@@ -347,13 +347,35 @@ def recruitInstance( launchedJsonFilePath, resultsLogFilePathIgnored ):
         # add instance to knownHosts
         with open( os.path.expanduser('~/.ssh/known_hosts'), 'a' ) as khFile:
             jsonToKnownHosts.jsonToKnownHosts( startedInstances, khFile )
+
+        deadline = min( g_.deadline, time.time() + args.instTimeLimit )
+        # rsync the common input file, if any
+        if args.commonInFilePath:
+            logFrameState( -1, 'rsyncing', iid, 0 )
+            destFileName = os.path.basename( args.commonInFilePath )
+            (rc, stderr) = rsyncToRemote( args.commonInFilePath, destFileName, inst, timeLimit=args.instTimeLimit )
+            if rc == 0:
+                logFrameState( -1, 'rsynced', iid )
+            else:
+                logStderr( stderr.rstrip(), iid )
+                logFrameState( -1, 'rsyncFailed', iid, rc )
+                logger.warning( 'rc from rsync was %d', rc )
+                terminateInstances( args.authToken, [iid] )
+                #g_.workingInstances.remove( iid )
+                #saveProgress()
+                logger.warning( 'terminating instance because rsync %s', iid )
+                terminateInstances( args.authToken, [iid] )
+                logOperation( 'terminateBad', [iid], '<recruitInstances>' )
+                purgeHostKeys( [inst] )
+                return None
+
+
         # install something on startedInstance, if required, else just return inst
         installerCmd = getInstallerCmd()
         if not installerCmd:
             return inst
         logger.info( 'installerCmd %s', installerCmd )
         sshSpecs = inst['ssh']
-        deadline = min( g_.deadline, time.time() + args.instTimeLimit )
         logInstallerOperation( iid, ['connect', sshSpecs['host'], sshSpecs['port']] )
         with subprocess.Popen(['ssh',
                         '-p', str(sshSpecs['port']),
@@ -421,11 +443,11 @@ def triage( statuses ):
             badOnes.append( status )
     return (goodOnes, badOnes)
 
-def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, resultsLogFilePath='' ):
+def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, resultsLogFilePath ):
     '''launch instances and install prereqs on them;
         terminate those that could not install; return list of good instances'''
-    if not g_.resultsLogFilePath:
-        resultsLogFilePath = g_.dataDirPath+'/recruitInstances.jlog'
+    #if not g_.resultsLogFilePath:
+    #    resultsLogFilePath = g_.dataDirPath+'/recruitInstances.jlog'
     goodInstances = []
     rc = None
     launchedInstances = None
@@ -493,7 +515,7 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
             stepStatuses = tellInstances.tellInstances( startedInstances, installerCmd,
                 resultsLogFilePath=resultsLogFilePath,
                 download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
-                timeLimit=min(args.instTimeLimit, args.timeLimit), upload=None, stopOnSigterm=not True,
+                timeLimit=min(args.instTimeLimit, args.timeLimit), upload=args.commonInFilePath, stopOnSigterm=not True,
                 knownHostsOnly=True
                 )
             # SHOULD restore our handler because tellInstances may have overridden it
@@ -646,6 +668,7 @@ def renderFramesOnInstance( inst ):
     saveProgress()
     logger.info( 'would compute frames on instance %s', abbrevIid )
 
+    '''
     # rsync the common input file, if any
     if args.commonInFilePath:
         logFrameState( -1, 'rsyncing', iid, 0 )
@@ -663,7 +686,7 @@ def renderFramesOnInstance( inst ):
             purgeHostKeys( [inst] )
             saveProgress()
             return -1  # go no further if we can't rsync to the worker
-
+    '''
     def trackStderr( proc ):
         for line in proc.stderr:
             print( '<stderr>', abbrevIid, line.strip(), file=sys.stderr )
@@ -1000,9 +1023,9 @@ def runBatch( **kwargs ):
     goodInstances = None
     try:
         if args.launch:
-            goodInstances= recruitInstances( nToRecruit, g_.dataDirPath+'/recruitLaunched.json', True )
+            goodInstances= recruitInstances( nToRecruit, g_.dataDirPath+'/recruitLaunched.json', True, installerLogFilePath )
         else:
-            goodInstances = recruitInstances( nToRecruit, g_.dataDirPath+'/survivingInstances.json', False )
+            goodInstances = recruitInstances( nToRecruit, g_.dataDirPath+'/survivingInstances.json', False, installerLogFilePath )
         g_.installerLogFile = open( installerLogFilePath, 'a' )
 
         g_.framesToDo.extend( range(args.startFrame, args.endFrame+1, args.frameStep ) )
