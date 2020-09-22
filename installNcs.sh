@@ -69,7 +69,7 @@ else
     # try installing pip using get-pip
     echo installing pip
     curl -L https://bootstrap.pypa.io/get-pip.py > get-pip.py
-    $pyx get-pip.py --user
+    $pyx get-pip.py --user --upgrade --no-cache-dir
 
     # check whether it is installed now
     pipVersion="$($pyx -m pip --version 2>&1)"
@@ -84,8 +84,7 @@ else
 fi
 
 # install ncscli distribution from pypi
-$pyx -m pip install --user ncscli
-#$pyx -m pip install --user  -i https://test.pypi.org/simple/ ncscli==0.0.17 --extra-index-url https://pypi.org/simple
+$pyx -m pip install --user --upgrade --no-cache-dir ncscli
 
 
 sitePackagesDir=$($pyx -m site --user-site)
