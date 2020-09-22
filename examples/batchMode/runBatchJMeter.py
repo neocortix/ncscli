@@ -57,11 +57,11 @@ try:
         limitOneFramePerWorker = True,
         autoscaleMax = 2
     )
-
-    rc2 = subprocess.call( ['./plotJMeterOutput.py', '--dataDirPath', outDataDir],
-        stdout=subprocess.DEVNULL )
-    if rc2:
-        logger.warning( 'plotJMeterOutput exited with returnCode %d', rc2 )
+    if os.path.isfile( outDataDir +'/recruitLaunched.json' ):
+        rc2 = subprocess.call( ['./plotJMeterOutput.py', '--dataDirPath', outDataDir],
+            stdout=subprocess.DEVNULL )
+        if rc2:
+            logger.warning( 'plotJMeterOutput exited with returnCode %d', rc2 )
 
     sys.exit( rc )
 except KeyboardInterrupt:
