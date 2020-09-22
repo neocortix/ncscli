@@ -37,7 +37,7 @@ if __name__ == "__main__":
     rc = batchRunner.runBatch(
         frameProcessor = pythonFrameProcessor(),
         commonInFilePath = pythonFrameProcessor.workerScriptPath,
-        authToken = 'YourAuthTokenHere',
+        authToken = os.getenv( 'NCS_AUTH_TOKEN' ) or 'YourAuthTokenHere',
         timeLimit = 1200,
         instTimeLimit = 600,
         frameTimeLimit = 300,
