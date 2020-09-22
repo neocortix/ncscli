@@ -44,7 +44,7 @@ if __name__ == "__main__":
     rc = batchRunner.runBatch(
         frameProcessor = blenderFrameProcessor(),
         commonInFilePath = blenderFrameProcessor.blendFilePath,
-        authToken = 'YourAuthToken',
+        authToken = os.getenv( 'NCS_AUTH_TOKEN' ) or 'YourAuthTokenHere',
         timeLimit = 4*3600,
         instTimeLimit = 1200,
         frameTimeLimit = 2100,
