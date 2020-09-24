@@ -33,7 +33,7 @@ if __name__ == "__main__":
         frameProcessor = binaryFrameProcessor(),
         commonInFilePath = binaryFrameProcessor.workerBinFilePath,
         filter = '{"cpu-arch": "aarch64", "dpr": ">=24"}',
-        authToken = 'YourAuthTokenHere',
+        authToken = os.getenv('NCS_AUTH_TOKEN') or 'YourAuthTokenHere',
         timeLimit = 1200,
         instTimeLimit = 120,
         frameTimeLimit = 120,

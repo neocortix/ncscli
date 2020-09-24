@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import datetime
 import logging
+import os
 import sys
 
 import ncscli.batchRunner as batchRunner
@@ -30,7 +31,7 @@ outDataDir = 'data/ping_' + dateTimeTag
 
 rc = batchRunner.runBatch(
     frameProcessor = pingFrameProcessor(),
-    authToken = 'YourAuthTokenHere',
+    authToken = os.getenv('NCS_AUTH_TOKEN') or 'YourAuthTokenHere',
     timeLimit = 720,  # seconds
     frameTimeLimit = 120,
     outDataDir = outDataDir,
