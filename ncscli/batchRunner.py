@@ -507,7 +507,7 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
         with open( os.path.expanduser('~/.ssh/known_hosts'), 'a' ) as khFile:
             jsonToKnownHosts.jsonToKnownHosts( startedInstances, khFile )
         # install something on startedInstances, if required, else just return startedInstances
-        if not getInstallerCmd():
+        if (not getInstallerCmd()) and (not args.commonInFilePath):
             return startedInstances
         if not sigtermSignaled():
             installerCmd = getInstallerCmd()
@@ -828,7 +828,8 @@ def renderFramesOnInstance( inst ):
         if curFrameRendered:
             logFrameState( frameNum, 'retrieving', iid )
             (returnCode, stderr) = scpFromRemote( 
-                outFileName, os.path.join( g_.dataDirPath, outFileName ), inst
+                outFileName, g_.dataDirPath, inst
+                #outFileName, os.path.join( g_.dataDirPath, outFileName ), inst
                 )
             if returnCode == 0:
                 g_.framesFinished.append( frameNum )
