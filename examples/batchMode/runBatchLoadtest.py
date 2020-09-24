@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import datetime
 import logging
+import os
 import sys
 
 import ncscli.batchRunner as batchRunner
@@ -13,7 +14,8 @@ class locustFrameProcessor(batchRunner.frameProcessor):
         return 'curl -L https://github.com/locustio/locust/archive/0.12.2.tar.gz > locust.tar.gz && tar -xf locust.tar.gz && mv locust-0.12.2/ locust'
 
     def frameOutFileName( self, frameNum ):
-        return 'worker_%03d_requests.csv' % frameNum
+        return 'worker_%03d_*.csv' % frameNum
+        #return 'worker_%03d_requests.csv' % frameNum
 
     def frameCmd( self, frameNum ):
         usersPerWorker = 20  # number of simulated users per worker instance
@@ -41,8 +43,8 @@ outDataDir = 'data/loadtest_' + dateTimeTag
 try:
     rc = batchRunner.runBatch(
         frameProcessor = locustFrameProcessor(),
-        commonInFilePath = 'locustWorker/',
-        authToken = 'YourAuthTokenHere',
+        commonInFilePath = 'locustWorker',
+        authToken = os.getenv('NCS_AUTH_TOKEN') or 'YourAuthTokenHere',
         encryptFiles=False,
         timeLimit = 14*60,
         frameTimeLimit = 240,
