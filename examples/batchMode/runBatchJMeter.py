@@ -13,10 +13,11 @@ class JMeterFrameProcessor(batchRunner.frameProcessor):
 
     def installerCmd( self ):
         # return 'apt update && apt install -y -q jmeter'
-        return 'apt update && apt install -y -qq openjdk-11-jdk-headless && curl -L https://downloads.apache.org//jmeter/binaries/apache-jmeter-5.3.tgz > apache-jmeter-5.3.tgz && tar zxf apache-jmeter-5.3.tgz'
+        #return 'apt update && apt install -y -qq openjdk-11-jdk-headless && curl -L https://downloads.apache.org//jmeter/binaries/apache-jmeter-5.3.tgz > apache-jmeter-5.3.tgz && tar zxf apache-jmeter-5.3.tgz'
+        return 'apt-get -qq update && apt-get -qq -y install openjdk-11-jdk-headless > /dev/null && curl -L https://downloads.apache.org//jmeter/binaries/apache-jmeter-5.3.tgz > apache-jmeter-5.3.tgz && tar zxf apache-jmeter-5.3.tgz'
 
     JMeterFilePath = 'TestPlan.jmx'
-    #JMeterFilePath = 'TestPlan_041_short.jmx'
+    #JMeterFilePath = 'TestPlan_RampLong.jmx'
 
     def frameOutFileName( self, frameNum ):
         return 'TestPlan_results_%03d.csv' % frameNum
