@@ -932,6 +932,7 @@ def runBatch( **kwargs ):
         return 1
 
     g_.dataDirPath = args.outDataDir
+    logger.info( 'args.outDataDir: %s', args.outDataDir )
     os.makedirs( g_.dataDirPath, exist_ok=True )
 
     signal.signal( signal.SIGTERM, sigtermHandler )
@@ -1102,7 +1103,7 @@ def runBatch( **kwargs ):
         },
         '<master>'
         )
-    if nFramesFinished == g_.nFramesWanted:
+    if nFramesFinished > 0:
         return 0
     else:
         return 1
