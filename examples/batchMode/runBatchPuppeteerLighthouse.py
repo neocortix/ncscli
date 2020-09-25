@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 import datetime
+import glob
 import logging
 import os
 import subprocess
 import sys
+import tarfile
 
 import ncscli.batchRunner as batchRunner
 
@@ -24,6 +26,12 @@ class PuppeteerLighthouseFrameProcessor(batchRunner.frameProcessor):
             self.PuppeteerFilePath, frameNum, frameNum, frameNum
         )
         return cmd
+
+def untarResults( outDataDir ):
+    tarFilePaths = glob.glob( outDataDir+'/Puppeteer_results_*.tar.gz' )
+    for tarFilePath in tarFilePaths:
+        with tarfile.open( tarFilePath, 'r' ) as tarFile:
+            tarFile.extractall( path=outDataDir )
 
 
 # configure logger formatting
@@ -56,6 +64,7 @@ try:
         autoscaleMax = 2
     )
     if os.path.isfile( outDataDir +'/recruitLaunched.json' ):
+        untarResults( outDataDir )
         rc2 = subprocess.call( ['./processPuppeteerOutput.py', '--dataDirPath', outDataDir],
             stdout=subprocess.DEVNULL )
         if rc2:
