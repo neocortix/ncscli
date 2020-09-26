@@ -62,11 +62,17 @@ def test_runBatchBinaryGo():
 def test_runBatchBlender():
     check_batchRunner_example( 'runBatchBlender', 'rendered_frame_*.png' )
 
+def test_runBatchJMeter():
+    check_batchRunner_example( 'runBatchJMeter', 'TestPlan_results_*.csv' )
+
+def test_runBatchLoadtest():
+    check_batchRunner_example( 'runBatchLoadtest', 'worker_*.csv' )
+
 def test_runBatchPing():
     check_batchRunner_example( 'runBatchPing', 'frame_*.out' )
-    
 
+def test_runBatchPuppeteerLighthouse():
+    check_batchRunner_example( 'runBatchPuppeteerLighthouse', 'Puppeteer_results_*.tar.gz' )
 
-def no_test_runBatchLoadtest():
-    rc = subprocess.call( ['./runBatchLoadtest.py'] )
-    assert rc == 0
+def test_runBatchPython():
+    check_batchRunner_example( 'runBatchPython', 'sine_*.png' )
