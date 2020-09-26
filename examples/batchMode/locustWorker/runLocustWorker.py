@@ -17,7 +17,8 @@ class g_:
 
 def on_request_success( request_type, name, response_time, response_length, **kwargs ):
     if g_.reqsOutFile:
-        requestTime = time.time()-response_time
+        # subtract response_time (milliseconds) from time.time() (seconds)
+        requestTime = time.time()-(response_time / 1000.0)
 
         print( '%.3f'% requestTime, request_type, '%.1f'% response_time,
             response_length, '"'+name+'"', sep=',',
@@ -27,7 +28,8 @@ def on_request_failure( request_type, name, response_time, exception, **kwargs )
     #if kwargs:
     #    print( 'KWARGS', kwargs, file=sys.stderr )
     if g_.reqsBadOutFile:
-        requestTime = time.time()-response_time
+        # subtracted response_time (milliseconds) from time.time() (seconds)
+        requestTime = time.time()-(response_time / 1000.0)
 
         print( '%.3f'% requestTime, request_type, '%.1f'% response_time,
             '"'+name+'"', type(exception).__name__, '"%s"'%exception, sep=',',
