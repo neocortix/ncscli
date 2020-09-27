@@ -2,6 +2,7 @@
 import datetime
 import logging
 import os
+import subprocess
 import sys
 
 import ncscli.batchRunner as batchRunner
@@ -55,6 +56,11 @@ try:
         nWorkers = 6,
         autoscaleMax = 2
     )
+    if os.path.isfile( outDataDir +'/recruitLaunched.json' ):
+        rc2 = subprocess.call( ['./plotLocustOutput.py', '--dataDirPath', outDataDir],
+            stdout=subprocess.DEVNULL )
+        if rc2:
+            logger.warning( 'plotLocustOutput.py exited with returnCode %d', rc2 )
 
     sys.exit( rc )
 except KeyboardInterrupt:
