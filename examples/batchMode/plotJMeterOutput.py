@@ -132,15 +132,42 @@ if __name__ == "__main__":
     completedJobs = demuxResults(jlogFilePath)
 
     mappedFrameNumLocation = []
+    mappedFrameNumLocationUnitedStates = []
+    mappedFrameNumLocationRussia = []
+    mappedFrameNumLocationOther = []
+    
     for i in range(0,len(completedJobs)):
         for j in range(0,len(launchedInstances)):
             if launchedInstances[j]["instanceId"] == completedJobs[i][1]:
                 mappedFrameNumLocation.append([completedJobs[i][0],
-                                            launchedInstances[j]["device-location"]["latitude"],
-                                            launchedInstances[j]["device-location"]["longitude"],
-                                            launchedInstances[j]["device-location"]["display-name"],
-                                            launchedInstances[j]["device-location"]["country"]
-                                            ])
+                                           launchedInstances[j]["device-location"]["latitude"],
+                                           launchedInstances[j]["device-location"]["longitude"],
+                                           launchedInstances[j]["device-location"]["display-name"],
+                                           launchedInstances[j]["device-location"]["country"]
+                                           ])
+                if launchedInstances[j]["device-location"]["country"] == "United States":
+                    mappedFrameNumLocationUnitedStates.append([completedJobs[i][0],
+                                               launchedInstances[j]["device-location"]["latitude"],
+                                               launchedInstances[j]["device-location"]["longitude"],
+                                               launchedInstances[j]["device-location"]["display-name"],
+                                               launchedInstances[j]["device-location"]["country"]
+                                               ])
+                elif launchedInstances[j]["device-location"]["country"] == "Russia":
+                    mappedFrameNumLocationRussia.append([completedJobs[i][0],
+                                               launchedInstances[j]["device-location"]["latitude"],
+                                               launchedInstances[j]["device-location"]["longitude"],
+                                               launchedInstances[j]["device-location"]["display-name"],
+                                               launchedInstances[j]["device-location"]["country"]
+                                               ])
+                else:
+                    mappedFrameNumLocationOther.append([completedJobs[i][0],
+                                               launchedInstances[j]["device-location"]["latitude"],
+                                               launchedInstances[j]["device-location"]["longitude"],
+                                               launchedInstances[j]["device-location"]["display-name"],
+                                               launchedInstances[j]["device-location"]["country"]
+                                               ])
+                
+
 
     print("\nLocations:")
     for i in range(0,len(mappedFrameNumLocation)):
@@ -394,7 +421,9 @@ if __name__ == "__main__":
                 # print("%s" % CountryData[i][1][j])
                 # plt.plot(np.transpose(CountryData[i][1][j])[0],np.transpose(CountryData[i][1][j])[1])        
                 ax.add_artist(plt.Polygon(CountryData[i][1][j],edgecolor='None', facecolor=(colorValue,colorValue,colorValue),aa=True))           
-    plt.plot(getColumn(mappedFrameNumLocation,2),getColumn(mappedFrameNumLocation,1),linestyle='', color=(0.0, 0.5, 1.0),marker='o',markersize=15)
+    plt.plot(getColumn(mappedFrameNumLocationUnitedStates,2),getColumn(mappedFrameNumLocationUnitedStates,1),linestyle='', color=(0.0, 0.5, 1.0),marker='o',markersize=15)
+    plt.plot(getColumn(mappedFrameNumLocationRussia,2),getColumn(mappedFrameNumLocationRussia,1),linestyle='', color=(1.0, 0.0, 0.0),marker='o',markersize=15)
+    plt.plot(getColumn(mappedFrameNumLocationOther,2),getColumn(mappedFrameNumLocationOther,1),linestyle='', color=(0.0, 0.9, 0.0),marker='o',markersize=15)
     plt.xlim([-180,180])
     plt.ylim([-60,90])
     #plt.show()
