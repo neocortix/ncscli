@@ -19,7 +19,7 @@ class locustFrameProcessor(batchRunner.frameProcessor):
         #return 'worker_%03d_requests.csv' % frameNum
 
     def frameCmd( self, frameNum ):
-        usersPerWorker = 20  # number of simulated users per worker instance
+        usersPerWorker = 6  # number of simulated users per worker instance
         rampUpRate = 5  # number of simulated users to spawn per second
         duration = 60  # number of seconds to run the test
         csvSpec = '--csv ~/worker_%03d' % frameNum
@@ -49,7 +49,7 @@ try:
         encryptFiles=False,
         timeLimit = 14*60,
         frameTimeLimit = 240,
-        filter = '{"dpr": ">=24"}',
+        filter = '{"dpr": ">=48","ram:":">=2800000000","app-version": ">=2.1.11"}',
         outDataDir = outDataDir,
         startFrame = 1,
         endFrame = 5,
