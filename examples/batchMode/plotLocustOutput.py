@@ -100,8 +100,6 @@ if __name__ == "__main__":
 
     logger.info( 'plotting data in directory %s', os.path.realpath(args.dataDirPath)  )
 
-    #mpl.rcParams.update({'font.size': 28})
-    #mpl.rcParams['axes.linewidth'] = 2 #set the value globally
     
     outputDir = args.dataDirPath
     launchedJsonFilePath = outputDir + "/recruitLaunched.json"
@@ -395,7 +393,10 @@ if __name__ == "__main__":
             CountrySphericalData.append([countryString,coordinateSphericalList])
 
     figSize1 = (19.2, 10.8)
-    fontFactor = .5
+    fontFactor = 0.75
+    mpl.rcParams.update({'font.size': 22})
+    mpl.rcParams['axes.linewidth'] = 2 #set the value globally
+    markerSizeValue = 10
 
     # plot world map
     fig = plt.figure(3, figsize=figSize1)
@@ -417,16 +418,15 @@ if __name__ == "__main__":
                 # print("%s" % CountryData[i][1][j])
                 # plt.plot(np.transpose(CountryData[i][1][j])[0],np.transpose(CountryData[i][1][j])[1])        
                 ax.add_artist(plt.Polygon(CountryData[i][1][j],edgecolor='None', facecolor=(colorValue,colorValue,colorValue),aa=True))           
-    # plt.plot(getColumn(mappedFrameNumLocation,2),getColumn(mappedFrameNumLocation,1),linestyle='', color=(0.0, 0.5, 1.0),marker='o',markersize=15)
-    plt.plot(getColumn(mappedFrameNumLocationUnitedStates,2),getColumn(mappedFrameNumLocationUnitedStates,1),linestyle='', color=(0.0, 0.5, 1.0),marker='o',markersize=15)
-    plt.plot(getColumn(mappedFrameNumLocationRussia,2),getColumn(mappedFrameNumLocationRussia,1),linestyle='', color=(1.0, 0.0, 0.0),marker='o',markersize=15)
-    plt.plot(getColumn(mappedFrameNumLocationOther,2),getColumn(mappedFrameNumLocationOther,1),linestyle='', color=(0.0, 0.9, 0.0),marker='o',markersize=15)
+    plt.plot(getColumn(mappedFrameNumLocationUnitedStates,2),getColumn(mappedFrameNumLocationUnitedStates,1),linestyle='', color=(0.0, 0.5, 1.0),marker='o',markersize=markerSizeValue)
+    plt.plot(getColumn(mappedFrameNumLocationRussia,2),getColumn(mappedFrameNumLocationRussia,1),linestyle='', color=(1.0, 0.0, 0.0),marker='o',markersize=markerSizeValue)
+    plt.plot(getColumn(mappedFrameNumLocationOther,2),getColumn(mappedFrameNumLocationOther,1),linestyle='', color=(0.0, 0.9, 0.0),marker='o',markersize=markerSizeValue)
     plt.xlim([-180,180])
     plt.ylim([-60,90])
     #plt.show()
-    plt.savefig( outputDir+'/worldMap.png' )
+    plt.savefig( outputDir+'/worldMap.png', bbox_inches='tight')
 
-    plotMarkerSize = 4
+    plotMarkerSize = 3
     plt.figure(10, figsize=figSize1)
     plt.plot(startRelTimesAndMSPRsUnitedStates[0],startRelTimesAndMSPRsUnitedStates[1], linestyle='', color=(0.0, 0.6, 1.0),marker='o',markersize=plotMarkerSize)
     plt.plot(startRelTimesAndMSPRsRussia[0],startRelTimesAndMSPRsRussia[1], linestyle='', color=(1.0, 0.0, 0.0),marker='o',markersize=plotMarkerSize)
