@@ -6,6 +6,9 @@ import os
 import re
 import subprocess
 
+import pytest
+
+
 def check_batchRunner_results( jlogFilePath ):
     with open( jlogFilePath, 'r') as inFile:
         for line in inFile:
@@ -50,7 +53,8 @@ def test_runBatchBinary():
     if not os.path.isfile('helloFrame_aarch64'):
         # check if the C compiler is available
         rc = subprocess.call( 'hash aarch64-linux-gnu-gcc', shell=True )
-        assert rc==0, 'C compiler not found (for building helloFrame_aarch64)'
+        if rc != 0:
+            pytest.xfail( 'C compiler not found (for building helloFrame_aarch64)' )
         # build the ARM executable
         rc = subprocess.call( ['aarch64-linux-gnu-gcc', '-o', 'helloFrame_aarch64', 'helloFrame.c'] )
         assert rc==0, 'could not build helloFrameGo_aarch64'
@@ -62,7 +66,8 @@ def test_runBatchBinaryGo():
     if not os.path.isfile('helloFrameGo_aarch64'):
         # check if the go compiler is available
         rc = subprocess.call( 'hash go', shell=True )
-        assert rc==0, '"go" compiler not found (for building helloFrameGo_aarch64)'
+        if rc != 0:
+            pytest.xfail( '"go" compiler not found (for building helloFrameGo_aarch64)' )
         # build the ARM executable
         rc = subprocess.call( 'GOARCH=arm64 go build -o helloFrameGo_aarch64 helloFrameGo.go', shell=True )
         assert rc==0, 'could not build helloFrame_aarch64'
