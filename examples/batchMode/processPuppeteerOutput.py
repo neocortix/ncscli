@@ -10,6 +10,7 @@ import logging
 import math
 import os
 import sys
+import warnings
 # third-party modules
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -96,6 +97,9 @@ if __name__ == "__main__":
     logDateFmt = '%Y/%m/%d %H:%M:%S'
     formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
     logging.basicConfig(format=logFmt, datefmt=logDateFmt)
+
+    # treat numpy deprecations as errors
+    warnings.filterwarnings('error', category=np.VisibleDeprecationWarning)
 
     ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( '--dataDirPath', required=True, help='the path to to directory for input and output data' )
@@ -249,17 +253,17 @@ if __name__ == "__main__":
     # ax.set_aspect('equal')
     # for i in range(0,20) :
     colorValue = 0.85
-    for i in range(0,len(CountryData)) :
-        if len(np.shape(CountryData[i][1]))==2 :
-            # plt.plot(np.transpose(CountryData[i][1])[0],np.transpose(CountryData[i][1])[1])
-            ax.add_artist(plt.Polygon(CountryData[i][1],edgecolor='None', facecolor=(colorValue,colorValue,colorValue),aa=True))           
+    edgeColor = None  # (colorValue*.9, colorValue*.9, colorValue*.9)
 
-        else :      
-            # print("%s       %s" % (CountryData[i][0],np.shape(CountryData[i][1])[0]))
-            for j in range(0,np.shape(CountryData[i][1])[0]) :
-                # print("%s" % CountryData[i][1][j])
-                # plt.plot(np.transpose(CountryData[i][1][j])[0],np.transpose(CountryData[i][1][j])[1])        
-                ax.add_artist(plt.Polygon(CountryData[i][1][j],edgecolor='None', facecolor=(colorValue,colorValue,colorValue),aa=True))           
+    for i in range(0,len(CountryData)) :
+        if isinstance( CountryData[i][1], np.ndarray ):
+            ax.add_artist(plt.Polygon(CountryData[i][1],edgecolor=edgeColor,
+                facecolor=(colorValue,colorValue,colorValue),aa=True))
+        else :
+            for j in range(0,len(CountryData[i][1])) :
+                ax.add_artist(plt.Polygon(CountryData[i][1][j],edgecolor=edgeColor,
+                    facecolor=(colorValue,colorValue,colorValue),aa=True))
+
     plt.plot(getColumn(mappedFrameNumLocationUnitedStates,2),getColumn(mappedFrameNumLocationUnitedStates,1),linestyle='', color=(0.0, 0.5, 1.0),marker='o',markersize=markerSizeValue)
     plt.plot(getColumn(mappedFrameNumLocationRussia,2),getColumn(mappedFrameNumLocationRussia,1),linestyle='', color=(1.0, 0.0, 0.0),marker='o',markersize=markerSizeValue)
     plt.plot(getColumn(mappedFrameNumLocationOther,2),getColumn(mappedFrameNumLocationOther,1),linestyle='', color=(0.0, 0.9, 0.0),marker='o',markersize=markerSizeValue)
