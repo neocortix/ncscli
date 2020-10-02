@@ -1,0 +1,45 @@
+
+# This workflow will install Python dependencies, run tests at least one Python version
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+
+name: Python package
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.7]
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v2
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 pytest
+        pip install requests>=2.12.4, asyncssh>=1.16.1, matplotlib
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+    - name: Test with pytest
+      env:
+        NCS_AUTH_TOKEN: ${{ secrets.NCS_AUTH_TOKEN }}
+      run: |
+        ssh-keygen -q -f ~/.ssh/id_rsa -t rsa -N ''
+        export PYTHONPATH=$PWD
+        export PATH=$PWD'/ncscli':$PATH
+        cd examples/batchMode
+        ./pytestQuick.sh
+    - name: Upload output data as artifacts
+      uses: actions/upload-artifact@v2
+      with:
+        name: batchExamples-data-${{ matrix.python-version }}
+        path: examples/batchMode/data
+      # Use always() to always run this step to publish test results when there are test failures
+      if: ${{ always() }}
