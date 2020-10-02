@@ -4,6 +4,7 @@ import glob
 import json
 import os
 import re
+import sys
 import subprocess
 
 import pytest
@@ -30,6 +31,8 @@ def check_batchRunner_example( exampleName, frameFilePattern=None ):
     binPath = './' + exampleName + '.py'
     proc = subprocess.run( [binPath], stderr=subprocess.PIPE )
     rc = proc.returncode
+    if rc:
+        print( proc.stderr.decode('utf-8'), file=sys.stderr )
     assert rc==0, exampleName+' returned non-zero rc'
     stderr = proc.stderr.decode('utf-8')
     assert 'args.outDataDir' in stderr, 'no args.outDataDir in stderr'
