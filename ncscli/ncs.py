@@ -198,7 +198,7 @@ def deleteSshClientKey( authToken, keyName, maxRetries=20 ):
 
 def launchScInstancesAsync( authToken, encryptFiles, numReq=1,
         regions=[], abis=[], sshClientKeyName=None, jsonFilter=None,
-        jobId=None, okToContinueFunc=None ):
+        jobId=None, okToContinueFunc=None, maxRetries=20 ):
     def shouldBreak():
         if okToContinueFunc and not okToContinueFunc():
             #logger.warning( 'not okToContinue')
@@ -248,11 +248,21 @@ def launchScInstancesAsync( authToken, encryptFiles, numReq=1,
     #logger.info( 'posting with auth %s', authToken )
     try:
         resp = requests.post( url, headers=headers, data=reqDataStr )
-    except requests.ConnectionError:
-        #TODO improve exception handling to enable more retries when appropriate
-        logger.warning( 'got ConnectionError, retrying')
+    except requests.ConnectionError as exc:
+        wouldRetry = True
+        logger.warning( 'got ConnectionError from post (%s) %s', type(exc), exc )
+    else:
+        wouldRetry = False
+    if wouldRetry and maxRetries > 0:
         time.sleep( 10 )
-        resp = requests.post( url, headers=headers, data=reqDataStr )
+        logger.info( 'retrying post (up to %d retries)', maxRetries )
+        return launchScInstancesAsync( authToken, encryptFiles, numReq=numReq,
+            regions=regions, abis=abis, sshClientKeyName=sshClientKeyName, jsonFilter=jsonFilter,
+            jobId=jobId, okToContinueFunc=okToContinueFunc, maxRetries=maxRetries-1 )
+    elif wouldRetry:
+        # giving up
+        logger.error( 'could not post within maximum retries' )
+        return {'serverError': 503, 'reqId': reqId}  # "service unavailable", but maybe should be different
 
     #logger.info( 'response code %s', resp.status_code )
     if (resp.status_code < 200) or (resp.status_code >= 300):
@@ -269,7 +279,7 @@ def launchScInstancesAsync( authToken, encryptFiles, numReq=1,
         jobId = resp.json()['id']
         try:
             logger.debug( 'getting instance list for job %s', jobId )
-            resp2 = queryNcsSc( 'jobs/'+jobId, authToken, maxRetries=20 )
+            resp2 = queryNcsSc( 'jobs/'+jobId, authToken, maxRetries=maxRetries )
         except Exception as exc:
             # the caller must be responsible for killing these
             logger.warning( 'exception getting list of instances (%s) "%s"',
