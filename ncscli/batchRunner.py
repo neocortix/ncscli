@@ -786,7 +786,7 @@ def renderFramesOnInstance( inst ):
                         frameDetails[ 'progress' ] = frameProgress
                         saveProgress()
                     if ((deadline - time.time() < timeLimit/2)) and frameProgress < .5:
-                        logger.warning( 'frame %d on %s seems slow', frameNum, abbrevIid )
+                        #logger.warning( 'frame %d on %s seems slow', frameNum, abbrevIid )
                         logFrameState( frameNum, 'seemsSlow', iid, frameProgress )
                 else:
                     if proc.returncode == 0:
@@ -803,7 +803,7 @@ def renderFramesOnInstance( inst ):
                 time.sleep(10)
             returnCode = proc.returncode if proc.returncode != None else 124
             if returnCode:
-                logger.warning( 'computeFailed for frame %d on %s', frameNum, iid )
+                logger.warning( 'computeFailed with rc %d for frame %d on %s', returnCode, frameNum, iid )
                 logFrameState( frameNum, 'computeFailed', iid, returnCode )
                 frameDetails[ 'progress' ] = 0
                 g_.framesToDo.append( frameNum )
