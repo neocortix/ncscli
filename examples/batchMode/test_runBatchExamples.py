@@ -91,6 +91,10 @@ def test_runBatchBlender():
 def test_runBatchJMeter():
     check_batchRunner_example( 'runBatchJMeter', 'TestPlan_results_*.csv' )
 
+@pytest.mark.xfail
+def test_runBatchK6():
+    check_batchRunner_example( 'runBatchK6', 'worker_*.csv' )
+
 def test_runBatchLoadtest():
     check_batchRunner_example( 'runBatchLoadtest', 'worker_*.csv' )
 
