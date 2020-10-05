@@ -36,6 +36,9 @@ logging.basicConfig(format=logFmt, datefmt=logDateFmt)
 dateTimeTag = datetime.datetime.now().strftime( '%Y-%m-%d_%H%M%S' )
 outDataDir = 'data/k6_' + dateTimeTag
 
+if not os.path.isfile( 'k6Worker/k6' ):
+    logger.error( 'the k6 Arm-64 binary was not found, you may need to build it using "go get"' )
+    sys.exit( 1)
 try:
     rc = batchRunner.runBatch(
         frameProcessor = k6FrameProcessor(),
