@@ -17,7 +17,7 @@ def check_batchRunner_results( jlogFilePath ):
         lastLine = line
     #print( 'the last line was', lastLine )
     decoded = json.loads( lastLine )
-    print( 'decoded last line:', decoded )
+    #print( 'decoded last line:', decoded )
 
     assert decoded.get( 'type' ) == 'operation', 'not operation'
     assert 'args' in decoded, 'no args'
@@ -91,8 +91,20 @@ def test_runBatchBlender():
 def test_runBatchJMeter():
     check_batchRunner_example( 'runBatchJMeter', 'TestPlan_results_*.csv' )
 
-@pytest.mark.xfail
 def test_runBatchK6():
+    # check if the built ARM executable already exists
+    if not os.path.isfile('k6Worker/k6'):
+        # check if the go compiler is available
+        rc = subprocess.call( 'hash go', shell=True )
+        if rc != 0:
+            pytest.xfail( '"go" compiler not found (for building k6Worker/k6)' )
+        # build the ARM executable
+        rc = subprocess.call( 'GOARCH=arm64 GOPATH=$PWD/go go get github.com/loadimpact/k6', shell=True )
+        assert rc==0, 'could not build k6 for Arm64'
+        # copy ARM executable to k6worker dir
+        rc = subprocess.call( 'cp -p go/bin/linux_arm64/k6 k6Worker', shell=True )
+        assert rc==0, 'could not copy ARM executable to k6worker dir'
+
     check_batchRunner_example( 'runBatchK6', 'worker_*.csv' )
 
 def test_runBatchLoadtest():
