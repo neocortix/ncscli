@@ -20,10 +20,10 @@ class locustFrameProcessor(batchRunner.frameProcessor):
 
     def frameCmd( self, frameNum ):
         usersPerWorker = 6  # number of simulated users per worker instance
-        rampUpRate = 5  # number of simulated users to spawn per second
-        duration = 60  # number of seconds to run the test
+        rampUpRate = 1  # number of simulated users to spawn per second (can be fractional)
+        duration = 60  # number of seconds to run the test (must be integer)
         csvSpec = '--csv ~/worker_%03d' % frameNum
-        cmd = 'cd locustWorker && python3 -u ./runLocustWorker.py --host=https://loadtest-target.neocortix.com %s --exit-code-on-error 0 --no-web -c %d -r %d --run-time %d' % (
+        cmd = 'cd locustWorker && python3 -u ./runLocustWorker.py --host=https://loadtest-target.neocortix.com %s --only-summary --exit-code-on-error 0 --no-web -c %d -r %f --run-time %d' % (
             csvSpec, usersPerWorker, rampUpRate, duration
         )
         return cmd
@@ -54,6 +54,7 @@ try:
         startFrame = 1,
         endFrame = 5,
         nWorkers = 6,
+        limitOneFramePerWorker = True,
         autoscaleMax = 2
     )
     if os.path.isfile( outDataDir +'/recruitLaunched.json' ):
