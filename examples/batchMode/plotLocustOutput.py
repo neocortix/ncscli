@@ -210,62 +210,41 @@ if __name__ == "__main__":
                 if frameNum == mappedFrameNumLocation[j][0]:
                     jIndex = j
             responseData.append([frameNum,minStartTimeForDevice,startTimes,elapsedTimes,mappedFrameNumLocation[jIndex]])
-    globalMinStartTime = min(getColumn(responseData,1))
+    if not responseData:
+        sys.exit( 'no plottable data was found' )
 
-    if False:
-        for i in range(0,len(responseData)):
-            print("%d  %.3f  %s" %(responseData[i][0],responseData[i][1],responseData[i][4]))
-        print(globalMinStartTime)
-
+    # first, time-shift all startTimes by subtracting the minStartTime for each device
+    # and compute the maxStartTime (i.e. test duration) for each device
     relativeResponseData = []
     for i in range(0,len(responseData)):
         relativeStartTimes = []
         for ii in range(0,len(responseData[i][2])):
-            difference = responseData[i][2][ii]-globalMinStartTime
+            # difference = responseData[i][2][ii]-globalMinStartTime
             # if i==2 and ii<3700 and difference > 500:
             #     print("i = %d   ii = %d   difference = %f    data = %f" % (i,ii,difference,responseData[i][2][ii] ))
-            relativeStartTimes.append(responseData[i][2][ii]-globalMinStartTime) 
-        relativeResponseData.append([responseData[i][0],relativeStartTimes,responseData[i][3],responseData[i][4]])
+            # relativeStartTimes.append(responseData[i][2][ii]-globalMinStartTime)
+            relativeStartTimes.append(responseData[i][2][ii]-responseData[i][1])
+        maxStartTime = max(relativeStartTimes)
+        relativeResponseData.append([responseData[i][0],relativeStartTimes,responseData[i][3],responseData[i][4],maxStartTime])
 
-    # get first start times
-    firstStartTimes = []
-    for i in range(0,len(relativeResponseData)):
-        firstStartTimes.append(relativeResponseData[i][1][0])
+    # compute median maxStartTime
+    medianMaxStartTime = np.median(getColumn(relativeResponseData,4))
+    print("medianMaxStartTime = %f" % medianMaxStartTime)
 
-    minFirstStartTimes = min(firstStartTimes)
-    for i in range(0,len(relativeResponseData)):
-        if relativeResponseData[i][1][0] == minFirstStartTimes:
-            iIndex = i
-
-    sortedFirstStartTimes = np.sort(firstStartTimes)    
-    print("First Start Times = %s" % sortedFirstStartTimes)
-
-    if len(sortedFirstStartTimes)>1 and sortedFirstStartTimes[1] > 30:
-        # exclude first early record, it's an outlier
-        relativeResponseData2 = []
-        for i in range(0,len(relativeResponseData)):
-            if i != iIndex: 
-                relativeStartTimes2 = [(ii-sortedFirstStartTimes[1]) for ii in relativeResponseData[i][1]]
-                relativeResponseData2.append([relativeResponseData[i][0],relativeStartTimes2,relativeResponseData[i][2],relativeResponseData[i][3]])
-    else:
-        relativeResponseData2 = relativeResponseData    
-
-
-    # remove device records which started too late
-    # print(relativeResponseData[0])    
+    # remove device records which ran too long
+    # print(relativeResponseData[0])
     culledRelativeResponseData = []
     cullResponseData = True
-    startDelayThreshold = 30  # in seconds
-    maxAllowedDuration = 600  # in seconds
-    for i in range(0,len(relativeResponseData2)):
+    excessDurationThreshold = 30  # in seconds
+    for i in range(0,len(relativeResponseData)):
         if cullResponseData:
-            if relativeResponseData2[i][1][0] < startDelayThreshold and max(relativeResponseData2[i][1])<maxAllowedDuration:
+            # print("i = %d   min, max = %f  %f" % (i,min(relativeResponseData[i][1]),max(relativeResponseData[i][1])))
+            if relativeResponseData[i][4]<(medianMaxStartTime+excessDurationThreshold):
                 # print("min, max = %f  %f" % (min(relativeResponseData2[i][1]),max(relativeResponseData2[i][1])))
-                culledRelativeResponseData.append(relativeResponseData2[i])
+                culledRelativeResponseData.append(relativeResponseData[i])
         else:
-            culledRelativeResponseData.append(relativeResponseData2[i])
-            
-            
+            culledRelativeResponseData.append(relativeResponseData[i])
+
     print("Number of devices = %d" % len(relativeResponseData))
     print("Culled Number of devices = %d" %len(culledRelativeResponseData))
     culledLocations = getColumn(getColumn(culledRelativeResponseData,3),3)
