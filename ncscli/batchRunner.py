@@ -79,31 +79,14 @@ class frameProcessor(object):
 
 g_.frameProcessor = frameProcessor()
 
-useClass = True
-if useClass:
-    def getInstallerCmd():
-        return g_.frameProcessor.installerCmd()
+def getInstallerCmd():
+    return g_.frameProcessor.installerCmd()
 
-    def getFrameOutFileName( frameNum ):
-        return g_.frameProcessor.frameOutFileName( frameNum )
+def getFrameOutFileName( frameNum ):
+    return g_.frameProcessor.frameOutFileName( frameNum )
 
-    def getFrameCmd( frameNum ):
-        return g_.frameProcessor.frameCmd( frameNum )
-else:
-    def getInstallerCmd():
-        return 'echo noInstall'
-
-    def getFrameOutFileName( frameNum ):
-        return 'frame_%d.out' % (frameNum)
-
-    def getFrameCmd( frameNum ):
-        targetHost = 'google.com'
-        nPings = 3
-        timeLimit = 60
-        interval = 5
-        pingCmd = 'ping %s -U -D -c %s -w %f -i %f > %s' \
-            % (targetHost, nPings, timeLimit,  interval, getFrameOutFileName(frameNum) )
-        return pingCmd
+def getFrameCmd( frameNum ):
+    return g_.frameProcessor.frameCmd( frameNum )
 
 class SigTerm(BaseException):
     #logger.warning( 'unsupported SigTerm exception created')
@@ -611,7 +594,7 @@ def scpFromRemote( srcFileName, destFilePath, inst, timeLimit=120 ):
     user = sshSpecs['user']
 
     destFilePathFull = os.path.realpath(os.path.abspath( destFilePath ))
-    cmd = [ 'scp', '-P', str(port), user+'@'+host+':~/'+srcFileName,
+    cmd = [ 'scp', '-r', '-P', str(port), user+'@'+host+':~/'+srcFileName,
         destFilePathFull
     ]
     logger.debug( 'retrieving from %s', inst['instanceId'] )
@@ -919,18 +902,9 @@ def runBatch( **kwargs ):
     batchArgs = argparse.Namespace( **argDict )
     #batchArgs = types.SimpleNamespace( **argDict )  # another way, but not iterable (no "in")
 
-    if 'frameProcessor' in batchArgs:
-        g_.frameProcessor = batchArgs.frameProcessor
-    else:
-        logger.warning( 'NO frameProcessor given' )
-
     global args
     args = batchArgs
     #logger.debug('args: %s', args)
-    if args.commonInFilePath and not os.path.isfile( args.commonInFilePath ) and not os.path.isdir( args.commonInFilePath ):
-        logger.error( 'file not found: %s', args.commonInFilePath )
-        return 1
-
     g_.dataDirPath = args.outDataDir
     logger.info( 'args.outDataDir: %s', args.outDataDir )
     os.makedirs( g_.dataDirPath, exist_ok=True )
@@ -938,11 +912,6 @@ def runBatch( **kwargs ):
     signal.signal( signal.SIGTERM, sigtermHandler )
     myPid = os.getpid()
     logger.debug('procID: %s', myPid)
-
-    if args.frameTimeLimit > args.timeLimit:
-        logger.warning('given frameTimeLimit (%d) > given job timeLimit; using %d for both',
-            args.frameTimeLimit, args.timeLimit )
-
 
     g_.progressFilePath = g_.dataDirPath + '/progress.json'
     settingsJsonFilePath = g_.dataDirPath + '/settings.json'
@@ -958,6 +927,25 @@ def runBatch( **kwargs ):
     #del argsToSave['frameProcessor']
     argsToSave.pop('frameProcessor', None)
     logOperation( 'starting', argsToSave, '<master>')
+
+    if 'frameProcessor' in batchArgs:
+        g_.frameProcessor = batchArgs.frameProcessor
+    else:
+        logger.error( 'no frameProcessor given' )
+        return 1
+
+    if args.frameTimeLimit > args.timeLimit:
+        logger.warning('given frameTimeLimit (%d) > given job timeLimit; using %d for both',
+            args.frameTimeLimit, args.timeLimit )
+
+    if args.commonInFilePath and not os.path.isfile( args.commonInFilePath ) and not os.path.isdir( args.commonInFilePath ):
+        logger.error( 'file not found: %s', args.commonInFilePath )
+        return 1
+
+    if args.endFrame < args.startFrame:
+        logger.error( 'specified endFrame (%d) is less than startFrame (%d)', args.endFrame, args.startFrame )
+        return 1
+
 
     startTime = time.time()
     g_.deadline = startTime + args.timeLimit
