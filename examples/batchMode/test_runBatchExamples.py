@@ -88,6 +88,9 @@ def test_runBatchBinaryGo():
 def test_runBatchBlender():
     check_batchRunner_example( 'runBatchBlender', 'rendered_frame_*.png' )
 
+def test_runBatchGatling():
+    check_batchRunner_example( 'runBatchGatling', 'gatlingResults_*' )
+
 def test_runBatchJMeter():
     check_batchRunner_example( 'runBatchJMeter', 'TestPlan_results_*.csv' )
 
