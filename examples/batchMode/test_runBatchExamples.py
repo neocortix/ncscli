@@ -96,7 +96,7 @@ def test_runBatchJMeter():
 
 def test_runBatchK6():
     # check if the built ARM executable already exists
-    if not os.path.isfile('k6Worker/k6'):
+    if not os.path.isfile('k6Worker/k6.tar.gz'):
         # check if the go compiler is available
         rc = subprocess.call( 'hash go', shell=True )
         if rc != 0:
@@ -107,6 +107,9 @@ def test_runBatchK6():
         # copy ARM executable to k6worker dir
         rc = subprocess.call( 'cp -p go/bin/linux_arm64/k6 k6Worker', shell=True )
         assert rc==0, 'could not copy ARM executable to k6worker dir'
+        # compress the executable
+        rc = subprocess.call( 'tar -czf k6Worker/k6.tar.gz k6Worker/k6 --remove-files', shell=True )
+        assert rc==0, 'could not compress to k6Worker/k6.tar.gz'
 
     check_batchRunner_example( 'runBatchK6', 'worker_*.csv' )
 
