@@ -10,3 +10,4 @@ pytest -v --rootdir . --junitxml data/pytest.xml -o 'junit_family = xunit2' \
 # pretty-print the xml summary, if xmllint is installed
 if hash xmllint 2>/dev/null; then
     xmllint --format data/pytest.xml
+fi
