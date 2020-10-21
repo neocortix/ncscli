@@ -80,13 +80,25 @@ class frameProcessor(object):
 g_.frameProcessor = frameProcessor()
 
 def getInstallerCmd():
-    return g_.frameProcessor.installerCmd()
+    try:
+        return g_.frameProcessor.installerCmd()
+    except Exception as exc:
+        logger.warning( 'the frameProcessor installerCmd() raised exception (%s) %s', type(exc), exc )
+        return None
 
 def getFrameOutFileName( frameNum ):
-    return g_.frameProcessor.frameOutFileName( frameNum )
+    try:
+        return g_.frameProcessor.frameOutFileName( frameNum )
+    except Exception as exc:
+        logger.warning( 'the frameProcessor frameOutFileName() raised exception (%s) %s', type(exc), exc )
+        return None
 
 def getFrameCmd( frameNum ):
-    return g_.frameProcessor.frameCmd( frameNum )
+    try:
+        return g_.frameProcessor.frameCmd( frameNum )
+    except Exception as exc:
+        logger.warning( 'the frameProcessor frameCmd() raised exception (%s) %s', type(exc), exc )
+        return None
 
 class SigTerm(BaseException):
     #logger.warning( 'unsupported SigTerm exception created')
@@ -649,6 +661,7 @@ def renderFramesOnInstance( inst ):
     abbrevIid = iid[0:16]
     g_.workingInstances.append( iid )
     saveProgress()
+    logLevel = logger.getEffectiveLevel()
     logger.info( 'would compute frames on instance %s', abbrevIid )
 
     '''
@@ -692,8 +705,9 @@ def renderFramesOnInstance( inst ):
             elif '| Synchronizing object |' in line:
                 pass
             elif line.strip():
-                print( '<stdout>', abbrevIid, line.strip(), file=sys.stderr )
                 logStdout( line.rstrip(), iid )
+                if logLevel <= logging.INFO:
+                    print( '<stdout>', abbrevIid, line.strip(), file=sys.stderr )
     nFailures = 0    
     while len( g_.framesFinished) < g_.nFramesWanted:
         if sigtermSignaled():
@@ -734,81 +748,81 @@ def renderFramesOnInstance( inst ):
 
         outFileName = getFrameOutFileName( frameNum )
         returnCode = None
-        cmd = getFrameCmd( frameNum )
-
-        logger.debug( 'commanding %s', cmd )
-        sshSpecs = inst['ssh']
-
         curFrameRendered = False
-        logFrameState( frameNum, 'starting', iid )
-        frameStartDateTime = datetime.datetime.now(datetime.timezone.utc)
-        with subprocess.Popen(['ssh',
-                            '-p', str(sshSpecs['port']),
-                            '-o', 'ServerAliveInterval=360',
-                            '-o', 'ServerAliveCountMax=3',
-                            sshSpecs['user'] + '@' + sshSpecs['host'], cmd],
-                            encoding='utf8',
-                            stdout=subprocess.PIPE,  # subprocess.PIPE subprocess.DEVNULL
-                            stderr=subprocess.PIPE) as proc:
-            frameProgress = 0
-            frameProgressReported = 0
-            deadline = min( g_.deadline, time.time() + timeLimit )
-            stdoutThr = threading.Thread(target=trackStdout, args=(proc,))
-            stdoutThr.start()
-            stderrThr = threading.Thread(target=trackStderr, args=(proc,))
-            stderrThr.start()
-            while time.time() < deadline:
-                proc.poll() # sets proc.returncode
-                if proc.returncode == None:
-                    if frameProgress > min( .99, frameProgressReported + .01 ):
-                        logger.info( 'frame %d on %s is %.1f %% done', frameNum, abbrevIid, frameProgress*100 )
-                        frameProgressReported = frameProgress
-                        rightNow = datetime.datetime.now(datetime.timezone.utc)
-                        frameDetails[ 'lastDateTime' ] = rightNow.isoformat()
-                        frameDetails[ 'elapsedTime' ] = (rightNow - frameStartDateTime).total_seconds()
-                        frameDetails[ 'progress' ] = frameProgress
-                        saveProgress()
-                    if ((deadline - time.time() < timeLimit/2)) and frameProgress < .5:
-                        #logger.warning( 'frame %d on %s seems slow', frameNum, abbrevIid )
-                        logFrameState( frameNum, 'seemsSlow', iid, frameProgress )
-                else:
-                    if proc.returncode == 0:
-                        logger.info( 'frame %d on %s succeeded', frameNum, abbrevIid )
-                        curFrameRendered = True
-                    else:
-                        logger.warning( 'instance %s gave returnCode %d', abbrevIid, proc.returncode )
-                    break
-                if sigtermSignaled():
-                    break
-                if g_.interrupted:
-                    logger.info( 'exiting polling loop because interrupted' )
-                    break
-                time.sleep(10)
-            returnCode = proc.returncode if proc.returncode != None else 124
-            if returnCode:
-                logger.warning( 'computeFailed with rc %d for frame %d on %s', returnCode, frameNum, iid )
-                logFrameState( frameNum, 'computeFailed', iid, returnCode )
-                frameDetails[ 'progress' ] = 0
-                g_.framesToDo.append( frameNum )
-                saveProgress()
-                time.sleep(10) # maybe we should retire this instance; at least, making it sleep so it is less competitive
-            else:
-                logFrameState( frameNum, 'computed', iid )
-                #g_.framesFinished.append( frameNum )  # too soon
+        cmd = getFrameCmd( frameNum )
+        if cmd:
+            logger.debug( 'commanding %s', cmd )
+            sshSpecs = inst['ssh']
 
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-                if proc.returncode:
-                    logger.warning( 'ssh return code %d', proc.returncode )
-            except subprocess.TimeoutExpired:
-                logger.warning( 'ssh did not terminate in time' )
-            stdoutThr.join()
-            stderrThr.join()
+            logFrameState( frameNum, 'starting', iid )
+            frameStartDateTime = datetime.datetime.now(datetime.timezone.utc)
+            with subprocess.Popen(['ssh',
+                                '-p', str(sshSpecs['port']),
+                                '-o', 'ServerAliveInterval=360',
+                                '-o', 'ServerAliveCountMax=3',
+                                sshSpecs['user'] + '@' + sshSpecs['host'], cmd],
+                                encoding='utf8',
+                                stdout=subprocess.PIPE,  # subprocess.PIPE subprocess.DEVNULL
+                                stderr=subprocess.PIPE) as proc:
+                frameProgress = 0
+                frameProgressReported = 0
+                deadline = min( g_.deadline, time.time() + timeLimit )
+                stdoutThr = threading.Thread(target=trackStdout, args=(proc,))
+                stdoutThr.start()
+                stderrThr = threading.Thread(target=trackStderr, args=(proc,))
+                stderrThr.start()
+                while time.time() < deadline:
+                    proc.poll() # sets proc.returncode
+                    if proc.returncode == None:
+                        if frameProgress > min( .99, frameProgressReported + .01 ):
+                            logger.info( 'frame %d on %s is %.1f %% done', frameNum, abbrevIid, frameProgress*100 )
+                            frameProgressReported = frameProgress
+                            rightNow = datetime.datetime.now(datetime.timezone.utc)
+                            frameDetails[ 'lastDateTime' ] = rightNow.isoformat()
+                            frameDetails[ 'elapsedTime' ] = (rightNow - frameStartDateTime).total_seconds()
+                            frameDetails[ 'progress' ] = frameProgress
+                            saveProgress()
+                        if ((deadline - time.time() < timeLimit/2)) and frameProgress < .5:
+                            #logger.warning( 'frame %d on %s seems slow', frameNum, abbrevIid )
+                            logFrameState( frameNum, 'seemsSlow', iid, frameProgress )
+                    else:
+                        if proc.returncode == 0:
+                            logger.info( 'frame %d on %s succeeded', frameNum, abbrevIid )
+                            curFrameRendered = True
+                        else:
+                            logger.warning( 'instance %s gave returnCode %d', abbrevIid, proc.returncode )
+                        break
+                    if sigtermSignaled():
+                        break
+                    if g_.interrupted:
+                        logger.info( 'exiting polling loop because interrupted' )
+                        break
+                    time.sleep(10)
+                returnCode = proc.returncode if proc.returncode != None else 124
+                if returnCode:
+                    logger.warning( 'computeFailed with rc %d for frame %d on %s', returnCode, frameNum, iid )
+                    logFrameState( frameNum, 'computeFailed', iid, returnCode )
+                    frameDetails[ 'progress' ] = 0
+                    g_.framesToDo.append( frameNum )
+                    saveProgress()
+                    time.sleep(10) # maybe we should retire this instance; at least, making it sleep so it is less competitive
+                else:
+                    logFrameState( frameNum, 'computed', iid )
+                    #g_.framesFinished.append( frameNum )  # too soon
+
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                    if proc.returncode:
+                        logger.warning( 'ssh return code %d', proc.returncode )
+                except subprocess.TimeoutExpired:
+                    logger.warning( 'ssh did not terminate in time' )
+                stdoutThr.join()
+                stderrThr.join()
         # may not need this logging here
-        if returnCode != 0:
-            logger.warning( 'remote returnCode %d for %s', returnCode, abbrevIid )
-        if curFrameRendered:
+        #if returnCode != 0:
+        #    logger.warning( 'remote returnCode %d for %s', returnCode, abbrevIid )
+        if curFrameRendered and outFileName:
             logFrameState( frameNum, 'retrieving', iid )
             (returnCode, stderr) = scpFromRemote( 
                 outFileName, g_.dataDirPath, inst
@@ -970,6 +984,9 @@ def runBatch( **kwargs ):
     if resp['statusCode'] == 403:
         logger.error( 'the given authToken was not accepted' )
         return 1
+    elif resp['statusCode'] not in range( 200, 300 ):
+        logger.error( 'service error (%d) while validating authToken' )
+        return 1
     g_.limitOneFramePerWorker = args.limitOneFramePerWorker
     g_.autoscaleMax = 1
     if not args.nWorkers:
@@ -1101,7 +1118,7 @@ def createArgumentParser():
         fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( '--commonInFilePath', help='a file to upload initially to all instances' )
     ap.add_argument( '--authToken', required=True, help='the NCS authorization token to use (required)' )
-    ap.add_argument( '--outDataDir', help='output data darectory', default='./aniData/' )
+    ap.add_argument( '--outDataDir', help='output data darectory', default='./data/' )
     ap.add_argument( '--encryptFiles', type=boolArg, default=True, help='whether to encrypt files on launched instances' )
     ap.add_argument( '--filter', help='json to filter instances for launch' )
     ap.add_argument( '--frameTimeLimit', type=int, default=8*60*60, help='amount of time (in seconds) allowed for each frame' )
