@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 sudo apt-get -qq update
-echo installing jdk
-sudo apt-get -qq install -y openjdk-11-jdk-headless > /dev/null
+#echo installing jdk
+#sudo apt-get -qq install -y openjdk-11-jdk-headless > /dev/null
 export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-arm64
 export PATH=$PATH:$JAVA_HOME/bin
 echo curling gatling
