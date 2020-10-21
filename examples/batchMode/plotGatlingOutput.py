@@ -184,6 +184,9 @@ if __name__ == "__main__":
         for row in rows:
             #print( 'considering row', row )
             if row['scope'] == 'REQUEST':  #  and row['which'] == 'request_1'
+                if not row.get( 'startTime'):
+                    logger.warning( 'no startTime in row of %s', inFilePath)
+                    continue
                 startTime = float(row['startTime'])/1000
                 endTime = float(row['endTime'])/1000
                 startTimes.append( startTime )
