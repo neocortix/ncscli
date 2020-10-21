@@ -36,8 +36,8 @@ class ncsSim extends Simulation {
 
   setUp( // 11
     //scn.inject(atOnceUsers(1)) // just one user
-    scn.inject( constantConcurrentUsers( 6 ) during (90 seconds ) )
-    //scn.inject( rampConcurrentUsers(1) to (6) during (45 seconds), constantConcurrentUsers( 6 ) during (45 seconds ) )
+    //scn.inject( constantConcurrentUsers( 6 ) during (90 seconds ) )
+    scn.inject( rampConcurrentUsers(1) to (6) during (45 seconds), constantConcurrentUsers( 6 ) during (45 seconds ) )
     //scn.inject( rampConcurrentUsers(1) to (6) during (360 seconds), constantConcurrentUsers( 6 ) during (30 seconds ) )
   ).protocols(httpProtocol) // 13
 }
