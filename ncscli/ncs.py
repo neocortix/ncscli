@@ -53,7 +53,7 @@ def ncscReqHeaders( authToken ):
         "X-Neocortix-Cloud-API-AuthToken": authToken
     }
 
-def queryNcsSc( urlTail, authToken, reqParams=None, maxRetries=20 ):
+def queryNcsSc( urlTail, authToken, reqParams=None, maxRetries=30 ):
     #if random.random() > .75:
     #    raise requests.exceptions.RequestException( 'simulated exception' )
     # set long timeouts for requests.get() as a tuple (connection timeout, read timeout) in seconds
@@ -73,6 +73,7 @@ def queryNcsSc( urlTail, authToken, reqParams=None, maxRetries=20 ):
         logger.warning( 'exception (%s) %s', type(exc), exc )
         if maxRetries > 0:
             time.sleep( 10 )
+            logger.info( 'retrying %s (up to %d retries)', url, maxRetries )
             return queryNcsSc( urlTail, authToken, reqParams, maxRetries-1 )
         else:
             return { 'content': {}, 'statusCode': 599 }
@@ -137,7 +138,7 @@ def listSshClientKeys( authToken ):
     else:
         return keys
 
-def uploadSshClientKey( authToken, keyName, keyContents, maxRetries=20 ):
+def uploadSshClientKey( authToken, keyName, keyContents, maxRetries=30 ):
     headers = ncscReqHeaders( authToken )
     reqData = {
         'title': keyName,
@@ -167,7 +168,7 @@ def uploadSshClientKey( authToken, keyName, keyContents, maxRetries=20 ):
         return 503  # "service unavailable", but maybe should be different if gotException
     return resp.status_code
 
-def deleteSshClientKey( authToken, keyName, maxRetries=20 ):
+def deleteSshClientKey( authToken, keyName, maxRetries=30 ):
     headers = ncscReqHeaders( authToken )
     reqData = {
         'title': keyName,
@@ -198,7 +199,7 @@ def deleteSshClientKey( authToken, keyName, maxRetries=20 ):
 
 def launchScInstancesAsync( authToken, encryptFiles, numReq=1,
         regions=[], abis=[], sshClientKeyName=None, jsonFilter=None,
-        jobId=None, okToContinueFunc=None, maxRetries=20 ):
+        jobId=None, okToContinueFunc=None, maxRetries=30 ):
     def shouldBreak():
         if okToContinueFunc and not okToContinueFunc():
             #logger.warning( 'not okToContinue')
