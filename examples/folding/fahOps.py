@@ -755,6 +755,12 @@ if __name__ == "__main__":
                                     )
                                 nFoundInfo += 1
         logger.info( 'got queueInfo from %d instances', nFoundInfo )
+        logger.info( 'downloading client.db from %d instances', len(reachables))
+        stepStatuses = tellInstances.tellInstances( reachables,
+            download='/var/lib/fahclient/work/client.db', downloadDestDir=dataDirPath+'/clientLogs', 
+            timeLimit=args.timeLimit, sshAgent=args.sshAgent,
+            stopOnSigterm=True, knownHostsOnly=False
+            )
         logger.info( 'downloading log.txt from %d instances', len(reachables))
         stepStatuses = tellInstances.tellInstances( reachables,
             download='/var/lib/fahclient/log.txt', downloadDestDir=dataDirPath+'/clientLogs', 
@@ -780,8 +786,8 @@ if __name__ == "__main__":
                 fileModDateTime = universalizeDateTime( fileModDateTime )
                 if fileModDateTime <= thresholdDateTime:
                     os.remove( inFilePath )
-                elif fileModDateTime <= newerThresholdDateTime:
-                    logger.warning( 'old fileModDateTime for %s (%s)', logDir, fileModDateTime )
+                #elif fileModDateTime <= newerThresholdDateTime:
+                #    logger.warning( 'old fileModDateTime for %s (%s)', logDir, fileModDateTime )
         
         # ingest all new or updated client logs
         loggedCollNames = db.list_collection_names(
@@ -809,7 +815,7 @@ if __name__ == "__main__":
                         # for safety, ingest to a temp collection and then rename (with replace) when done
                         ingestFahLog( logFile, db['clientLog_temp'] )
                         db['clientLog_temp'].rename( collName, dropTarget=True )
-                        logger.info( 'ingested %s', collName )
+                        #logger.debug( 'ingested %s', collName )
                 except Exception as exc:
                     logger.warning( 'exception (%s) ingesting %s', type(exc), inFilePath, exc_info=False )
     elif args.action == 'terminateBad':
