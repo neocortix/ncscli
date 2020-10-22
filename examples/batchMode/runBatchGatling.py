@@ -18,9 +18,11 @@ class gatlingFrameProcessor(batchRunner.frameProcessor):
         return 'gatlingResults_%03d/' % frameNum
 
     def frameCmd( self, frameNum ):
-        # you can modify the gatlingWorker/ncsSim.scala file to change details of the test
-        cmd = '~/gatling-charts-highcharts-bundle-3.4.0/bin/gatling.sh -nr --simulation neocortix.ncsSim -sf ~/gatlingWorker -rf ~/gatlingResults_%03d' % (
-            frameNum
+        # substitute your own gatling simulation class, and put the scala file in the gatlingWorker dir
+        # -or- modify the provided gatlingWorker/ncsSim.scala file to change details of the test
+        simulationClass = 'neocortix.ncsSim'
+        cmd = '~/gatling-charts-highcharts-bundle-3.4.0/bin/gatling.sh -nr --simulation %s -sf ~/gatlingWorker -rf ~/gatlingResults_%03d' % (
+            simulationClass, frameNum
         )
         return cmd
 
