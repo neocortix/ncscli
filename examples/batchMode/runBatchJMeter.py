@@ -12,9 +12,7 @@ class JMeterFrameProcessor(batchRunner.frameProcessor):
     '''defines details for using JMeter for a simplistic load test'''
 
     def installerCmd( self ):
-        # return 'apt update && apt install -y -q jmeter'
-        #return 'apt update && apt install -y -qq openjdk-11-jdk-headless && curl -L https://downloads.apache.org//jmeter/binaries/apache-jmeter-5.3.tgz > apache-jmeter-5.3.tgz && tar zxf apache-jmeter-5.3.tgz'
-        return 'apt-get -qq update && apt-get -qq -y install openjdk-11-jdk-headless > /dev/null && curl -L https://downloads.apache.org//jmeter/binaries/apache-jmeter-5.3.tgz > apache-jmeter-5.3.tgz && tar zxf apache-jmeter-5.3.tgz'
+        return 'curl -s -S -L https://mirror.olnevhost.net/pub/apache/jmeter/binaries/apache-jmeter-5.3.tgz > apache-jmeter-5.3.tgz && tar zxf apache-jmeter-5.3.tgz'
 
     JMeterFilePath = 'TestPlan.jmx'
     #JMeterFilePath = 'TestPlan_RampLong.jmx'
@@ -48,7 +46,7 @@ try:
         authToken = os.getenv( 'NCS_AUTH_TOKEN' ) or 'YourAuthTokenHere',
         encryptFiles=False,
         timeLimit = 80*60,
-        instTimeLimit = 12*60,
+        instTimeLimit = 6*60,
         frameTimeLimit = 600,
         filter = '{"dpr": ">=48","ram:":">=2800000000","app-version": ">=2.1.11"}',
         outDataDir = outDataDir,
