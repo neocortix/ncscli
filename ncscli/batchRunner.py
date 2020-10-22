@@ -48,6 +48,7 @@ class g_:
     signaled = False
     frameDetails = {}
     dataDirPath = None
+    deviceLocsWanted = True
     frameProcessor = None
     framesToDo = collections.deque()
     nFramesWanted = None
@@ -344,8 +345,20 @@ def recruitInstance( launchedJsonFilePath, resultsLogFilePathIgnored ):
             jsonToKnownHosts.jsonToKnownHosts( startedInstances, khFile )
 
         deadline = min( g_.deadline, time.time() + args.instTimeLimit )
+
+        rc = None
+        if g_.deviceLocsWanted:
+            rc = pushDeviceLoc( inst )
+            if rc:
+                logger.warning( 'rc from pushDeviceLoc was %d', rc )
+                terminateInstances( args.authToken, [iid] )
+                logger.warning( 'terminating instance because pushDeviceLoc %s', iid )
+                terminateInstances( args.authToken, [iid] )
+                logOperation( 'terminateBad', [iid], '<recruitInstances>' )
+                purgeHostKeys( [inst] )
+                return None
         # rsync the common input file, if any
-        if args.commonInFilePath:
+        if args.commonInFilePath and not rc:
             logFrameState( -1, 'rsyncing', iid, 0 )
             destFileName = os.path.basename( args.commonInFilePath )
             (rc, stderr) = rsyncToRemote( args.commonInFilePath, destFileName, inst, timeLimit=args.instTimeLimit )
@@ -501,13 +514,33 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
         # add instances to knownHosts
         with open( os.path.expanduser('~/.ssh/known_hosts'), 'a' ) as khFile:
             jsonToKnownHosts.jsonToKnownHosts( startedInstances, khFile )
-        # install something on startedInstances, if required, else just return startedInstances
+        
+        if not g_.deviceLocsWanted:
+            goodInstances = startedInstances
+        else:
+            returnCodes = pushDeviceLocs( startedInstances )
+            goodInstances = []
+            badInstances = []
+            for index, rc in enumerate( returnCodes ):
+                if rc == 0:
+                    goodInstances.append( startedInstances[index] )
+                else:
+                    badInstances.append( startedInstances[index] )
+            if badInstances:
+                logger.info( 'could not pushDeviceLoc to %d instances', len(badInstances) )
+                badIids = [inst['instanceId'] for inst in badInstances ]
+                logOperation( 'terminateBad', badIids, '<recruitInstances>' )
+                terminateInstances( args.authToken, badIids )
+                logger.info( 'purging host keys')
+                purgeHostKeys( badInstances )
+
+        # install something on goodInstances, if required, else just return goodInstances
         if (not getInstallerCmd()) and (not args.commonInFilePath):
-            return startedInstances
+            return goodInstances
         if not sigtermSignaled():
             installerCmd = getInstallerCmd()
-            logger.info( 'calling tellInstances to install on %d instances', len(startedInstances))
-            stepStatuses = tellInstances.tellInstances( startedInstances, installerCmd,
+            logger.info( 'calling tellInstances to install on %d instances', len(goodInstances))
+            stepStatuses = tellInstances.tellInstances( goodInstances, installerCmd,
                 resultsLogFilePath=resultsLogFilePath,
                 download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
                 timeLimit=min(args.instTimeLimit, args.timeLimit), upload=args.commonInFilePath, stopOnSigterm=not True,
@@ -517,7 +550,7 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
             #signal.signal( signal.SIGTERM, sigtermHandler )
             if not stepStatuses:
                 logger.warning( 'no statuses returned from installer')
-                startedIids = [inst['instanceId'] for inst in startedInstances]
+                startedIids = [inst['instanceId'] for inst in goodInstances]
                 logOperation( 'terminateBad', startedIids, '<recruitInstances>' )
                 terminateInstances( args.authToken, startedIids )
                 return []
@@ -526,14 +559,14 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
             #eventTimings.append(stepTiming)
             logger.info( '%d good installs, %d bad installs', len(goodOnes), len(badOnes) )
             logger.info( 'stepStatuses %s', stepStatuses )
-            goodInstances = [inst for inst in startedInstances if inst['instanceId'] in goodOnes ]
+            goodInstances = [inst for inst in goodInstances if inst['instanceId'] in goodOnes ]
             badIids = []
             for status in badOnes:
                 badIids.append( status['instanceId'] )
             if badIids:
                 logOperation( 'terminateBad', badIids, '<recruitInstances>' )
                 terminateInstances( args.authToken, badIids )
-                badInstances = [inst for inst in startedInstances if inst['instanceId'] in badIids ]
+                badInstances = [inst for inst in goodInstances if inst['instanceId'] in badIids ]
                 logger.info( 'purging host keys')
                 purgeHostKeys( badInstances )
             #if goodInstances:
@@ -853,6 +886,101 @@ def renderFramesOnInstance( inst ):
         g_.workingInstances.remove( iid )
         saveProgress()
     return 0
+
+def commandInstance( inst, cmd, timeLimit ):
+    deadline = time.time() + timeLimit
+    sshSpecs = inst['ssh']
+    #logInstallerOperation( iid, ['connect', sshSpecs['host'], sshSpecs['port']] )
+    with subprocess.Popen(['ssh',
+                    '-p', str(sshSpecs['port']),
+                    '-o', 'ServerAliveInterval=360',
+                    '-o', 'ServerAliveCountMax=3',
+                    sshSpecs['user'] + '@' + sshSpecs['host'], cmd],
+                    encoding='utf8',
+                    #stdout=subprocess.PIPE,  # subprocess.PIPE subprocess.DEVNULL
+                    ) as proc:  # stderr=subprocess.PIPE
+        #logInstallerOperation( iid, ['command', cmd] )
+        #stderrThr = threading.Thread(target=trackStderr, args=(proc,))
+        #stderrThr.start()
+        abbrevIid = inst['instanceId'][0:16]
+        while time.time() < deadline:
+            proc.poll() # sets proc.returncode
+            if proc.returncode == None:
+                logger.info( 'waiting for command on instance %s', abbrevIid)
+            else:
+                if proc.returncode == 0:
+                    logger.debug( 'command succeeded on instance %s', abbrevIid )
+                else:
+                    logger.warning( 'instance %s gave returnCode %d', abbrevIid, proc.returncode )
+                break
+            if sigtermSignaled():
+                break
+            if g_.interrupted:
+                break
+            time.sleep(5)
+        proc.poll()
+        returnCode = proc.returncode if proc.returncode != None else 124 # declare timeout if no rc
+        if returnCode:
+            logger.warning( 'installer returnCode %s', returnCode )
+        #if returnCode == 124:
+        #    logInstallerEvent( 'timeout', args.instTimeLimit, iid )
+        #else:
+        #    logInstallerEvent('returncode', returnCode, iid )
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+            if proc.returncode:
+                logger.warning( 'ssh return code %d', proc.returncode )
+        except subprocess.TimeoutExpired:
+            logger.warning( 'ssh did not terminate in time' )
+        #stderrThr.join()
+        if returnCode:
+            #logger.warning( 'terminating instance because installerFailed %s', iid )
+            #terminateInstances( args.authToken, [iid] )
+            #logOperation( 'terminateBad', [iid], '<recruitInstances>' )
+            #purgeHostKeys( [inst] )
+            return returnCode
+        else:
+            return 0
+    return 1
+
+def pushDeviceLoc( inst, timeLimit=30 ):
+    iid = inst['instanceId']
+    logger.debug( 'would push deviceLoc to instance %s', iid[0:16] )
+    rc = 1
+    if not inst.get( 'device-location' ):
+        logger.warning( 'no device-location for %s', iid[0:16] )
+    else:
+        logFrameState( -1, 'pushDeviceLocStarting', iid )
+        deviceLoc = inst['device-location']
+        deviceLocJson = json.dumps( deviceLoc )
+        # trickily enquote and embedded apostrophes (single-quotes) for bash compatibility
+        deviceLocJson = deviceLocJson.replace( "'", r"'\''")
+        # generate a command to create the json file on the instance
+        cmd = "mkdir ~/.neocortix && echo '%s' > ~/.neocortix/device-location.json" % deviceLocJson
+        logger.debug( 'cmd: %s', cmd )
+        rc = commandInstance( inst, cmd, timeLimit=timeLimit )
+        logFrameState( -1, 'pushDeviceLocDone', iid, rc )
+    return rc
+
+def pushDeviceLocs( instances, timeLimit=40 ):
+    '''push device-location info to instances, in parallel'''
+    returnCodes = []
+    with futures.ThreadPoolExecutor( max_workers=len(instances) ) as executor:
+        parIter = executor.map( pushDeviceLoc, instances, timeout=timeLimit )
+        returnCodes = [None] * len(instances)
+        try:
+            index = 0
+            for returnCode in parIter:
+                returnCodes[index] = returnCode
+                index += 1
+                time.sleep( .1 )
+        except KeyboardInterrupt:
+            logger.warning( 'interrupted, setting flag')
+            g_.interrupted = True
+            raise
+        logger.debug( 'returnCodes: %s', returnCodes )
+    return returnCodes
 
 def recruitAndRender():
     '''a threadproc to recruit an instance, compute frames on it, and terminate it'''
