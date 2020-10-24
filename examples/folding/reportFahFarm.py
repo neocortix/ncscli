@@ -1,4 +1,4 @@
-'''reports details about a virtual boinc farm'''
+'''reports details about a virtual folding@home farm'''
 # standard library modules
 import argparse
 import collections
@@ -11,16 +11,16 @@ import datetime
 import logging
 #import math
 #import os
-#import re
+import re
 #import socket
 #import shutil
 #import signal
-import socket
+#import socket
 #import subprocess
 import sys
 #import threading
 #import time
-import urllib
+#import urllib
 #import uuid
 
 # third-party module(s)
@@ -72,6 +72,8 @@ def isNumber( sss ):
         return False
 
 def instanceDpr( inst ):
+    #logger.info( 'inst: %s', inst['instanceId'] )
+    #raise Exception( 'OBSOLETE' )
     #logger.info( 'NCSC Inst details %s', inst )
     # cpuarch:      string like "aarch64" or "armv7l"
     # cpunumcores:  int
@@ -97,7 +99,7 @@ def getStartedInstances( db ):
         #logger.info( 'getting instances from %s', collName )
         launchedColl = db[collName]
         inRecs = list( launchedColl.find( {}, 
-            {'device-id': 1, 'cpu': 1, 'instanceId': 1, 'state': 1 }) 
+            {'device-id': 1, 'cpu': 1, 'dpr': 1, 'instanceId': 1, 'state': 1 }) 
             ) # fully iterates the cursor, getting all records
         if len(inRecs) <= 0:
             logger.warn( 'no launched instances found in %s', collName )
@@ -106,19 +108,20 @@ def getStartedInstances( db ):
                 logger.warning( 'no instance ID in input record')
             if 'dpr' in inRec:
                 dpr = inRec['dpr']
+                #logger.info( 'found instance dpr %.1f', dpr )
                 if dpr < 24:
-                    logger.info( 'low dpr %.1f %s', dpr, inRec )
+                    logger.info( 'low dpr found %.1f %s', dpr, inRec['instanceId'] )
             else:
                 dpr = instanceDpr( inRec )
-                if dpr < 24:
-                    logger.info( 'low dpr computed %.1f %s', dpr, inRec )
+                #if dpr < 25:
+                #    logger.info( 'low dpr computed %.1f %s', dpr, inRec )
             inRec['dpr'] = round( dpr )
         startedInstances.extend( [inst for inst in inRecs if inst['state'] in ['started', 'stopped'] ] )
     return startedInstances
 
 def getInstallerRecs( db ):
     instRecs = {}
-    colls = db.list_collection_names( filter={ 'name': {'$regex': r'^startBoinc_.*'} } )
+    colls = db.list_collection_names( filter={ 'name': {'$regex': r'^startFah_.*'} } )
     colls = sorted( colls, reverse=False )
     for collName in colls:
         found = db[collName].find( {"instanceId": {"$ne": "<master>"} } )
@@ -213,46 +216,6 @@ def collectTaskMetrics( db ):
             allTasks = allTasks.append( tasks, sort=False )
     return allTasks
 
-def reportExceptionRecoveriesHackerly( db ):
-    instHistories = {}
-    taskColls = db.list_collection_names( filter={ 'name': {'$regex': r'^get_tasks_.*'} } )
-    taskColls = sorted( taskColls, reverse=False )
-    for collName in taskColls:
-        #tcoll = db['get_tasks_2020-04-13_190241']
-        tcoll = db[collName]
-        found = tcoll.find( {"instanceId": {"$ne": "<master>"} } )
-        for instRec in found:
-            iid = instRec['instanceId']
-            if iid not in instHistories:
-                instHistories[iid] = []
-            #logger.info( 'scanning %s', instRec['instanceId'] )
-            for event in instRec['events']:
-                if 'exception' in event:
-                    #logger.info( 'found exception for %s', iid[0:16] )
-                    #logger.info( 'exc: %s', event['exception'] )
-                    #if event['exception']['type'] == 'gaierror':
-                    if event['exception']['type'] == 'ConnectionRefusedError':
-                        instHistories[iid].append( event )
-                elif 'returncode' in event:
-                    if event['returncode'] == 0:
-                        instHistories[iid].append( event )
-    logger.info( 'scanning event histories' )
-    for iid, history in instHistories.items():
-        hadExcept = False
-        for event in history:
-            if 'exception' in event:
-                if not hadExcept:
-                    print( iid, event['dateTime'] )
-                    #logger.info( '%s on %s at %s', event['exception']['type'], iid[0:16], event['dateTime'][0:16] )
-                hadExcept = True
-            elif 'returncode' in event:
-                if hadExcept:
-                    logger.info('recovered %s %s', iid[0:16], event['dateTime'][0:16])
-                #else:
-                #    logger.info( 'noExcept' )
-        #if hadExcept:
-        #    logger.info( 'hadExcept: %s', iid[0:16] )
-
 def maybeNumber( txt ):
     if txt is None:
          return None
@@ -302,36 +265,38 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser( description=__doc__,
         fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( '--authToken', help='the NCS authorization token to use (required for launch or terminate)' )
-    ap.add_argument( '--farm', required=True, help='the name of the virtual boinc farm' )
-    ap.add_argument( '--projectUrl', help='the URL to the boinc science project', default='https://boinc.bakerlab.org/rosetta/' )
-    ap.add_argument( '--projectKey', required=True, help='the authorization key for the boinc project')
+    ap.add_argument( '--farm', required=True, help='the name of the virtual farm' )
+    #ap.add_argument( '--projectUrl', help='the URL to the science project', default='https://stats.foldingathome.org/' )
+    #ap.add_argument( '--projectKey', required=True, help='the authorization key for the science project')
     ap.add_argument( '--mongoHost', help='the host of mongodb server', default='localhost')
     ap.add_argument( '--mongoPort', help='the port of mongodb server', default=27017)
     args = ap.parse_args()
 
-    farm = args.farm  # 'rosetta_2'
+    farm = args.farm
     
     logger.info( 'connecting to database for %s', farm )
     mclient = pymongo.MongoClient( args.mongoHost )
-    dbName = 'boinc_' + farm
+    dbName = 'fah_' + farm
     db = mclient[dbName]
 
+    # establish threshold datetime for "recent" terminations
     lookbackMinutes = 120
     thresholdDateTime = datetime.datetime.now( datetime.timezone.utc ) \
         - datetime.timedelta( minutes=lookbackMinutes )
     thresholdDateTimeStr = thresholdDateTime.isoformat()
     dateTimeTagFormat = '%Y-%m-%d_%H%M%S'
     
-    ancientDateTime = datetime.datetime( 2020, 4, 12, tzinfo=datetime.timezone.utc )
+    # (hack) ancient datetime for instances too old for ncs details to be queried
+    ancientDateTime = datetime.datetime( 2020, 7, 1, tzinfo=datetime.timezone.utc )
     
     logger.info( 'getting startedInstances' )
     startedInstances = getStartedInstances( db )
     instancesByIid = {inst['instanceId']: inst for inst in startedInstances }
 
-    # rosetta
-    projUrl = args.projectUrl  # 'https://boinc.bakerlab.org/rosetta/'
-    authStr = args.projectKey  # account key for boinc project ("weak" key may not work)
+    #projUrl = args.projectUrl
+    #authStr = args.projectKey  # account key for project ("weak" key may not work)
     
+    '''
     logger.info( 'retrieving account info from %s', projUrl )
     accountInfo = retrieveAccountInfo( projUrl, authStr )
     hostInfos = accountInfo.get('hosts')
@@ -343,6 +308,7 @@ if __name__ == "__main__":
 
     if not True:
         taskMetrics = collectTaskMetrics( db )
+    '''
 
     nCheckedInstances = 0
     nSuccessfulInstances = 0
@@ -360,10 +326,13 @@ if __name__ == "__main__":
         abbrevIid = iid[0:16]
         inst['instanceId'] = iid
         inst['checkedDateTime'] = interpretDateTimeField( inst['checkedDateTime'] )
+        if inst.get('queueInfo'):
+            inst['ppd'] = int(inst['queueInfo']['ppd'])
+            inst['creditEstimate'] = int(inst['queueInfo']['creditestimate'])
         instEvents = None
         if 'events' in inst:
             instEvents = inst['events']
-        elif inst['checkedDateTime'] >= ancientDateTime:  # '2020-04-12':
+        elif inst['checkedDateTime'] >= ancientDateTime:
             logger.info( 'querying NCS for %s', abbrevIid )
             response = ncs.queryNcsSc( 'instances/%s' % iid, args.authToken )
             if response['statusCode'] == 200:
@@ -371,6 +340,15 @@ if __name__ == "__main__":
                 instEvents = instX['events']
                 inst['events'] = instX['events']
                 coll.update_one( {'_id': iid}, { "$set": { "events": instX['events'] } } )
+        cdt = inst['checkedDateTime']
+        ldtField = inst['launchedDateTime']
+        ldt = universalizeDateTime( dateutil.parser.parse( ldtField ) )
+        inst['launchedDateTime'] = universalizeDateTime( ldt )
+        if inst.get('terminatedDateTime'):
+            inst['terminatedDateTime'] = interpretDateTimeField( inst['terminatedDateTime'] )
+        inst['uptime'] = (cdt-ldt).total_seconds()
+        inst['uptimeHrs'] = inst['uptime'] / 3600
+        inst['dpr'] = instancesByIid[iid]['dpr']
         if instEvents:
             eventsByIid[ iid ] = instEvents
             lastEventStr = instEvents[-1]['category'] + '.' + instEvents[-1]['event']
@@ -397,29 +375,133 @@ if __name__ == "__main__":
         inst['hostName'] = instHost
         #if 'ztka' in instHost:
         #    logger.warning( 'DOWNLOADERR %s', inst['_id'] )
+        inst['totCredit'] = 0
+        inst['RAC'] = 0
+        '''
         if instHost and instHost in hostInfoByName:
             inst['totCredit'] = hostInfoByName[instHost]['total_credit']
             inst['RAC'] = hostInfoByName[instHost]['expavg_credit']
-        else:
-            inst['totCredit'] = 0
-            inst['RAC'] = 0
+        '''
             
+    checkedInstancesDf = pd.DataFrame( checkedInstances )
+    checkedInstancesDf = pd.concat([checkedInstancesDf, checkedInstancesDf['simInfo'].apply(pd.Series)], axis=1)
+    # drop the mysteriouos zero column created by the concat
+    #checkedInstancesDf = checkedInstancesDf.drop(0,1)
+    criticalDateTime = datetime.datetime( 2020, 10, 17, 17, 53, tzinfo=datetime.timezone.utc )
+    checkedInstancesDf = checkedInstancesDf[ checkedInstancesDf.launchedDateTime>=criticalDateTime ]
+    print( '%d instances were launched since %s', len(checkedInstancesDf), criticalDateTime )
+
+    '''
+    checkedInstancesDf['totCredit'] = 0
+    checkedInstancesDf['nUploads'] = 0
+    nEstimates = 0
+    defaultCred = 300  # use a typical value as default
+    #with open( 'uploadMsgs.log', 'w' ) as logFile:
+    for index, row in checkedInstancesDf.iterrows():
+        print( '.', end='' )
+        iid = row.instanceId
+        loggedCollName = 'clientLog_' + iid
+        found = db[loggedCollName].find( {} )
+        for item in found:
+            msg = item['msg']
+            if ':Final credit estimate' in msg:
+                nEstimates += 1
+                parts = msg.split()
+                creditEst = float( parts[-2] ) # the part before 'points'
+                #print( creditEst )
+                #print( 'updating creditEst-defaultCred', 'creditEst', creditEst, 'defaultCred', defaultCred )
+                checkedInstancesDf.loc[index,'totCredit'] += creditEst-defaultCred
+                #checkedInstancesDf.loc[index,'totCredit'] += creditEst
+            elif ':Sending unit results:' in msg:
+                checkedInstancesDf.loc[index,'nUploads'] += 1
+                checkedInstancesDf.loc[index,'totCredit'] += defaultCred
+            #print( iid[0:8], item['dateTime'][0:19], item['msg'], file=logFile )
+        # make estimate for cahses with upload but no credit est
+        if checkedInstancesDf.loc[index,'nUploads'] >0 and checkedInstancesDf.loc[index,'totCredit']<=0:
+            totCred = checkedInstancesDf.loc[index,'nUploads'] * defaultCred
+            print( 'estimating %d credit for %s' % (totCred, row.instanceId[0:8]) )
+            checkedInstancesDf.loc[index,'totCredit'] = totCred
+    print( 'sum of totCredit: ', checkedInstancesDf['totCredit'].sum() )
+    print( 'number of credit estimates', nEstimates )
+    print( 'number of uploads', checkedInstancesDf.nUploads.sum() )
+    '''
+    logger.info( 'counting uploads' )
+    # search for "upload complete" in logs and store counts in 'nUploads' column
+    checkedInstancesDf['nUploads'] = 0
+    checkedInstancesDf['nUpFails'] = 0
+    downloadMsgsByIid = {}
+    uploadMsgsByIid = {}
+    pat = r':Completed (.*) out of'
+    for index, row in checkedInstancesDf.iterrows():
+        print( '.', end='' )
+        iid = row.instanceId
+        loggedCollName = 'clientLog_' + iid
+        
+        found = db[loggedCollName].find( {
+                "mType": "complete",
+                "msg": {'$regex': '.*:Completed.*'} }
+            )
+        for item in found:
+            msg = item['msg']
+            if '500000 steps' not in msg:
+                print( 'NSTEPS', msg )
+            numPart = re.search( pat, msg ).group(1)
+            nSteps = int( numPart )
+            if nSteps > 50000:
+                checkedInstancesDf.loc[index,'nSteps'] = nSteps
+            #if nSteps > 490000:
+            #    print( iid, item['dateTime'], msg )
+        
+        nSigInts = db[loggedCollName].count_documents( 
+                {"mType": None, "msg": {'$regex': '.*Caught signal SIGINT.*'} }
+                )
+        if nSigInts > 0:
+            logger.warning( '%d SIGINT for %s', nSigInts, iid[0:8] )
+            
+        downloadMsgsByIid[ iid ] = []
+        # find 'received unit" messages
+        found = db[loggedCollName].find( {
+                #"mType": 'upload',
+                "msg": {'$regex': '.*:Received Unit:*'} }
+            )
+        for item in found:
+            msg = item['msg']
+            downloadMsgsByIid[ iid ].append( msg )
+
+        uploadMsgsByIid[ iid ] = []
+        # find 'sending" messages
+        found = db[loggedCollName].find( {
+                "mType": 'upload',
+                "msg": {'$regex': '.*Sending unit results.*'} }
+            )
+        for item in found:
+            msg = item['msg']
+            uploadMsgsByIid[ iid ].append( msg )
+            #db[loggedCollName].update_one( {'_id': item['_id' ]}, 
+            #  {'$set': { 'mType': 'upload' } }  )
+            if ' error:FAILED ' in msg:
+                checkedInstancesDf.loc[index,'nUpFails'] += 1
+            else:
+                logger.info( '"upload" msg for inst %s, %s', iid[0:8], msg )
+            checkedInstancesDf.loc[index,'nUploads'] += 1
+            if checkedInstancesDf.loc[index].get('nSteps',0) > 40000:
+                creditEst = checkedInstancesDf.loc[index].get('creditEstimate', 800)
+                logger.info( 'creditEst for inst %s, %s', iid[0:8], creditEst )
+            else:
+                creditEst = 1
+            checkedInstancesDf.loc[index,'totCredit'] += creditEst
+            #print( iid[0:8], item['dateTime'][0:19], item['msg'], file=logFile )
+    
+    logger.info( 'counting uploads done' )
+    print()
     # this loop prints info for recently-checked terminated instances
     print( 'recently terminated instances for farm', farm )
-    for inst in checkedInstances:
+    for _, inst in checkedInstancesDf.iterrows():
         nCheckedInstances += 1
         cdt = inst['checkedDateTime']
-        ldtField = inst['launchedDateTime']
-        ldt = universalizeDateTime( dateutil.parser.parse( ldtField ) )
-        inst['launchedDateTime'] = universalizeDateTime( ldt )
-        if inst.get('terminatedDateTime'):
-            inst['terminatedDateTime'] = interpretDateTimeField( inst['terminatedDateTime'] )
-        inst['uptime'] = (cdt-ldt).total_seconds()
-        iid = inst['_id']
-        inst['instanceId'] = iid
-        inst['dpr'] = instancesByIid[iid]['dpr']
+        iid = inst['instanceId']
         
-        instSucceeded = inst.get('nTasksComputed',0) > 0
+        instSucceeded = inst.get('nUploads',0) > inst.get('nUpFails',0)
         if instSucceeded:
             nSuccessfulInstances += 1
         if cdt >= thresholdDateTime and inst['state'] == 'terminated':
@@ -427,16 +509,17 @@ if __name__ == "__main__":
             abbrevIid = iid[0:16]
             print( '%s, %d, %d, %d, %d, %d, %s, %s, %.1f, %s' % 
                   (inst['state'], inst['devId'],
-                   inst.get('nTasksComputed',0), inst['nCurTasks'],
+                   inst.get('nTasksComputed',0), inst.get('nCurTasks', 0),
                    inst.get('nFailures',0), inst.get('nExceptions',0),
                    cdtAbbrev, abbrevIid,
                    inst['uptime']/3600, inst.get('unplugged','')) )
         #else:
         #    print( 'older' )
-    checkedInstancesDf = pd.DataFrame( checkedInstances )
 
     print()
     print(datetime.datetime.now( datetime.timezone.utc ))
+    print('folding farm', args.farm)
+    '''
     projName = projUrl.split('/')[-2]
     projNetLoc = urllib.parse.urlparse( projUrl ).netloc
     #print( 'project', projNetLoc, 'stats' )
@@ -447,73 +530,86 @@ if __name__ == "__main__":
     else:
         print( 'total credit:', round(accountInfo['total_credit']) )
         print( 'RAC:', round(accountInfo['expavg_credit']) )  # "recent avgerage credit"
+        '''
+    #criticalDateTime = datetime.datetime( 2020, 10, 17, 17, 53, tzinfo=datetime.timezone.utc )
+    #recentInstances = checkedInstancesDf[ checkedInstancesDf.launchedDateTime>=criticalDateTime ]
+    #print( '%d instances were launched since %s', len(recentInstances), criticalDateTime )
 
     nCurrentlyRunning = len( checkedInstancesDf[ checkedInstancesDf.state=='checked' ] )
     print( '%d currently running instances' % 
           (nCurrentlyRunning ) )
-    currentlySuccessful = checkedInstancesDf[ (checkedInstancesDf.state=='checked') & (checkedInstancesDf.nTasksComputed>0) ]
-    print( '%d of those had finished tasks' % len(currentlySuccessful) )
-    print( 'historically, %d out of %d instances had finished tasks' 
+    currentlySuccessful = checkedInstancesDf[ (checkedInstancesDf.state=='checked') 
+        & (checkedInstancesDf.nUploads>checkedInstancesDf.nUpFails) ]
+    print( '%d of those had good uploads' % len(currentlySuccessful) )
+    print( 'historically, %d out of %d instances had attempted uploads' 
           % (nSuccessfulInstances, nCheckedInstances) )
+    print( '%d total uploads' % (checkedInstancesDf.nUploads.sum()-checkedInstancesDf.nUpFails.sum()) )
+    print( 'estimated total credit:', checkedInstancesDf.totCredit.sum() )
+    goldDpr = 48
+    lowRiders = checkedInstancesDf[(checkedInstancesDf.dpr<goldDpr) & (checkedInstancesDf.dpr>=24)]
+    if 'totCredit' in lowRiders:
+        print( 'silver (sub-%d) total credit: %d'
+              % (goldDpr, round(lowRiders.totCredit.sum()) )
+              )
     print()
     # print details for the best instances with finished tasks
     if len( checkedInstancesDf ) > 20:
-        bestCreditThresh = max( sorted(checkedInstancesDf.totCredit)[-20], 1 )
+        bestCreditThresh = max( checkedInstancesDf.totCredit.sort_values(ascending=False).iloc[20], 1 )
     else:
         bestCreditThresh = 1
     print( 'best instances' )
-    for inst in checkedInstances:
-        #if inst.get('nTasksComputed',0) > 0:
+    for _, inst in checkedInstancesDf.sort_values(['totCredit', 'nUploads', 'progress' ], ascending=False).iterrows():
         if inst.get('totCredit',0) >= bestCreditThresh:  # 12000 150 300
+        #if inst.nUploads or inst.get('progress', 0) >= .5:
             cdt = inst['checkedDateTime']
             cdtAbbrev = cdt.strftime( dateTimeTagFormat )[5:-2]
             iid = inst['_id']
-            abbrevIid = iid[0:16]
+            abbrevIid = iid[0:8]
             host = inst['ssh']['host']
             hostId = inst.get( 'bpsHostId' )
             abbrevHost = host.split('.')[0]
-            print( '%s, %d, %d, %d, %d, %d, %s, %s, %s, %.1f' % 
+            print( '%s, %d, %d, %.1f, %d, %d, %s, %s, %s, %.1f' % 
                   (inst['state'], inst['devId'],
-                   inst['totCredit'], inst.get('nTasksComputed',0),
+                   #inst['totCredit'], inst.get('nTasksComputed',0),
+                   inst['nUploads']-inst['nUpFails'], inst.get('totCredit',0),  # 'progress'
                    inst.get('nFailures',0), inst.get('nExceptions',0),
                    cdtAbbrev, abbrevHost, abbrevIid,
                    inst['uptime']/3600) )
     print()
+    #%%
+    print( 'longest-dur instances' )
+    for _, inst in checkedInstancesDf.sort_values(['uptime', 'totCredit'], ascending=False).iterrows():
+        if inst['uptime'] >= 36*3600:
+            cdt = inst['checkedDateTime']
+            cdtAbbrev = cdt.strftime( dateTimeTagFormat )[5:-2]
+            iid = inst['_id']
+            abbrevIid = iid[0:8]
+            host = inst['ssh']['host']
+            hostId = inst.get( 'bpsHostId' )
+            abbrevHost = host.split('.')[0]
+            print( '%s, %d, %d, %.1f, %d, %d, %s, %s, %s, %.1f' % 
+                  (inst['state'], inst['devId'],
+                   #inst['totCredit'], inst.get('nTasksComputed',0),
+                   inst['nUploads']-inst['nUpFails'], inst.get('totCredit',0),  # 'progress'
+                   inst.get('nFailures',0), inst.get('nExceptions',0),
+                   cdtAbbrev, abbrevHost, abbrevIid,
+                   inst['uptime']/3600) )
 
     sys.stdout.flush()
-    if False:
-        logger.info( 'checking dns for instances' )
-        nChecked = 0
-        badGais = []
-        for inst in checkedInstances:
-            if inst['state'] == 'checked':
-                nChecked += 1
-                iid = inst['_id']
-                abbrevIid = iid[0:16]
-                #logger.info( 'checking dns for %s', abbrevIid )
-                host = inst['ssh']['host']
-                port = inst['ssh']['port']
-                try:
-                    info = socket.getaddrinfo( host, port )
-                except Exception as exc:
-                    logger.warning( 'gai failed for host "%s", port %d, %s', 
-                                   host, port, iid )
-                    logger.warning( 'error (%d) %s', exc.errno, exc )
-                    if exc.errno != socket.EAI_NONAME:
-                        logger.warning( '(unusual error)' )
-                    badGais.append( (inst, exc ))
-        logger.info( '%d bad gai out of %d checked', len(badGais), nChecked)   
+    
+    fahResp = requests.get( 'https://api.foldingathome.org/cpus', params={'query': 'neocortix_0'} )
+    fahJson = fahResp.json()
+    fahDf = pd.DataFrame( fahJson )
+    fahProjectDf = fahDf[ fahDf.project==16813 ].drop( ['team', 'slot', 'os'], 1 )
+    print( 'credits via api' )
+    print( fahProjectDf )
+    
+
     # collect ram totals
     #ramByDevId = {}
     #for inst in startedInstances:
     #    ramByDevId[ inst['device-id'] ] = inst['ram']['total'] / 1000000
-    lowRiders = checkedInstancesDf[(checkedInstancesDf.dpr<38) & (checkedInstancesDf.dpr>=24)]
-    if 'totCredit' in lowRiders:
-        print( 'silver (sub-38) total credit:', round(lowRiders.totCredit.sum()))
-    
-    if False:
-        reportExceptionRecoveriesHackerly( db )
-            
+                
     if False:
         instRecs = getInstallerRecs( db )
         logger.info( 'found %d installation attempts', len(instRecs) )
