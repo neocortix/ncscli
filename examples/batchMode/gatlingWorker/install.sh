@@ -10,3 +10,4 @@ echo installing unzip
 sudo apt-get -qq install -y unzip > /dev/null
 echo unzipping gatling
 unzip -q gatling-charts-highcharts-bundle-3.4.0-bundle.zip
+cp gatlingWorker/gatling.conf ~/gatling-charts-highcharts-bundle-3.4.0/conf
