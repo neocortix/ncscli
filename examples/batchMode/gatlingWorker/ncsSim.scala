@@ -2,11 +2,26 @@
 package neocortix
 
 import scala.concurrent.duration._
+import scala.io.Source
 
 import io.gatling.core.Predef._
 import io.gatling.http.Predef._
 
 class ncsSim extends Simulation {
+  val homeDirPath = System.getProperty("user.home")
+  val deviceLocFilePath = homeDirPath + "/.neocortix/device-location.json"
+  val source = scala.io.Source.fromFile(deviceLocFilePath)
+  val js = source.mkString
+  println( "device-location: " + js )
+  val pat= """country-code": "(..)"""".r
+  val matched = pat.findFirstMatchIn( js )
+  matched match {
+  case Some(m) =>
+    println("country-code: " + m.group(1))
+  case None =>
+    println("no country-code")
+  }
+
 
   val httpProtocol = http
     .baseUrl("https://loadtest-target.neocortix.com")
