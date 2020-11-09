@@ -8,19 +8,37 @@ import io.gatling.core.Predef._
 import io.gatling.http.Predef._
 
 class ncsSim extends Simulation {
+  // read the json file
   val homeDirPath = System.getProperty("user.home")
   val deviceLocFilePath = homeDirPath + "/.neocortix/device-location.json"
   val source = scala.io.Source.fromFile(deviceLocFilePath)
   val js = source.mkString
   println( "device-location: " + js )
-  val pat= """country-code": "(..)"""".r
-  val matched = pat.findFirstMatchIn( js )
+
+  // extract the country-code
+  var countryCode = "ZZ";  // default in case it is not found
+  var pat = """country-code":\s*"(..)"""".r
+  var matched = pat.findFirstMatchIn( js )
   matched match {
   case Some(m) =>
-    println("country-code: " + m.group(1))
+    countryCode = m.group(1)
   case None =>
     println("no country-code")
   }
+  println("countryCode: " + countryCode)
+
+  // extract the timezone string
+  var tzStr="Etc/UTC";  // default in case it is not found
+  pat = """tz":\s*\{"id":\s*"([^"]+)"""".r
+  matched = pat.findFirstMatchIn( js )
+  matched match {
+  case Some(m) =>
+    tzStr = m.group(1)
+  case None =>
+    println("no tz-string")
+  }
+  println( "tzStr: " + tzStr )
+
 
 
   val httpProtocol = http
