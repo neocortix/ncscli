@@ -515,11 +515,11 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
         with open( os.path.expanduser('~/.ssh/known_hosts'), 'a' ) as khFile:
             jsonToKnownHosts.jsonToKnownHosts( startedInstances, khFile )
         
+        goodInstances = []
         if not g_.deviceLocsWanted:
             goodInstances = startedInstances
-        else:
+        elif startedInstances:
             returnCodes = pushDeviceLocs( startedInstances )
-            goodInstances = []
             badInstances = []
             for index, rc in enumerate( returnCodes ):
                 if rc == 0:
@@ -533,7 +533,8 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
                 terminateInstances( args.authToken, badIids )
                 logger.info( 'purging host keys')
                 purgeHostKeys( badInstances )
-
+        if not goodInstances:
+            return []
         # install something on goodInstances, if required, else just return goodInstances
         if (not getInstallerCmd()) and (not args.commonInFilePath):
             return goodInstances
