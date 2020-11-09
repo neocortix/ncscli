@@ -171,7 +171,7 @@ async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.
             else:
                 return 0
     except Exception as exc:
-        logger.warning( 'got exception (%s) %s', type(exc), exc, exc_info=False )
+        logger.warning( 'got exception (%s) on instance %s "%s"', type(exc), iidAbbrev, exc, exc_info=False )
         logResult( 'exception', {'type': type(exc).__name__, 'msg': str(exc) }, iid )
         return exc
     return 'did we not connect?'
@@ -344,8 +344,10 @@ def tellInstances( instancesSpec, command=None, resultsLogFilePath=None,
     argsToSave['instanceIds'] = [inst['instanceId'] for inst in startedInstances]
     logResult( 'operation', ['tellInstances', {'args': argsToSave} ], '<master>')
     
-    #installed = set()
-    #failed = set()
+    if not startedInstances:
+        if resultsLogFile:
+            resultsLogFile.close()
+        return []
 
     if download:
         # create dirs for downloads
