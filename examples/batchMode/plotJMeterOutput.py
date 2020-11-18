@@ -86,7 +86,13 @@ def getFieldsFromFileNameCSV3(fileName,firstRecord=0) :
             # print ("Corrected line = %s" % lines[i])
     fields = [lines[i].split(',') for i in range(firstRecord,len(lines))]
     file.close()   
-    return fields
+    rows = []
+    for row in fields:
+        if len( row ) < 4:
+            logger.warning( 'row had fewer than 4 fields in %s; %s', fileName, row )
+        else:
+            rows.append( row )
+    return rows
 
 if __name__ == "__main__":
     # configure logger formatting
@@ -172,11 +178,11 @@ if __name__ == "__main__":
                                                ])
                 
 
-
+    '''
     print("\nLocations:")
     for i in range(0,len(mappedFrameNumLocation)):
         print("%s" % mappedFrameNumLocation[i][3])
-        
+    '''
         
     print("\nReading Response Time data")    
     #determine number of files and their filenames  TestPlan_results_001.csv
@@ -191,11 +197,23 @@ if __name__ == "__main__":
     # print(resultFileNames)
     # print(numResultFiles)
 
+    # read the result .csv file to find out what labels are present
+    labels = []
+    for i in range(0,numResultFiles):
+        inFilePath = outputDir + "/" + resultFileNames[i]
+        fields = getFieldsFromFileNameCSV3(inFilePath,firstRecord=1) 
+        if not fields:
+            logger.info( 'no fields in %s', inFilePath )
+            continue
+        for j in range(0,len(fields)):
+            labels.append(fields[j][2])
+    reducedLabels = list(np.unique(labels))
+    print("\nreducedLabels = %s \n" % reducedLabels)
+
     # read the result .csv files
     responseData = []
     for i in range(0,numResultFiles):
         inFilePath = outputDir + "/" + resultFileNames[i]
-        # lines = getLinesFromFileName(inFilePath)    
         fields = getFieldsFromFileNameCSV3(inFilePath) 
         if not fields:
             logger.info( 'no fields in %s', inFilePath )
@@ -203,19 +221,22 @@ if __name__ == "__main__":
         frameNum = int(resultFileNames[i].lstrip("TestPlan_results_").rstrip(".csv"))
         startTimes = []
         elapsedTimes = []
+        labels = []
         for j in range(0,len(fields)):
-            if fields[j][2] == "HTTP Request" and fields[j][3] == "200":
+            if len(fields[j]) <= 3:
+                logger.info( 'fields[j]: %s from %s', fields[j], resultFileNames[i] )
+            if (len(fields[j]) > 3) and (fields[j][2] in reducedLabels) and fields[j][3] == "200":
+            # if (fields[j][2] == "HTTP Request" or fields[j][2] == "GetWorkload" or fields[j][2] == "GetStarttime" or fields[j][2] == "GetDistribution")  and fields[j][3] == "200":
                 startTimes.append(int(fields[j][0])/1000.0)
                 elapsedTimes.append(int(fields[j][1])/1000.0)         
-        # startTimes = [int(ii)/1000.0 for ii in getColumn(fields,0) if getColumn(fields,3) != "200"] 
-        # elapsedTimes = [int(ii)/1000.0 for ii in getColumn(fields,1) if getColumn(fields,3) != "200"]
+                labels.append(fields[j][2])         
         if startTimes:
             minStartTimeForDevice = min(startTimes)
             jIndex = -1
             for j in range (0,len(mappedFrameNumLocation)):
                 if frameNum == mappedFrameNumLocation[j][0]:
                     jIndex = j
-            responseData.append([frameNum,minStartTimeForDevice,startTimes,elapsedTimes,mappedFrameNumLocation[jIndex]])
+            responseData.append([frameNum,minStartTimeForDevice,startTimes,elapsedTimes,mappedFrameNumLocation[jIndex],labels])
     if not responseData:
         sys.exit( 'no plottable data was found' )
 
@@ -231,7 +252,7 @@ if __name__ == "__main__":
             # relativeStartTimes.append(responseData[i][2][ii]-globalMinStartTime)
             relativeStartTimes.append(responseData[i][2][ii]-responseData[i][1])
         maxStartTime = max(relativeStartTimes)
-        relativeResponseData.append([responseData[i][0],relativeStartTimes,responseData[i][3],responseData[i][4],maxStartTime])
+        relativeResponseData.append([responseData[i][0],relativeStartTimes,responseData[i][3],responseData[i][4],maxStartTime,responseData[i][5]])
 
     # compute median maxStartTime
     medianMaxStartTime = np.median(getColumn(relativeResponseData,4))
@@ -255,9 +276,9 @@ if __name__ == "__main__":
     print("Culled Number of devices = %d" %len(culledRelativeResponseData))
     culledLocations = getColumn(getColumn(culledRelativeResponseData,3),3)
 
-    print("\nCulled Locations:")
-    for i in range(0,len(culledLocations)):
-        print("%s" % culledLocations[i])
+    #print("\nCulled Locations:")
+    #for i in range(0,len(culledLocations)):
+    #    print("%s" % culledLocations[i])
         
     print("\nAnalyzing Location data")
     startRelTimesAndMSPRsUnitedStatesMuxed = []
@@ -268,19 +289,49 @@ if __name__ == "__main__":
     for i in range(0,len(culledRelativeResponseData)):
         # print(culledRelativeResponseData[i][3][4])
         if culledRelativeResponseData[i][3][4]=="United States" :
-            startRelTimesAndMSPRsUnitedStatesMuxed.append([culledRelativeResponseData[i][1],culledRelativeResponseData[i][2] ])
+            startRelTimesAndMSPRsUnitedStatesMuxed.append([culledRelativeResponseData[i][1],culledRelativeResponseData[i][2],culledRelativeResponseData[i][5] ])
         elif culledRelativeResponseData[i][3][4]=="Russia" :     
-            startRelTimesAndMSPRsRussiaMuxed.append([culledRelativeResponseData[i][1],culledRelativeResponseData[i][2] ])
+            startRelTimesAndMSPRsRussiaMuxed.append([culledRelativeResponseData[i][1],culledRelativeResponseData[i][2],culledRelativeResponseData[i][5] ])
         else:
-            startRelTimesAndMSPRsOtherMuxed.append([culledRelativeResponseData[i][1],culledRelativeResponseData[i][2] ])
+            startRelTimesAndMSPRsOtherMuxed.append([culledRelativeResponseData[i][1],culledRelativeResponseData[i][2],culledRelativeResponseData[i][5] ])
 
-    startRelTimesAndMSPRsUnitedStates = [flattenList(getColumn(startRelTimesAndMSPRsUnitedStatesMuxed,0)),flattenList(getColumn(startRelTimesAndMSPRsUnitedStatesMuxed,1))]
-    startRelTimesAndMSPRsRussia = [flattenList(getColumn(startRelTimesAndMSPRsRussiaMuxed,0)),flattenList(getColumn(startRelTimesAndMSPRsRussiaMuxed,1))]
-    startRelTimesAndMSPRsOther = [flattenList(getColumn(startRelTimesAndMSPRsOtherMuxed,0)),flattenList(getColumn(startRelTimesAndMSPRsOtherMuxed,1))]
+    startRelTimesAndMSPRsUnitedStates = [flattenList(getColumn(startRelTimesAndMSPRsUnitedStatesMuxed,0)),flattenList(getColumn(startRelTimesAndMSPRsUnitedStatesMuxed,1)),flattenList(getColumn(startRelTimesAndMSPRsUnitedStatesMuxed,2))]
+    startRelTimesAndMSPRsRussia = [flattenList(getColumn(startRelTimesAndMSPRsRussiaMuxed,0)),flattenList(getColumn(startRelTimesAndMSPRsRussiaMuxed,1)),flattenList(getColumn(startRelTimesAndMSPRsRussiaMuxed,2))]
+    startRelTimesAndMSPRsOther = [flattenList(getColumn(startRelTimesAndMSPRsOtherMuxed,0)),flattenList(getColumn(startRelTimesAndMSPRsOtherMuxed,1)),flattenList(getColumn(startRelTimesAndMSPRsOtherMuxed,2))]
 
     # print(len(startRelTimesAndMSPRsUnitedStates[0]))
     # print(len(startRelTimesAndMSPRsRussia[0]))
     # print(len(startRelTimesAndMSPRsOther[0]))
+
+    # now split out the response data by label
+    startRelTimesAndMSPRsUnitedStatesByLabel = [[[],[],reducedLabels[i]] for i in range(0,len(reducedLabels))] 
+    startRelTimesAndMSPRsRussiaByLabel = [[[],[],reducedLabels[i]] for i in range(0,len(reducedLabels))] 
+    startRelTimesAndMSPRsOtherByLabel = [[[],[],reducedLabels[i]] for i in range(0,len(reducedLabels))] 
+    # print("\n\nstartRelTimesAndMSPRsUnitedStatesByLabel = %s\n\n" % startRelTimesAndMSPRsUnitedStatesByLabel )
+
+    for j in range(0,len(startRelTimesAndMSPRsUnitedStates[0])):
+        label = startRelTimesAndMSPRsUnitedStates[2][j]
+        index = reducedLabels.index(label)
+        startRelTimesAndMSPRsUnitedStatesByLabel[index][0].append(startRelTimesAndMSPRsUnitedStates[0][j])
+        startRelTimesAndMSPRsUnitedStatesByLabel[index][1].append(startRelTimesAndMSPRsUnitedStates[1][j])
+
+    for j in range(0,len(startRelTimesAndMSPRsRussia[0])):
+        label = startRelTimesAndMSPRsRussia[2][j]
+        index = reducedLabels.index(label)
+        startRelTimesAndMSPRsRussiaByLabel[index][0].append(startRelTimesAndMSPRsRussia[0][j])
+        startRelTimesAndMSPRsRussiaByLabel[index][1].append(startRelTimesAndMSPRsRussia[1][j])
+
+    for j in range(0,len(startRelTimesAndMSPRsOther[0])):
+        label = startRelTimesAndMSPRsOther[2][j]
+        index = reducedLabels.index(label)
+        startRelTimesAndMSPRsOtherByLabel[index][0].append(startRelTimesAndMSPRsOther[0][j])
+        startRelTimesAndMSPRsOtherByLabel[index][1].append(startRelTimesAndMSPRsOther[1][j])
+
+    if False:
+        print("\n\nlen(startRelTimesAndMSPRsUnitedStates[0]) = %i\n\n" % len(startRelTimesAndMSPRsUnitedStates[0]))
+
+        for i in range(0,len(reducedLabels)):
+            print("len(startRelTimesAndMSPRsUnitedStatesByLabel[%d][0]) = %d" % (i,len(startRelTimesAndMSPRsUnitedStatesByLabel[i][0])))
 
     print("Determining Delivered Load")
     timeBinSeconds = 5
@@ -425,6 +476,34 @@ if __name__ == "__main__":
     plt.xlabel("Time during Test (s)", fontsize=32*fontFactor)  
     plt.ylabel("Response Times (s)", fontsize=32*fontFactor)  
     plt.savefig( outputDir+'/responseTimesByRegion.png', bbox_inches='tight' )
+    #plt.show()    
+    # plt.clf()
+    # plt.close()  
+
+
+    plotMarkerSize = 6
+    fig = plt.figure(20, figsize=figSize1)
+    #ax = plt.gca()
+    #box = ax.get_position()
+    #ax.set_position([box.x0, box.y0, box.width * 0.8, box.height])
+
+    for i in range(0,len(reducedLabels)):
+        fraction = 0.5+0.5*(i+1)/len(reducedLabels)
+        plt.plot(startRelTimesAndMSPRsUnitedStatesByLabel[i][0],startRelTimesAndMSPRsUnitedStatesByLabel[i][1], linestyle='', color=(0.0, 0.6*fraction, 1.0*fraction),marker='o',markersize=plotMarkerSize,label="U.S.A.--" + reducedLabels[i])
+        
+    for i in range(0,len(reducedLabels)):
+        fraction = 0.5+0.5*(i+1)/len(reducedLabels)
+        plt.plot(startRelTimesAndMSPRsRussiaByLabel[i][0],startRelTimesAndMSPRsRussiaByLabel[i][1], linestyle='', color=(1.0*fraction, 0.0, 0.0),marker='o',markersize=plotMarkerSize,label="Russia--" + reducedLabels[i])
+
+    for i in range(0,len(reducedLabels)):
+        fraction = 0.5+0.5*(i+1)/len(reducedLabels)
+        plt.plot(startRelTimesAndMSPRsOtherByLabel[i][0],startRelTimesAndMSPRsOtherByLabel[i][1], linestyle='', color=(0.0, 1.0*fraction, 0.0),marker='o',markersize=plotMarkerSize,label="Other--" + reducedLabels[i])
+    plt.legend(loc="center left",ncol=1,bbox_to_anchor=(1, 0.5)) 
+    plt.ylim([0,clipTimeInSeconds])
+    plt.title("Response Times (s)\n", fontsize=42*fontFactor)
+    plt.xlabel("Time during Test (s)", fontsize=32*fontFactor)  
+    plt.ylabel("Response Times (s)", fontsize=32*fontFactor)  
+    plt.savefig( outputDir+'/responseTimesByRegion2.png', bbox_inches='tight' )
     #plt.show()    
     # plt.clf()
     # plt.close()  
