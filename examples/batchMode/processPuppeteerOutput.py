@@ -253,7 +253,7 @@ if __name__ == "__main__":
     # ax.set_aspect('equal')
     # for i in range(0,20) :
     colorValue = 0.85
-    edgeColor = None  # (colorValue*.9, colorValue*.9, colorValue*.9)
+    edgeColor = (colorValue*.85, colorValue*.85, colorValue*.85)
 
     for i in range(0,len(CountryData)) :
         if isinstance( CountryData[i][1], np.ndarray ):
