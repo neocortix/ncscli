@@ -68,9 +68,22 @@ def test_runBatchBinary():
             pytest.xfail( 'C compiler not found (for building helloFrame_aarch64)' )
         # build the ARM executable
         rc = subprocess.call( ['aarch64-linux-gnu-gcc', '-o', 'helloFrame_aarch64', 'helloFrame.c'] )
-        assert rc==0, 'could not build helloFrameGo_aarch64'
+        assert rc==0, 'could not build helloFrame_aarch64'
 
     check_batchRunner_example( 'runBatchBinary', 'frame_*.out' )
+
+def test_runBatchBinaryCpp():
+    # check if the built ARM executable already exists
+    if not os.path.isfile('helloFrameCpp_aarch64'):
+        # check if the Cpp compiler is available
+        rc = subprocess.call( 'hash aarch64-linux-gnu-g++', shell=True )
+        if rc != 0:
+            pytest.xfail( 'C++ compiler not found (for building helloFrameCpp_aarch64)' )
+        # build the ARM executable
+        rc = subprocess.call( ['aarch64-linux-gnu-g++', '-o', 'helloFrameCpp_aarch64', 'helloFrameCpp.cpp'] )
+        assert rc==0, 'could not build helloFrameCpp_aarch64'
+
+    check_batchRunner_example( 'runBatchBinaryCpp', 'frame_*.out' )
 
 def test_runBatchBinaryGo():
     # check if the built ARM executable already exists
@@ -84,6 +97,22 @@ def test_runBatchBinaryGo():
         assert rc==0, 'could not build helloFrame_aarch64'
 
     check_batchRunner_example( 'runBatchBinaryGo', 'frame_*.out' )
+
+def test_runBatchJava():
+    # check if the built JAR file already exists
+    if not os.path.isfile('helloFrame.jar'):
+        # check if the javac compiler is available
+        rc = subprocess.call( 'hash javac', shell=True )
+        if rc != 0:
+            pytest.xfail( 'javac compiler not found (for building helloFrame.jar)' )
+        # build the Java class
+        rc = subprocess.call( 'javac -d helloFrame-bin helloFrame.java', shell=True )
+        if rc == 0:
+            rc = subprocess.call( 'jar -cvfe helloFrame.jar com.example.helloFrame -C helloFrame-bin/ com/example', shell=True )
+
+        assert rc==0, 'could not build helloFrame.jar'
+
+    check_batchRunner_example( 'runBatchJava', 'frame_*.out' )
 
 def test_runBatchBlender():
     check_batchRunner_example( 'runBatchBlender', 'rendered_frame_*.png' )
