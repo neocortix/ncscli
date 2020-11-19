@@ -23,6 +23,7 @@ jobs:
         python-version: ${{ matrix.python-version }}
     - name: Install dependencies
       run: |
+        sudo apt install crossbuild-essential-arm64
         python -m pip install --upgrade pip
         pip install flake8 pytest
         pip install requests>=2.12.4, asyncssh>=1.16.1, matplotlib
