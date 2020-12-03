@@ -19,6 +19,15 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
+def boolArg( v ):
+    '''use with ArgumentParser add_argument for (case-insensitive) boolean arg'''
+    if v.lower() == 'true':
+        return True
+    elif v.lower() == 'false':
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 def demuxResults( inFilePath ):
     instanceList = []
     with open( inFilePath, 'rb' ) as inFile:
@@ -106,13 +115,14 @@ if __name__ == "__main__":
 
     ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( '--dataDirPath', required=True, help='the path to to directory for input and output data' )
+    ap.add_argument( '--logY', type=boolArg, help='whether to use log scale on Y axis', default=False)
     args = ap.parse_args()
 
     logger.info( 'plotting data in directory %s', os.path.realpath(args.dataDirPath)  )
 
     #mpl.rcParams.update({'font.size': 28})
     #mpl.rcParams['axes.linewidth'] = 2 #set the value globally
-    
+    logYWanted = args.logY
     outputDir = args.dataDirPath
     launchedJsonFilePath = outputDir + "/recruitLaunched.json"
     print("launchedJsonFilePath = %s" % launchedJsonFilePath)
@@ -471,7 +481,15 @@ if __name__ == "__main__":
     plt.plot(startRelTimesAndMSPRsUnitedStates[0],startRelTimesAndMSPRsUnitedStates[1], linestyle='', color=(0.0, 0.6, 1.0),marker='o',markersize=plotMarkerSize)
     plt.plot(startRelTimesAndMSPRsRussia[0],startRelTimesAndMSPRsRussia[1], linestyle='', color=(1.0, 0.0, 0.0),marker='o',markersize=plotMarkerSize)
     plt.plot(startRelTimesAndMSPRsOther[0],startRelTimesAndMSPRsOther[1], linestyle='', color=(0.0, 1.0, 0.0),marker='o',markersize=plotMarkerSize)
-    plt.ylim([0,clipTimeInSeconds])
+    if not logYWanted:
+        plt.ylim([0,clipTimeInSeconds])
+    else:
+        plt.ylim( [.01, 10] )
+        plt.yscale( 'log' )
+        ax = plt.gca()
+        ax.yaxis.set_major_locator( mpl.ticker.FixedLocator([ .02, .05, .1, .2, .5, 1, 2, 5, 10]) )
+        ax.yaxis.set_major_formatter(mpl.ticker.ScalarFormatter())
+
     plt.title("Response Times (s)\n", fontsize=42*fontFactor)
     plt.xlabel("Time during Test (s)", fontsize=32*fontFactor)  
     plt.ylabel("Response Times (s)", fontsize=32*fontFactor)  
