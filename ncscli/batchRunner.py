@@ -539,6 +539,15 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
         if (not getInstallerCmd()) and (not args.commonInFilePath):
             return goodInstances
         if not sigtermSignaled():
+            def waiter():
+                thr = threading.current_thread()
+                while not thr.stopRequested:
+                    time.sleep( 30 )
+                    if not thr.stopRequested:
+                        logger.info( 'waiting for installer' )
+            narrator = threading.Thread( target=waiter )
+            narrator.stopRequested = False
+            narrator.start()
             installerCmd = getInstallerCmd()
             logger.info( 'calling tellInstances to install on %d instances', len(goodInstances))
             stepStatuses = tellInstances.tellInstances( goodInstances, installerCmd,
@@ -547,6 +556,11 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
                 timeLimit=min(args.instTimeLimit, args.timeLimit), upload=args.commonInFilePath, stopOnSigterm=not True,
                 knownHostsOnly=True
                 )
+            narrator.stopRequested = True
+            narrator.join( timeout=60 )
+            if narrator.is_alive():
+                logger.warning( 'the narrator thread did not stop')
+
             # SHOULD restore our handler because tellInstances may have overridden it
             #signal.signal( signal.SIGTERM, sigtermHandler )
             if not stepStatuses:
