@@ -1185,6 +1185,9 @@ def runBatch( **kwargs ):
         settingsToSave = argsToSave.copy()
         with open( settingsJsonFilePath, 'w' ) as settingsFile:
             json.dump( settingsToSave, settingsFile )
+        # return early if recruitOnly
+        if args.recruitOnly:
+            return int( len( goodInstances ) == 0 )  # zero if good, 1 if bad
 
         if not len(goodInstances):
             logger.error( 'no good instances were recruited')
@@ -1273,6 +1276,8 @@ def createArgumentParser():
     ap.add_argument( '--nWorkers', type=int, help='to override the # of worker instances (default=0 for automatic)',
         default=0 )
     ap.add_argument( '--limitOneFramePerWorker', type=boolArg, help='prevent any worker from doing multiple frames',
+        default=False )
+    ap.add_argument( '--recruitOnly', type=boolArg, help='set True to exit immediately after installing',
         default=False )
     ap.add_argument( '--autoscaleInit', type=float, help='multiple (instances per frame) to launch initially',
         default=1 )
