@@ -82,8 +82,8 @@ try:
         limitOneFramePerWorker = True,
         autoscaleMax = 1,
         startFrame = 1,
-        endFrame = 12,
-        nWorkers = 12
+        endFrame = 5,
+        nWorkers = 5
     )
     if rc == 0:
         forwarderHost = 'localhost'
