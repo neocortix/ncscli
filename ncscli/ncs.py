@@ -12,6 +12,7 @@ import os
 import signal
 import sys
 import random
+import subprocess
 import time
 import uuid
 
@@ -448,6 +449,22 @@ def launchScInstances( authToken, encryptFiles, numReq=1,
         time.sleep(30)  # possible race condition here
         terminateJobInstances( authToken, jobId )
         raise
+
+def purgeKnownHost( host, port ):
+    # purge an entry from known_hosts
+    cmd = 'ssh-keygen -q -R [%s]:%s > /dev/null 2> /dev/null' % (host, port )
+    #logger.debug( 'cmd: %s', cmd )
+    retCode = subprocess.call( cmd, shell=True )
+    if retCode != 0:
+        logger.error( 'returnd error code %s', retCode )
+
+def purgeKnownHosts( inRecs ):
+    for inRec in inRecs:
+        if 'ssh' in inRec:
+            host = inRec['ssh'].get('host')
+            port = inRec['ssh'].get('port')
+            if host and port:
+                purgeKnownHost( host, port )
 
 def terminateNcscInstance( authToken, iid, maxRetries=1000 ):
     headers = ncscReqHeaders( authToken )
