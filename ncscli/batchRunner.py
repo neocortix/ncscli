@@ -1091,7 +1091,7 @@ def runBatch( **kwargs ):
         logger.error( 'no frameProcessor given' )
         return 1
 
-    if args.frameTimeLimit > args.timeLimit:
+    if (args.frameTimeLimit > args.timeLimit) and not args.recruitOnly:
         logger.warning('given frameTimeLimit (%d) > given job timeLimit; using %d for both',
             args.frameTimeLimit, args.timeLimit )
 
