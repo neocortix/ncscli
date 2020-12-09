@@ -38,7 +38,9 @@ def startForwarders( agentInstances, forwarderHost, portRangeStart=7102, maxPort
                 '%s@%s' % (user, instHost)
             ]
             #logger.info( 'cmd: %s', cmd )
-            rc = subprocess.call( cmd, shell=False, stdin=subprocess.DEVNULL )
+            rc = subprocess.call( cmd, shell=False,
+                stdin=subprocess.DEVNULL
+                )
             if rc:
                 logger.warning( 'could not forward to %s (rc %d)', iidAbbrev, rc )
                 continue
@@ -51,7 +53,7 @@ def startForwarders( agentInstances, forwarderHost, portRangeStart=7102, maxPort
 
             assignedPort += 1
             if assignedPort > maxPort:
-                logger.warning( 'exceeded maxport (%d vs %d)', assignedPort, maxPort )
+                logger.warning( 'exceeded maxPort (%d vs %d)', assignedPort, maxPort )
     print( 'forwarding:', ', '.join(mappings) )
 
 # configure logger formatting
@@ -74,15 +76,10 @@ try:
         commonInFilePath = 'nlAgent',
         authToken = os.getenv('NCS_AUTH_TOKEN') or 'YourAuthTokenHere',
         encryptFiles=False,
-        timeLimit = 89*60,
+        timeLimit = 60*60,
         instTimeLimit = 12*60,
-        frameTimeLimit = 15*60,
         filter = '{"dpr": ">=48","ram:":">=2800000000","app-version": ">=2.1.11"}',
         outDataDir = outDataDir,
-        limitOneFramePerWorker = True,
-        autoscaleMax = 1,
-        startFrame = 1,
-        endFrame = 5,
         nWorkers = 5
     )
     if rc == 0:
@@ -139,7 +136,8 @@ try:
             logger.info( 'would forward ports for %d instances', len(goodInstances) )
             startForwarders( goodInstances, forwarderHost )
         if jobId:
-            print( 'when you want to terminate these instances, use ncs.py sc terminate --jobId "%s"' % jobId)
+            print( 'when you want to terminate these instances, use python3 terminateAgents.py "%s"'
+                % (outDataDir + '/recruitLaunched.json'))
     sys.exit( rc )
 except KeyboardInterrupt:
     logger.warning( 'an interuption occurred')
