@@ -9,6 +9,7 @@ import time
 
 import ncscli.batchRunner as batchRunner
 import ncscli.tellInstances as tellInstances
+import startForwarders  # expected to be in the same directory
 
 
 class neoloadFrameProcessor(batchRunner.frameProcessor):
@@ -17,44 +18,6 @@ class neoloadFrameProcessor(batchRunner.frameProcessor):
     def installerCmd( self ):
         return 'nlAgent/install.sh'
 
-def startForwarders( agentInstances, forwarderHost, portRangeStart=7102, maxPort = 7199 ):
-    forwardingCsvFilePath = outDataDir +'/agentForwarding.csv'
-    with open( forwardingCsvFilePath, 'w' ) as csvOutFile:
-        print( 'forwarding', 'instanceId', 'instHost', 'instSshPort', 'assignedPort',
-            sep=',', file=csvOutFile
-            )
-        assignedPort = portRangeStart
-        mappings = []
-        for inst in agentInstances:
-            iid = inst['instanceId']
-            iidAbbrev = iid[0:8]
-            sshSpecs = inst['ssh']
-            instHost = sshSpecs['host']
-            instPort = sshSpecs['port']
-            user = sshSpecs['user']
-            logger.info( '%d ->%s %s@%s:%s', assignedPort, iidAbbrev, user, instHost, instPort )
-            cmd = ['ssh', '-fNT', '-o', 'ExitOnForwardFailure=yes', '-p', str(instPort), '-L',
-                '*:'+str(assignedPort)+':localhost:7100', 
-                '%s@%s' % (user, instHost)
-            ]
-            #logger.info( 'cmd: %s', cmd )
-            rc = subprocess.call( cmd, shell=False,
-                stdin=subprocess.DEVNULL
-                )
-            if rc:
-                logger.warning( 'could not forward to %s (rc %d)', iidAbbrev, rc )
-                continue
-
-            mapping = '%s:%d' % (forwarderHost, assignedPort)
-            mappings.append( mapping )
-            print( mapping, iid, instHost, instPort, assignedPort,
-                sep=',', file=csvOutFile
-                )
-
-            assignedPort += 1
-            if assignedPort > maxPort:
-                logger.warning( 'exceeded maxPort (%d vs %d)', assignedPort, maxPort )
-    print( 'forwarding:', ', '.join(mappings) )
 
 # configure logger formatting
 #logging.basicConfig()
@@ -70,6 +33,7 @@ dateTimeTag = datetime.datetime.now().strftime( '%Y-%m-%d_%H%M%S' )
 outDataDir = 'data/neoload_' + dateTimeTag
 
 try:
+    # call runBatch to launch worker instances and install the load generator agent on them
     rc = batchRunner.runBatch(
         frameProcessor = neoloadFrameProcessor(),
         recruitOnly=True,
@@ -77,25 +41,22 @@ try:
         authToken = os.getenv('NCS_AUTH_TOKEN') or 'YourAuthTokenHere',
         encryptFiles=False,
         timeLimit = 60*60,
-        instTimeLimit = 12*60,
+        instTimeLimit = 15*60,
         filter = '{"dpr": ">=48","ram:":">=2800000000","app-version": ">=2.1.11"}',
         outDataDir = outDataDir,
         nWorkers = 5
     )
     if rc == 0:
         forwarderHost = 'localhost'
+        portRangeStart=7102
         launchedJsonFilePath = outDataDir +'/recruitLaunched.json'
         launchedInstances = []
-        # get instances from the launched json file
+        # get details of launched instances from the json file
         with open( launchedJsonFilePath, 'r') as jsonInFile:
             try:
                 launchedInstances = json.load(jsonInFile)  # an array
             except Exception as exc:
                 logger.warning( 'could not load json (%s) %s', type(exc), exc )
-        jobId = None
-        if launchedInstances:
-            jobId = launchedInstances[0]['job']
-        logger.info( 'jobId: %s', jobId )
         startedInstances = [inst for inst in launchedInstances if inst['state'] == 'started' ]
         logger.info( 'started %d instances', len(startedInstances) )
 
@@ -104,7 +65,7 @@ try:
         starterCmd = 'cd ~/neoload7.6/ && /usr/bin/java -Dneotys.vista.headless=true -Xmx512m -Dvertx.disableDnsResolver=true -classpath $HOME/neoload7.6/.install4j/i4jruntime.jar:$HOME/neoload7.6/.install4j/launcherc0a362f9.jar:$HOME/neoload7.6/bin/*:$HOME/neoload7.6/lib/crypto/*:$HOME/neoload7.6/lib/*:$HOME/neoload7.6/lib/jdbcDrivers/*:$HOME/neoload7.6/lib/plugins/ext/* install4j.com.neotys.nl.agent.launcher.AgentLauncher_LoadGeneratorAgentService start &'
         stepStatuses = tellInstances.tellInstances( startedInstances, command=starterCmd,
             resultsLogFilePath=outDataDir +'/startAgents.jlog',
-            timeLimit=3600,
+            timeLimit=30*60,
             knownHostsOnly=True
             )
         logger.info( 'starter statuses: %s', stepStatuses )
@@ -121,7 +82,7 @@ try:
             # download the agent.log file from each instance
             stepStatuses = tellInstances.tellInstances( goodInstances,
                 download=agentLogFilePath, downloadDestDir=outDataDir +'/agentLogs',
-                timeLimit=3600,
+                timeLimit=30*60,
                 knownHostsOnly=True
                 )
             logger.info( 'download statuses: %s', stepStatuses )
@@ -133,9 +94,17 @@ try:
                 else:
                     logger.warning( 'could not download log from %s', status['instanceId'][0:8] )
             goodInstances = [inst for inst in goodInstances if inst['instanceId'] in goodIids ]
+            with open( outDataDir + '/startedAgents.json','w' ) as outFile:
+                json.dump( goodInstances, outFile )
+
+            # start the ssh port-forwarding
             logger.info( 'would forward ports for %d instances', len(goodInstances) )
-            startForwarders( goodInstances, forwarderHost )
-        if jobId:
+            startForwarders.startForwarders( goodInstances,
+                forwarderHost=forwarderHost,
+                portRangeStart=portRangeStart, maxPort=portRangeStart+100,
+                forwardingCsvFilePath=outDataDir+'/agentForwarding.csv'
+                )
+        if launchedInstances:
             print( 'when you want to terminate these instances, use python3 terminateAgents.py "%s"'
                 % (outDataDir + '/recruitLaunched.json'))
     sys.exit( rc )
