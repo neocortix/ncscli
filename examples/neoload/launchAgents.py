@@ -44,7 +44,7 @@ try:
         instTimeLimit = 15*60,
         filter = '{"dpr": ">=48","ram:":">=2800000000","app-version": ">=2.1.11"}',
         outDataDir = outDataDir,
-        nWorkers = 5
+        nWorkers = 10
     )
     if rc == 0:
         forwarderHost = 'localhost'
@@ -61,8 +61,10 @@ try:
         logger.info( 'started %d instances', len(startedInstances) )
 
         agentLogFilePath = '/root/.neotys/neoload/v7.6/logs/agent.log'
+        #agentLogFilePath = '/root/.neotys/neoload/v7.7/logs/agent.log'  # future
         # start the agent on each instance 
         starterCmd = 'cd ~/neoload7.6/ && /usr/bin/java -Dneotys.vista.headless=true -Xmx512m -Dvertx.disableDnsResolver=true -classpath $HOME/neoload7.6/.install4j/i4jruntime.jar:$HOME/neoload7.6/.install4j/launcherc0a362f9.jar:$HOME/neoload7.6/bin/*:$HOME/neoload7.6/lib/crypto/*:$HOME/neoload7.6/lib/*:$HOME/neoload7.6/lib/jdbcDrivers/*:$HOME/neoload7.6/lib/plugins/ext/* install4j.com.neotys.nl.agent.launcher.AgentLauncher_LoadGeneratorAgentService start &'
+        #starterCmd = 'cd ~/neoload7.7/ && /usr/bin/java -Dneotys.vista.headless=true -Xmx512m -Dvertx.disableDnsResolver=true -classpath $HOME/neoload7.7/.install4j/i4jruntime.jar:$HOME/neoload7.7/.install4j/launcherc0a362f9.jar:$HOME/neoload7.7/bin/*:$HOME/neoload7.7/lib/crypto/*:$HOME/neoload7.7/lib/*:$HOME/neoload7.7/lib/jdbcDrivers/*:$HOME/neoload7.7/lib/plugins/ext/* install4j.com.neotys.nl.agent.launcher.AgentLauncher_LoadGeneratorAgentService start &'
         stepStatuses = tellInstances.tellInstances( startedInstances, command=starterCmd,
             resultsLogFilePath=outDataDir +'/startAgents.jlog',
             timeLimit=30*60,
@@ -96,6 +98,13 @@ try:
             goodInstances = [inst for inst in goodInstances if inst['instanceId'] in goodIids ]
             with open( outDataDir + '/startedAgents.json','w' ) as outFile:
                 json.dump( goodInstances, outFile )
+
+            # plot map of workers
+            if os.path.isfile( outDataDir +'/startedAgents.json' ):
+                rc2 = subprocess.call( ['./plotAgentMap.py', '--dataDirPath', outDataDir],
+                    stdout=subprocess.DEVNULL )
+                if rc2:
+                    logger.warning( 'plotAgentMap exited with returnCode %d', rc2 )
 
             # start the ssh port-forwarding
             logger.info( 'would forward ports for %d instances', len(goodInstances) )
