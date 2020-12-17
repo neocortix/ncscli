@@ -12,7 +12,8 @@ class JMeterFrameProcessor(batchRunner.frameProcessor):
     '''defines details for using JMeter for a simplistic load test'''
 
     def installerCmd( self ):
-        return 'curl -s -S -L https://mirror.olnevhost.net/pub/apache/jmeter/binaries/apache-jmeter-5.3.tgz > apache-jmeter-5.3.tgz && tar zxf apache-jmeter-5.3.tgz'
+        return 'curl -s -S -L https://mirrors.sonic.net/apache/jmeter/binaries/apache-jmeter-5.3.tgz > apache-jmeter-5.3.tgz && tar zxf apache-jmeter-5.3.tgz'
+        # alternativey, could use https://mirror.olnevhost.net/pub/apache/... or https://downloads.apache.org/...
 
     JMeterFilePath = 'TestPlan.jmx'
     #JMeterFilePath = 'TestPlan_RampLong.jmx'
@@ -46,8 +47,8 @@ try:
         authToken = os.getenv( 'NCS_AUTH_TOKEN' ) or 'YourAuthTokenHere',
         encryptFiles=False,
         timeLimit = 80*60,
-        instTimeLimit = 6*60,
-        frameTimeLimit = 600,
+        instTimeLimit = 12*60,
+        frameTimeLimit = 10*60,
         filter = '{"dpr": ">=48","ram:":">=2800000000","app-version": ">=2.1.11"}',
         outDataDir = outDataDir,
         startFrame = 1,
@@ -56,7 +57,7 @@ try:
         limitOneFramePerWorker = True,
         autoscaleMax = 2
     )
-    if os.path.isfile( outDataDir +'/recruitLaunched.json' ):
+    if (rc == 0) and os.path.isfile( outDataDir +'/recruitLaunched.json' ):
         rc2 = subprocess.call( ['./plotJMeterOutput.py', '--dataDirPath', outDataDir],
             stdout=subprocess.DEVNULL )
         if rc2:
