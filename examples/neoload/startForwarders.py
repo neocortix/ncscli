@@ -45,14 +45,12 @@ def startForwarders( agentInstances, forwarderHost='localhost',
                 )
             if rc:
                 logger.warning( 'could not forward to %s (rc %d)', iidAbbrev, rc )
-                continue
-
-            mapping = '%s:%d' % (forwarderHost, assignedPort)
-            mappings.append( mapping )
-            print( mapping, iid, instHost, instPort, assignedPort,
-                sep=',', file=csvOutFile
-                )
-
+            else:
+                mapping = '%s:%d' % (forwarderHost, assignedPort)
+                mappings.append( mapping )
+                print( mapping, iid, instHost, instPort, assignedPort,
+                    sep=',', file=csvOutFile
+                    )
             assignedPort += 1
     logger.info( 'forwarding ports for %d agents', len(mappings) )
     if mappings:
