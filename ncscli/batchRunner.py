@@ -34,7 +34,7 @@ import requests
 # neocortix modules
 from . import ncs
 from . import jsonToKnownHosts
-from . import purgeKnownHosts
+#from . import purgeKnownHosts
 from . import tellInstances
 
 logger = logging.getLogger(__name__)
@@ -204,7 +204,7 @@ def purgeHostKeys( instanceRecs ):
     '''try to purgeKnownHosts; warn if any exception'''
     logger.debug( 'purgeKnownHosts for %d instances', len(instanceRecs) )
     try:
-        purgeKnownHosts.purgeKnownHosts( instanceRecs )
+        ncs.purgeKnownHosts( instanceRecs )
     except Exception as exc: 
         logger.warning( 'exception from purgeKnownHosts (%s) %s', type(exc), exc, exc_info=True )
         return 1
