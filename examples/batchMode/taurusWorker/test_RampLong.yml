@@ -1,0 +1,29 @@
+settings:
+  artifacts-dir: artifacts
+  check-interval: 10
+
+execution:
+- concurrency: 5
+  ramp-up: 300s
+  hold-for: 200s
+  scenario: quick-test
+
+scenarios:
+  quick-test:
+    requests:
+    - https://loadtest-target.neocortix.com
+
+modules:
+  console:
+    disable: true
+  consolidator:
+    min-buffer-len: 8s
+
+services:
+- module: monitoring
+  ~local:
+  - disable: true
+  - metrics:
+    - cpu
+    - mem
+

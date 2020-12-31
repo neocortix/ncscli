@@ -1,0 +1,12 @@
+settings:
+  artifacts-dir: artifacts_w
+
+execution:
+- concurrency: 1
+  iterations: 1
+  scenario: quick-test
+
+scenarios:
+  quick-test:
+    requests:
+    - https://loadtest-target.neocortix.com

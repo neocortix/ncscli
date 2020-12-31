@@ -1,0 +1,28 @@
+--- ../.local/lib/python3.7/site-packages/bzt/modules/monitoring.py     2020-12-21 20:31:06.991930608 +0000
++++ ./monitoring.py     2020-12-29 22:24:10.611830710 +0000
+@@ -70,10 +70,11 @@
+         for client in self.clients:
+             client.start()
+         super(Monitoring, self).startup()
+
+     def check(self):
++        return super(Monitoring, self).check()
+         results = []
+         for client in self.clients:
+             results.extend(client.get_data())
+
+         if results:
+@@ -315,11 +316,11 @@
+
+     def __get_disk_counters(self):
+         counters = None
+         try:
+             counters = psutil.disk_io_counters()
+-        except RuntimeError as exc:
++        except Exception as exc:
+             self.log.debug("Failed to get disk metrics: %s", exc)
+         if counters is None:
+             counters = psutil._common.sdiskio(0, 0, 0, 0, 0, 0)  # pylint: disable=protected-access
+             # noinspection PyProtectedMember
+         return counters
+
