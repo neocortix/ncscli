@@ -15,7 +15,7 @@ class taurusFrameProcessor(batchRunner.frameProcessor):
         cmd = 'sudo apt-get -qq update'
         cmd += ' && sudo apt-get -qq install build-essential'
         cmd += ' && sudo apt-get -qq install python3-dev'
-        cmd += ' && python3 -m pip install --user bzt'
+        cmd += ' && python3 -m pip install --user numpy==1.19.4 bzt'
         cmd += ' && cd taurusWorker'
         cmd += ' && patch -b -p4 ../.local/lib/python3.7/site-packages/bzt/modules/monitoring.py < monitoring.patch'
         cmd += ' && bzt warmup.yml'
