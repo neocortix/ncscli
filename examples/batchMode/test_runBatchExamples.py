@@ -153,3 +153,6 @@ def test_runBatchPuppeteerLighthouse():
 
 def test_runBatchPython():
     check_batchRunner_example( 'runBatchPython', 'sine_*.png' )
+
+def test_runBatchTaurus():
+    check_batchRunner_example( 'runBatchTaurus', 'artifacts_*/kpi.jtl' )
