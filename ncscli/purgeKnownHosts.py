@@ -18,7 +18,7 @@ def purgeKnownHost( host, port ):
     #logger.debug( 'cmd: %s', cmd )
     retCode = subprocess.call( cmd, shell=True )
     if retCode != 0:
-        logger.error( 'returnd error code %s', retCode )
+        logger.error( 'returned error code %s', retCode )
 
 def purgeKnownHosts( inRecs ):
     for inRec in inRecs:
