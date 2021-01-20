@@ -156,11 +156,6 @@
               <stringProp name="Argument.value">YourApiToken</stringProp>
               <stringProp name="Argument.metadata">=</stringProp>
             </elementProp>
-            <elementProp name="transactionDimensions" elementType="Argument">
-              <stringProp name="Argument.name">transactionDimensions</stringProp>
-              <stringProp name="Argument.value">dt.entity.service=SERVICE-xxxxx</stringProp>
-              <stringProp name="Argument.metadata">=</stringProp>
-            </elementProp>
             <elementProp name="dynatraceMetricIngestUrl" elementType="Argument">
               <stringProp name="Argument.name">dynatraceMetricIngestUrl</stringProp>
               <stringProp name="Argument.value">https://xxxxx.live.dynatrace.com/api/v2/metrics/ingest</stringProp>
