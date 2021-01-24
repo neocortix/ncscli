@@ -20,7 +20,7 @@ class JMeterFrameProcessor(batchRunner.frameProcessor):
         return cmd
 
     JMeterFilePath = 'TestPlan_dynatrace.jmx'
-    #JMeterFilePath = 'TestPlan_dt_0.jmx'
+    #JMeterFilePath = 'TestPlan_dynatrace_RampLong.jmx'
 
     def frameOutFileName( self, frameNum ):
         return 'TestPlan_results_%03d.csv' % frameNum
