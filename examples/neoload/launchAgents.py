@@ -11,12 +11,16 @@ import ncscli.batchRunner as batchRunner
 import ncscli.tellInstances as tellInstances
 import startForwarders  # expected to be in the same directory
 
+neoloadVersion = '7.7'  # '7.6' and '7.7 are currently supported
 
 class neoloadFrameProcessor(batchRunner.frameProcessor):
     '''defines details for installing Neotys Load Generator agent on a worker'''
 
     def installerCmd( self ):
-        return 'nlAgent/install.sh'
+        if neoloadVersion == '7.7':
+            return 'nlAgent/install_7-7.sh'
+        else:
+            return 'nlAgent/install_7-6.sh'
 
 
 # configure logger formatting
@@ -41,7 +45,7 @@ try:
         authToken = os.getenv('NCS_AUTH_TOKEN') or 'YourAuthTokenHere',
         encryptFiles=False,
         timeLimit = 60*60,
-        instTimeLimit = 15*60,
+        instTimeLimit = 30*60,
         filter = '{"dpr": ">=48","ram:":">=2800000000","app-version": ">=2.1.11"}',
         outDataDir = outDataDir,
         nWorkers = 10
@@ -60,11 +64,14 @@ try:
         startedInstances = [inst for inst in launchedInstances if inst['state'] == 'started' ]
         logger.info( 'started %d instances', len(startedInstances) )
 
-        agentLogFilePath = '/root/.neotys/neoload/v7.6/logs/agent.log'
-        #agentLogFilePath = '/root/.neotys/neoload/v7.7/logs/agent.log'  # future
+        if neoloadVersion == '7.7':
+            agentLogFilePath = '/root/.neotys/neoload/v7.7/logs/agent.log'
+            starterCmd = 'cd ~/neoload7.7/ && /usr/bin/java -Xmx512m -Dvertx.disableDnsResolver=true -classpath $HOME/neoload7.7/.install4j/i4jruntime.jar:$HOME/neoload7.7/.install4j/launchera03c11da.jar:$HOME/neoload7.7/bin/*:$HOME/neoload7.7/lib/crypto/*:$HOME/neoload7.7/lib/*:$HOME/neoload7.7/lib/jdbcDrivers/*:$HOME/neoload7.7/lib/plugins/ext/* install4j.com.neotys.nl.agent.launcher.AgentLauncher_LoadGeneratorAgent start &'
+        else:
+            agentLogFilePath = '/root/.neotys/neoload/v7.6/logs/agent.log'
+            starterCmd = 'cd ~/neoload7.6/ && /usr/bin/java -Dneotys.vista.headless=true -Xmx512m -Dvertx.disableDnsResolver=true -classpath $HOME/neoload7.6/.install4j/i4jruntime.jar:$HOME/neoload7.6/.install4j/launcherc0a362f9.jar:$HOME/neoload7.6/bin/*:$HOME/neoload7.6/lib/crypto/*:$HOME/neoload7.6/lib/*:$HOME/neoload7.6/lib/jdbcDrivers/*:$HOME/neoload7.6/lib/plugins/ext/* install4j.com.neotys.nl.agent.launcher.AgentLauncher_LoadGeneratorAgentService start &'
+
         # start the agent on each instance 
-        starterCmd = 'cd ~/neoload7.6/ && /usr/bin/java -Dneotys.vista.headless=true -Xmx512m -Dvertx.disableDnsResolver=true -classpath $HOME/neoload7.6/.install4j/i4jruntime.jar:$HOME/neoload7.6/.install4j/launcherc0a362f9.jar:$HOME/neoload7.6/bin/*:$HOME/neoload7.6/lib/crypto/*:$HOME/neoload7.6/lib/*:$HOME/neoload7.6/lib/jdbcDrivers/*:$HOME/neoload7.6/lib/plugins/ext/* install4j.com.neotys.nl.agent.launcher.AgentLauncher_LoadGeneratorAgentService start &'
-        #starterCmd = 'cd ~/neoload7.7/ && /usr/bin/java -Dneotys.vista.headless=true -Xmx512m -Dvertx.disableDnsResolver=true -classpath $HOME/neoload7.7/.install4j/i4jruntime.jar:$HOME/neoload7.7/.install4j/launcherc0a362f9.jar:$HOME/neoload7.7/bin/*:$HOME/neoload7.7/lib/crypto/*:$HOME/neoload7.7/lib/*:$HOME/neoload7.7/lib/jdbcDrivers/*:$HOME/neoload7.7/lib/plugins/ext/* install4j.com.neotys.nl.agent.launcher.AgentLauncher_LoadGeneratorAgentService start &'
         stepStatuses = tellInstances.tellInstances( startedInstances, command=starterCmd,
             resultsLogFilePath=outDataDir +'/startAgents.jlog',
             timeLimit=30*60,
