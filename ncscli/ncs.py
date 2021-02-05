@@ -19,7 +19,7 @@ import uuid
 # third-party modules
 import requests
 
-__version__ = '1.1.5'
+__version__ = '1.1.6'
 logger = logging.getLogger(__name__)
 
 
