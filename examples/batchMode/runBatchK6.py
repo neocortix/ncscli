@@ -58,7 +58,7 @@ try:
         autoscaleMax = 2
     )
     if os.path.isfile( outDataDir +'/recruitLaunched.json' ):
-        rc2 = subprocess.call( ['./plotK6Output.py', '--dataDirPath', outDataDir],
+        rc2 = subprocess.call( [sys.executable, 'plotK6Output.py', '--dataDirPath', outDataDir],
             stdout=subprocess.DEVNULL )
         if rc2:
             logger.warning( 'plotK6Output.py exited with returnCode %d', rc2 )

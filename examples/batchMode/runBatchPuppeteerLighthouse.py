@@ -65,7 +65,7 @@ try:
     )
     if os.path.isfile( outDataDir +'/recruitLaunched.json' ):
         untarResults( outDataDir )
-        rc2 = subprocess.call( ['./processPuppeteerOutput.py', '--dataDirPath', outDataDir],
+        rc2 = subprocess.call( [sys.executable, 'processPuppeteerOutput.py', '--dataDirPath', outDataDir],
             stdout=subprocess.DEVNULL )
         if rc2:
             logger.warning( 'processPuppeteerOutput exited with returnCode %d', rc2 )

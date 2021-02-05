@@ -64,7 +64,7 @@ try:
         autoscaleMax = 2
     )
     if (rc == 0) and os.path.isfile( outDataDir +'/recruitLaunched.json' ):
-        rc2 = subprocess.call( ['./plotJMeterOutput.py', '--dataDirPath', outDataDir],
+        rc2 = subprocess.call( [sys.executable, 'plotJMeterOutput.py', '--dataDirPath', outDataDir],
             stdout=subprocess.DEVNULL )
         if rc2:
             logger.warning( 'plotJMeterOutput exited with returnCode %d', rc2 )

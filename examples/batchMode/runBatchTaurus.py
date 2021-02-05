@@ -62,7 +62,7 @@ try:
         autoscaleMax = 2
     )
     if os.path.isfile( outDataDir +'/recruitLaunched.json' ):
-        rc2 = subprocess.call( ['./plotTaurusOutput.py', '--dataDirPath', outDataDir],
+        rc2 = subprocess.call( [sys.executable, 'plotTaurusOutput.py', '--dataDirPath', outDataDir],
             stdout=subprocess.DEVNULL )
         if rc2:
             logger.warning( 'plotTaurusOutput.py exited with returnCode %d', rc2 )

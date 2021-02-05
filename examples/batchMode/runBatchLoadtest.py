@@ -58,7 +58,7 @@ try:
         autoscaleMax = 2
     )
     if os.path.isfile( outDataDir +'/recruitLaunched.json' ):
-        rc2 = subprocess.call( ['./plotLocustOutput.py', '--dataDirPath', outDataDir],
+        rc2 = subprocess.call( [sys.executable, 'plotLocustOutput.py', '--dataDirPath', outDataDir],
             stdout=subprocess.DEVNULL )
         if rc2:
             logger.warning( 'plotLocustOutput.py exited with returnCode %d', rc2 )

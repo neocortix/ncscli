@@ -58,14 +58,14 @@ try:
     )
     if os.path.isfile( outDataDir +'/recruitLaunched.json' ):
         # plot output (requires matplotlib)
-        rc2 = subprocess.call( ['./plotGatlingOutput.py', '--dataDirPath', outDataDir],
+        rc2 = subprocess.call( [sys.executable, 'plotGatlingOutput.py', '--dataDirPath', outDataDir],
             stdout=subprocess.DEVNULL )
         if rc2:
             logger.warning( 'plotGatlingOutput.py exited with returnCode %d', rc2 )
         # report aggregated output (requires gatling)
         gatlingBinPath = 'gatling-3.4.0/bin/gatling.sh'
         if os.path.isfile( gatlingBinPath ):
-            rc2 = subprocess.call( ['./reportGatlingOutput.py', '--dataDirPath', outDataDir],
+            rc2 = subprocess.call( [sys.executable, 'reportGatlingOutput.py', '--dataDirPath', outDataDir],
                 stdout=subprocess.DEVNULL )
             if rc2:
                 logger.warning( 'reportGatlingOutput.py exited with returnCode %d', rc2 )
