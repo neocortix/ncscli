@@ -808,6 +808,8 @@ if __name__ == "__main__":
                     continue
             if not os.path.isfile( inFilePath ):
                 logger.warning( 'no file "%s"', inFilePath )
+            elif os.path.getsize( inFilePath ) <= 0:
+                logger.info( 'empty log file "%s"', inFilePath )
             else:
                 #logger.info( 'parsing log for %s', logDir[0:16] )
                 try:
