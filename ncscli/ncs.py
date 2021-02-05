@@ -155,7 +155,7 @@ def uploadSshClientKey( authToken, keyName, keyContents, maxRetries=30 ):
         logger.warning( 'got exception uploading %s (%s) %s', keyName, type(exc), exc )
     else:
         if (resp.status_code < 200) or (resp.status_code >= 300):
-            logger.warn( 'response code %s uploading %s', resp.status_code, keyName )
+            logger.warning( 'response code %s uploading %s', resp.status_code, keyName )
             wouldRetry = resp.status_code in range( 500, 600 )  # 5xx responses are server errors
         else:
             wouldRetry = False
@@ -184,7 +184,7 @@ def deleteSshClientKey( authToken, keyName, maxRetries=30 ):
         logger.warning( 'got exception (%s) %s', type(exc), exc )
     else:
         if (resp.status_code < 200) or (resp.status_code >= 300):
-            logger.warn( 'response code %s', resp.status_code )
+            logger.warning( 'response code %s', resp.status_code )
             wouldRetry = resp.status_code in range( 500, 600 )  # 5xx responses are server errors
         else:
             wouldRetry = False
@@ -477,7 +477,7 @@ def terminateNcscInstance( authToken, iid, maxRetries=1000 ):
         logger.warning( 'got exception terminating %s (%s) %s', iid, type(exc), exc )
     else:
         if (resp.status_code < 200) or (resp.status_code >= 300):
-            logger.warn( 'response code %s terminating %s', resp.status_code, iid )
+            logger.warning( 'response code %s terminating %s', resp.status_code, iid )
             wouldRetry = resp.status_code in range( 500, 600 )  # 5xx responses are server errors
             #wouldRetry = resp.status_code in [502, 504]  # "bad gateway", "gateway timeout"
         else:
@@ -503,7 +503,7 @@ def terminateJobInstances( authToken, jobId, maxRetries=1000 ):
         logger.warning( 'got exception (%s) %s', type(exc), exc )
     else:
         if (resp.status_code < 200) or (resp.status_code >= 300):
-            logger.warn( 'response code %s', resp.status_code )
+            logger.warning( 'response code %s', resp.status_code )
             wouldRetry = resp.status_code in range( 500, 600 )  # 5xx responses are server errors
         else:
             wouldRetry = False
@@ -644,7 +644,20 @@ def doCmdLaunch( args ):
                 print( ',', end=' ')
             print( json.dumps( outRec ) )
         else:
-            print( "%s,%s,%s" % (iid, iState, details['job']) )
+            pw = '*'
+            if args.showPasswords and 'ssh' in details:
+                pw = details['ssh'].get('password')
+            port = 0
+            host = ''
+            if 'ssh' in details:
+                if 'port' in details['ssh']:
+                    port = details['ssh']['port']
+                if 'host' in details['ssh']:
+                    host = details['ssh']['host']
+            print( iid, iState,
+                port, host, pw, details['job'],
+                sep=','
+                )
         if g_.signaled:
             break
     if args.json:
@@ -830,7 +843,7 @@ if __name__ == "__main__":
     ap.add_argument( '--region', nargs='+', help='the geographic region(s) to target' )
     ap.add_argument( '--showPasswords', action='store_true', help='if you want launch or list to show passwords' )
     ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use' )
-    ap.add_argument( '--itype', default=None, help='the instance type to create' )
+    ap.add_argument( '--itype', default=None, help='(deprecated) the instance type to create' )
     ap.add_argument( '--authToken', type=str, default=None,
         help='the NCS authorization token to use' )
     args = ap.parse_args()
