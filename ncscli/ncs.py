@@ -452,9 +452,11 @@ def launchScInstances( authToken, encryptFiles, numReq=1,
 
 def purgeKnownHost( host, port ):
     # purge an entry from known_hosts
-    cmd = 'ssh-keygen -q -R [%s]:%s > /dev/null 2> /dev/null' % (host, port )
+    cmd = ['ssh-keygen', '-q', '-R', '[%s]:%s' % (host, port) ]
     #logger.debug( 'cmd: %s', cmd )
-    retCode = subprocess.call( cmd, shell=True )
+    retCode = subprocess.call( cmd,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
     if retCode != 0:
         logger.error( 'returnd error code %s', retCode )
 
