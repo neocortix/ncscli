@@ -1,4 +1,4 @@
-Neocortix provides a single command-line tool for launching and managing Scalable Compute instances. It is tested mostly in Linux, but is written in standard Python 3, and also works on Windows 10, WIndows Server 2019, and MacOS.
+Neocortix provides a command-line tool for launching and managing Scalable Compute instances. It is tested mostly in Linux, but is written in standard Python 3, and also works on Windows 10, WIndows Server 2019, and MacOS.
 
 ## Prerequisites
 
@@ -6,18 +6,30 @@ First, you need to set up a Neocortix Cloud Services account. For instructions, 
 
 The ncscli package requires python (3.7, 3.8, or 3.9) and pip for python 3. If you don't have python 3 installed, see https://www.python.org/downloads/. If you don't have pip installed for python 3, see https://pip.pypa.io/en/stable/installing/.
 
-## Notes for Windows Users
+### Notes for Windows Users
 
-We recommend using *Windows Subsystem for Linux (WSL) 2* with an Ubuntu 20 or Debian 10 distribution on Windows 10. In that envronment, you can use our examples exactly as written. If you prefer not to use WSL, recent testing has shown that the best results can be achieved by installing python using the 64-bit installer from python.org. If you have used a different method of installation (such as the Windows Store), you may have to work though some issues.
+We recommend using *Windows Subsystem for Linux (WSL) 2* with an Ubuntu 20 or Debian 10 distribution on Windows 10. In that envronment, you can use our examples exactly as written. If you prefer not to use WSL, recent testing has shown that the best results can be achieved by installing python using the 64-bit installer from python.org. If you have used a different method of installation (such as the Windows Store, or Anaconda), you may have to work though some issues.
 
 Windows versions before Windows 10, version 1909, are not supported.
 
 In some environments., you may have to use a `python -m ncscli.ncs` command, rather than the `ncs.py` command that we show in examples.
 
+### Notes for Ubuntu and Debian Users
+
+Installing pip using the official `python.org` instructions can be trouble-prone. You can do it more easily using the following commands
+
+```shell
+sudo apt update
+sudo apt install python3-pip
+# for best results, update pip like this
+python3 -m pip install --upgrade pip
+```
+
+
 
 ## Installing the command-line tool and library
 
-Install our python-based package using the following command. On some systems, you may need to use the python command, instead of python3.
+Install our python-based package using the following command. On some systems, you may need to use the `python` or `py` command, instead of python3.
 ```shell
 python3 -m pip install ncscli
 ```
@@ -95,7 +107,7 @@ Yet another way to pass the auth token, or any command-line argument, is to crea
 
 Specifically, do these steps one time, as a setup:
 1. create a file called myNcsAuthToken (or any name that makes sense to you)
-2. insert just one line into the file, containing --authToken=YourAuthTokenHere
+2. insert just one line into the file, containing --authToken=YourAuthTokenHere (no spaces)
 3. set the ownership and permissions on the file, as appropriate for your situation
 
 Then, you can use a reference to that file each time you run an ncs command, like this.
