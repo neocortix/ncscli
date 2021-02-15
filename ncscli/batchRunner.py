@@ -804,7 +804,7 @@ def renderFramesOnInstance( inst ):
 
             logFrameState( frameNum, 'starting', iid )
             frameStartDateTime = datetime.datetime.now(datetime.timezone.utc)
-            with subprocess.Popen(['ssh',
+            with subprocess.Popen(['ssh', '-n', '-T',
                                 '-p', str(sshSpecs['port']),
                                 '-o', 'ServerAliveInterval=360',
                                 '-o', 'ServerAliveCountMax=3',
