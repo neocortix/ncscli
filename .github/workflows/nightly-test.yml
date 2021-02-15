@@ -41,7 +41,7 @@ jobs:
         export PYTHONPATH=$PWD
         export PATH=$PWD'/ncscli':$PATH
         cd examples/batchMode
-        ./pytestQuick.sh
+        pytest -v --rootdir . --junitxml data/pytest.xml -o 'junit_family = xunit2'
     - name: Upload output data as artifacts
       uses: actions/upload-artifact@v2
       with:
