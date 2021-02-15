@@ -14,7 +14,7 @@ class PuppeteerLighthouseFrameProcessor(batchRunner.frameProcessor):
     '''defines details for using Puppeteer and Lighthouse to analyze a web page from multiple devices'''
 
     def installerCmd( self ):
-        return 'apt update && apt install -y chromium nodejs npm && ln -s chromium /usr/bin/chromium-browser && PUPPETEER_SKIP_DOWNLOAD=yes npm install -g puppeteer && npm install -g lighthouse'
+        return 'apt update && apt install -y chromium nodejs npm && ln -s chromium /usr/bin/chromium-browser && PUPPETEER_SKIP_DOWNLOAD=yes npm install -g puppeteer && npm install -g lighthouse@6.5.0'
 
     PuppeteerFilePath = 'Puppeteer.js'
 
