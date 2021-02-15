@@ -2,7 +2,7 @@
 
 echo hello
 
-targetVersion="3.(6|7|8)"
+targetVersion="3.(6|7|8|9)"
 errMsg="python $targetVersion is not available in this environment"
 
 # python3 is preferred over regular python
@@ -32,6 +32,12 @@ else
     echo installing python3
     sudo yum update
     sudo yum install python3
+    if [ $? -eq 0 ]; then
+        echo installed python3
+    else
+        echo COULD NOT INSTALL python3
+        exit 1
+    fi
     pyx="python3"
 fi
 
