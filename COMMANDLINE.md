@@ -4,7 +4,7 @@ Neocortix provides a command-line tool for launching and managing Scalable Compu
 
 First, you need to set up a Neocortix Cloud Services account. For instructions, see https://neocortix.com/tutorials-account.
 
-The ncscli package requires python (3.7, 3.8, or 3.9) and pip for python 3. If you don't have python 3 installed, see https://www.python.org/downloads/. If you don't have pip installed for python 3, see https://pip.pypa.io/en/stable/installing/.
+The ncscli package requires python (3.6, 3.7, 3.8, or 3.9) and pip for python 3. If you don't have python 3 installed, see https://www.python.org/downloads/. If you don't have pip installed for python 3, see https://pip.pypa.io/en/stable/installing/.
 
 ### Notes for Windows Users
 
