@@ -93,7 +93,7 @@ def test_runBatchBinaryGo():
         if rc != 0:
             pytest.xfail( '"go" compiler not found (for building helloFrameGo_aarch64)' )
         # build the ARM executable
-        rc = subprocess.call( 'GOARCH=arm64 go build -o helloFrameGo_aarch64 helloFrameGo.go', shell=True )
+        rc = subprocess.call( 'GOARCH=arm64 GOOS=linux go build -o helloFrameGo_aarch64 helloFrameGo.go', shell=True )
         assert rc==0, 'could not build helloFrame_aarch64'
 
     check_batchRunner_example( 'runBatchBinaryGo', 'frame_*.out' )
@@ -102,7 +102,7 @@ def test_runBatchJava():
     # check if the built JAR file already exists
     if not os.path.isfile('helloFrame.jar'):
         # check if the javac compiler is available
-        rc = subprocess.call( 'hash javac', shell=True )
+        rc = subprocess.call( 'javac -version', shell=True )
         if rc != 0:
             pytest.xfail( 'javac compiler not found (for building helloFrame.jar)' )
         # build the Java class
@@ -131,13 +131,13 @@ def test_runBatchK6():
         if rc != 0:
             pytest.xfail( '"go" compiler not found (for building k6Worker/k6)' )
         # build the ARM executable
-        rc = subprocess.call( 'GOARCH=arm64 GOPATH=$PWD/go go get github.com/loadimpact/k6', shell=True )
+        rc = subprocess.call( 'GOARCH=arm64 GOOS=linux GOPATH=$PWD/go go get github.com/loadimpact/k6', shell=True )
         assert rc==0, 'could not build k6 for Arm64'
         # copy ARM executable to k6worker dir
         rc = subprocess.call( 'cp -p go/bin/linux_arm64/k6 k6Worker', shell=True )
         assert rc==0, 'could not copy ARM executable to k6worker dir'
         # compress the executable
-        rc = subprocess.call( 'tar -czf k6Worker/k6.tar.gz k6Worker/k6 --remove-files', shell=True )
+        rc = subprocess.call( 'tar -czf k6Worker/k6.tar.gz k6Worker/k6 && rm k6Worker/k6', shell=True )
         assert rc==0, 'could not compress to k6Worker/k6.tar.gz'
 
     check_batchRunner_example( 'runBatchK6', 'worker_*.csv' )
