@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from concurrent import futures
 import datetime
 import json
 import logging
@@ -11,7 +12,15 @@ import ncscli.batchRunner as batchRunner
 import ncscli.tellInstances as tellInstances
 import startForwarders  # expected to be in the same directory
 
+
+
 neoloadVersion = '7.7'  # '7.6' and '7.7 are currently supported
+nlWebWanted = False
+
+class g_:
+    signaled = False
+    interrupted = False
+
 
 class neoloadFrameProcessor(batchRunner.frameProcessor):
     '''defines details for installing Neotys Load Generator agent on a worker'''
@@ -22,6 +31,96 @@ class neoloadFrameProcessor(batchRunner.frameProcessor):
         else:
             return 'nlAgent/install_7-6.sh'
 
+def sigtermSignaled():
+    return g_.signaled
+
+def commandInstance( inst, cmd, timeLimit ):
+    deadline = time.time() + timeLimit
+    sshSpecs = inst['ssh']
+    #logInstallerOperation( iid, ['connect', sshSpecs['host'], sshSpecs['port']] )
+    with subprocess.Popen(['ssh',
+                    '-p', str(sshSpecs['port']),
+                    '-o', 'ServerAliveInterval=360',
+                    '-o', 'ServerAliveCountMax=3',
+                    sshSpecs['user'] + '@' + sshSpecs['host'], cmd],
+                    encoding='utf8',
+                    #stdout=subprocess.PIPE,  # subprocess.PIPE subprocess.DEVNULL
+                    ) as proc:  # stderr=subprocess.PIPE
+        #logInstallerOperation( iid, ['command', cmd] )
+        #stderrThr = threading.Thread(target=trackStderr, args=(proc,))
+        #stderrThr.start()
+        abbrevIid = inst['instanceId'][0:16]
+        while time.time() < deadline:
+            proc.poll() # sets proc.returncode
+            if proc.returncode == None:
+                logger.info( 'waiting for command on instance %s', abbrevIid)
+            else:
+                if proc.returncode == 0:
+                    logger.debug( 'command succeeded on instance %s', abbrevIid )
+                else:
+                    logger.warning( 'instance %s gave returnCode %d', abbrevIid, proc.returncode )
+                break
+            if sigtermSignaled():
+                break
+            if g_.interrupted:
+                break
+            time.sleep(5)
+        proc.poll()
+        returnCode = proc.returncode if proc.returncode != None else 124 # declare timeout if no rc
+        if returnCode:
+            logger.warning( 'installer returnCode %s', returnCode )
+        #if returnCode == 124:
+        #    logInstallerEvent( 'timeout', args.instTimeLimit, iid )
+        #else:
+        #    logInstallerEvent('returncode', returnCode, iid )
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+            if proc.returncode:
+                logger.warning( 'ssh return code %d', proc.returncode )
+        except subprocess.TimeoutExpired:
+            logger.warning( 'ssh did not terminate in time' )
+        #stderrThr.join()
+        if returnCode:
+            #logger.warning( 'terminating instance because installerFailed %s', iid )
+            #terminateInstances( args.authToken, [iid] )
+            #logOperation( 'terminateBad', [iid], '<recruitInstances>' )
+            #purgeHostKeys( [inst] )
+            return returnCode
+        else:
+            return 0
+    return 1
+
+def configureAgent( inst, port, timeLimit=500 ):
+    iid = inst['instanceId']
+    logger.info( 'would configure agent on instance %s for port %d', iid[0:16], port )
+    rc = 1
+    # generate a command to modify agent.properties on the instance
+    #workerHost = inst['ssh']['host']
+    cmd = "sed -i 's/NCS_LG_PORT/%d/' ~/neoload%s/conf/agent.properties" % (port, neoloadVersion)
+    cmd += " && sed -i 's/NCS_LG_HOST/%s/' ~/neoload%s/conf/agent.properties" % (forwarderHost, neoloadVersion)
+    logger.info( 'cmd: %s', cmd )
+    rc = commandInstance( inst, cmd, timeLimit=timeLimit )
+    return rc
+
+def configureAgents( instances, ports, timeLimit=600 ):
+    '''configure LG agents, in parallel'''
+    returnCodes = []
+    with futures.ThreadPoolExecutor( max_workers=len(instances) ) as executor:
+        parIter = executor.map( configureAgent, instances, ports, timeout=timeLimit )
+        returnCodes = [None] * len(instances)
+        try:
+            index = 0
+            for returnCode in parIter:
+                returnCodes[index] = returnCode
+                index += 1
+                time.sleep( .1 )
+        except KeyboardInterrupt:
+            logger.warning( 'interrupted, setting flag')
+            g_.interrupted = True
+            raise
+        logger.debug( 'returnCodes: %s', returnCodes )
+    return returnCodes
 
 # configure logger formatting
 #logging.basicConfig()
@@ -56,6 +155,7 @@ try:
         launchedJsonFilePath = outDataDir +'/recruitLaunched.json'
         launchedInstances = []
         # get details of launched instances from the json file
+        #TODO should get list of instances with good install, rather than all started instances
         with open( launchedJsonFilePath, 'r') as jsonInFile:
             try:
                 launchedInstances = json.load(jsonInFile)  # an array
@@ -70,6 +170,15 @@ try:
         else:
             agentLogFilePath = '/root/.neotys/neoload/v7.6/logs/agent.log'
             starterCmd = 'cd ~/neoload7.6/ && /usr/bin/java -Dneotys.vista.headless=true -Xmx512m -Dvertx.disableDnsResolver=true -classpath $HOME/neoload7.6/.install4j/i4jruntime.jar:$HOME/neoload7.6/.install4j/launcherc0a362f9.jar:$HOME/neoload7.6/bin/*:$HOME/neoload7.6/lib/crypto/*:$HOME/neoload7.6/lib/*:$HOME/neoload7.6/lib/jdbcDrivers/*:$HOME/neoload7.6/lib/plugins/ext/* install4j.com.neotys.nl.agent.launcher.AgentLauncher_LoadGeneratorAgentService start &'
+
+        portMap = {}
+        if True:  # nlWebWanted
+            # configure the agent properties on each instance
+            ports = list( range( portRangeStart, portRangeStart+len(startedInstances) ) )
+            for index, inst in enumerate( startedInstances ):
+                iid = inst['instanceId']
+                portMap[iid] = index + portRangeStart
+            configureAgents( startedInstances, ports, timeLimit=600 )
 
         # start the agent on each instance 
         stepStatuses = tellInstances.tellInstances( startedInstances, command=starterCmd,
@@ -117,6 +226,7 @@ try:
             logger.info( 'would forward ports for %d instances', len(goodInstances) )
             startForwarders.startForwarders( goodInstances,
                 forwarderHost=forwarderHost,
+                portMap=portMap,
                 portRangeStart=portRangeStart, maxPort=portRangeStart+100,
                 forwardingCsvFilePath=outDataDir+'/agentForwarding.csv'
                 )

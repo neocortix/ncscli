@@ -16,6 +16,7 @@ logger.setLevel(logging.INFO)
 
 def startForwarders( agentInstances, forwarderHost='localhost',
     portRangeStart=7102, maxPort = 7199,
+    portMap=None,
     forwardingCsvFilePath = 'agentForwarding.csv'
     ):
     with open( forwardingCsvFilePath, 'w' ) as csvOutFile:
@@ -25,10 +26,16 @@ def startForwarders( agentInstances, forwarderHost='localhost',
         assignedPort = portRangeStart
         mappings = []
         for inst in agentInstances:
+            iid = inst['instanceId']
+            if portMap:
+                assignedPort = portMap[ iid ]
+                logger.info( 'assigning mapped port %d', assignedPort )
+            else:
+                logger.info( 'assigning incremental port %d', assignedPort )
+
             if assignedPort > maxPort:
                 logger.warning( 'port number exceeded maxPort (%d vs %d)', assignedPort, maxPort )
                 break
-            iid = inst['instanceId']
             iidAbbrev = iid[0:8]
             sshSpecs = inst['ssh']
             instHost = sshSpecs['host']
@@ -36,7 +43,7 @@ def startForwarders( agentInstances, forwarderHost='localhost',
             user = sshSpecs['user']
             logger.info( '%d ->%s %s@%s:%s', assignedPort, iidAbbrev, user, instHost, instPort )
             cmd = ['ssh', '-fNT', '-o', 'ExitOnForwardFailure=yes', '-p', str(instPort), '-L',
-                '*:'+str(assignedPort)+':localhost:7100', 
+                '*:'+str(assignedPort)+':localhost:'+str(assignedPort), 
                 '%s@%s' % (user, instHost)
             ]
             #logger.info( 'cmd: %s', cmd )
