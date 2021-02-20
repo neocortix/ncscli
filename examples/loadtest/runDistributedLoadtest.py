@@ -24,16 +24,15 @@ import requests
 # neocortix modules
 import analyzeLtStats
 import extractAnsibleRecap
-import ncscli.ncs as ncs
 
-# try:
-#     import ncs
-# except ImportError:
-#     # set system and python paths for default places, since path seems to be not set properly
-#     ncscliPath = os.path.expanduser('~/ncscli/ncscli')
-#     sys.path.append( ncscliPath )
-#     os.environ["PATH"] += os.pathsep + ncscliPath
-#     import ncs
+try:
+    import ncscli.ncs as ncs
+except ImportError:
+    # set system and python paths for default places, since path seems to be not set properly
+    ncscliPath = os.path.expanduser('~/ncscli')
+    sys.path.append( ncscliPath )
+    os.environ["PATH"] += os.pathsep + ncscliPath  + os.sep + 'ncscli'
+    import ncscli.ncs as ncs
 
 
 logger = logging.getLogger(__name__)
