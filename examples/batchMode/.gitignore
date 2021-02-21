@@ -2,3 +2,13 @@ data/
 data_old/
 DevWeb/
 gx/
+
+gatling-3.4.0/
+gatling-charts-highcharts-bundle-3.4.0-bundle.zip
+helloFrame-bin/
+helloFrame.jar
+helloFrameCpp_aarch64
+helloFrameGo_aarch64
+helloFrame_aarch64
+k6Worker/k6.tar.gz
+LoadRunner_Developer_2020.3.tar.gz
