@@ -15,7 +15,7 @@ import startForwarders  # expected to be in the same directory
 
 
 neoloadVersion = '7.7'  # '7.6' and '7.7 are currently supported
-nlWebWanted = False
+nlWebWanted = True
 
 class g_:
     signaled = False
@@ -96,8 +96,12 @@ def configureAgent( inst, port, timeLimit=500 ):
     logger.info( 'would configure agent on instance %s for port %d', iid[0:16], port )
     rc = 1
     # generate a command to modify agent.properties on the instance
-    #workerHost = inst['ssh']['host']
-    cmd = "sed -i 's/NCS_LG_PORT/%d/' ~/neoload%s/conf/agent.properties" % (port, neoloadVersion)
+    configDirPath = '~/neoload%s/conf' % neoloadVersion
+    if nlWebWanted:
+        cmd = "cat %s/nlweb.properties >> %s/agent.properties" % tuple( [configDirPath]*2 )
+    else:
+        cmd = "echo not using NeoLoad Web"
+    cmd += " && sed -i 's/NCS_LG_PORT/%d/' ~/neoload%s/conf/agent.properties" % (port, neoloadVersion)
     cmd += " && sed -i 's/NCS_LG_HOST/%s/' ~/neoload%s/conf/agent.properties" % (forwarderHost, neoloadVersion)
     logger.info( 'cmd: %s', cmd )
     rc = commandInstance( inst, cmd, timeLimit=timeLimit )
@@ -147,10 +151,10 @@ try:
         instTimeLimit = 30*60,
         filter = '{"dpr": ">=48","ram:":">=2800000000","app-version": ">=2.1.11"}',
         outDataDir = outDataDir,
-        nWorkers = 10
+        nWorkers = 9
     )
     if rc == 0:
-        forwarderHost = 'localhost'
+        forwarderHost = 'YourHostHere'
         portRangeStart=7102
         launchedJsonFilePath = outDataDir +'/recruitLaunched.json'
         launchedInstances = []
