@@ -205,6 +205,7 @@ def findForwarders():
                         #logger.info( 'forwarding port %d', assignedPort)
                         mapping['port'] = assignedPort
             if mapping:
+                #logger.debug( 'forwarding port %d to %s', mapping['port'], mapping['host'] )
                 mappings.append( mapping )
     #logger.info( 'mappings: %s', mappings )
     return mappings
@@ -222,6 +223,66 @@ def checkForwarders( liveInstances,  forwarders ):
             badIids.append( iid )
     return badIids
 
+def parseLogLevel( arg ):
+    '''return a logging level (int) for the given case-insensitive level name'''
+    arg = arg.lower()
+    map = { 
+        'critical': logging.CRITICAL,
+        'error': logging.ERROR,
+        'warning': logging.WARNING,
+        'info': logging.INFO,
+        'debug': logging.DEBUG
+        }
+    if arg not in map:
+        logger.warning( 'the given logLevel "%s" is not recognized (using "info" level, instead)', arg )
+    setting = map.get( arg, logging.INFO )
+
+    return setting
+
+def queryMongoForLGs( mongoHost ):
+    import pymongo
+    mongoPort = 27017
+    mclient = pymongo.MongoClient(mongoHost, mongoPort)
+    dbName = 'neoload-on-premise'
+    collName = 'resources-definition'
+    db = mclient[dbName]
+    coll = db[collName]
+    # find loadGenerators in the list of resources
+    mFilter = {'t': 'NEOLOAD_LOADGENERATOR_AGENT'}
+    resources = list( coll.find( mFilter ) )
+    #logger.info( 'found resources: %s', resources )
+    logger.info( 'found %d load generators', len(resources) )
+    for resource in resources:
+        ipSpec = resource.get('a')
+        (host, port) = ipSpec.split(':')
+        resource['host'] = host
+        resource['port'] = int(port)
+        logger.debug( '%s %s %d', resource['_id'], resource['host'], resource['port']  )
+    '''
+    import pandas as pd
+    lgDf = pd.DataFrame( resources )
+    lgDf.to_csv( 'mongoLGs.csv' )
+    '''
+    return resources
+
+def queryNlWebForResources( nlWebUrl, nlWebToken ):
+    import requests
+    headers = {  "Accept": "application/json", "accountToken": nlWebToken }
+    url = nlWebUrl+'/v3/resources/zones'
+
+    resp = requests.get( url, headers=headers )
+    if (resp.status_code < 200) or (resp.status_code >= 300):
+        logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
+    else:
+        nlWebZones = resp.json()
+        logger.debug( 'nlWeb api zones: %s', nlWebZones )
+        for zone in nlWebZones:
+            logger.info( 'zone id: %s name: "%s"', zone['id'], zone['name'] )
+            for controller in zone['controllers']:
+                logger.info( '  Controller "%s" %s %s', controller['name'], controller['version'], controller['status'] )
+            for lg in zone['loadgenerators']:
+                logger.info( '  LG "%s" %s %s', lg['name'], lg['version'], lg['status'] )
+
 
 if __name__ == "__main__":
     # configure logger formatting
@@ -229,23 +290,38 @@ if __name__ == "__main__":
     logDateFmt = '%Y/%m/%d %H:%M:%S'
     formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
     logging.basicConfig(format=logFmt, datefmt=logDateFmt)
-    logger.setLevel(logging.INFO)
-    tellInstances.logger.setLevel( logging.INFO )
-    logger.debug('the logger is configured')
+    logger.setLevel(logging.WARNING)
 
     ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@' )
     ap.add_argument( '--dataDirPath', required=True, help='the path to the directory for input and output data' )
     ap.add_argument( '--neoloadVersion', default ='7.7', help='version of neoload to check for' )
+    ap.add_argument( '--nlWebUrl', help='the URL of a neoload web server to query' )
+    ap.add_argument( '--nlWebToken', help='a token for authorized access to a neoload web server' )
+    ap.add_argument( '--logLevel', default ='info', help='verbosity of log (e.g. debug, info, warning, error)' )
     args = ap.parse_args()
 
-    dataDirPath = args.dataDirPath  # 'data/neoload_2021-02-16_030030'
+    logLevel = parseLogLevel( args.logLevel )
+    logger.setLevel(logLevel)
+    tellInstances.logger.setLevel( logLevel )
+    logger.debug('the logger is configured')
+
+    dataDirPath = args.dataDirPath
     authToken = os.getenv('NCS_AUTH_TOKEN') or 'YourAuthTokenHere'
 
 
-
+    if args.nlWebUrl:
+        if not args.nlWebToken:
+            logger.warning( 'please pass --nlWebToken if you want to query an nlWeb server')
+        else:
+            queryNlWebForResources( args.nlWebUrl, args.nlWebToken )
+    if False:
+        mongoHost = 'yourNLWebMongoHost'
+        queryMongoForLGs( mongoHost )
 
     # get details of launched instances from the json file
-    instancesFilePath = os.path.join( dataDirPath, 'startedAgents.json' )
+    instancesFilePath = os.path.join( dataDirPath, 'liveAgents.json' )
+    if not os.path.isfile( instancesFilePath ):
+        instancesFilePath = os.path.join( dataDirPath, 'startedAgents.json' )
     startedInstances = []
     with open( instancesFilePath, 'r') as jsonInFile:
         try:
@@ -284,20 +360,36 @@ if __name__ == "__main__":
         logger.warning( 'no agent instances are still live')
         sys.exit( os.path.basename(__file__) + ' exit: no agent instances are still live')
 
-    logger.info( '%d liveInstances', len(liveInstances) )
+    logger.info( '%d live instances', len(liveInstances) )
     #logger.info( 'liveInstances: %s', liveInstances )
     checkProcesses( liveInstances )
     retrieveLogs( liveInstances, args.neoloadVersion )
     #showLogs( dataDirPath )
+
+    terminatedIids = []
     errorsByIid = checkLogs( liveInstances, dataDirPath )
     if errorsByIid:
         badIids = list( errorsByIid.keys() )
         logger.warning( 'terminating %d error-logged instance(s)', len( badIids ) )
         ncs.terminateInstances( authToken, badIids )
+        terminatedIids.extend( badIids )
 
     forwarders = findForwarders()
+    forwardersByPort = { fw['port']: fw for fw in forwarders }
+    for port in sorted( forwardersByPort.keys() ):
+        forwarder = forwardersByPort[port]
+        logger.debug( 'forwarding port %d to %s', forwarder['port'], forwarder['host'] )
+
     badIids = checkForwarders( liveInstances,  forwarders )
     if badIids:
         logger.warning( 'terminating %d not-forwarded instance(s)', len( badIids ) )
         ncs.terminateInstances( authToken, badIids )
+        terminatedIids.extend( badIids )
+ 
+    terminatedIids = set( terminatedIids )
+    stillLive = [inst for inst in liveInstances if inst['instanceId'] not in terminatedIids]
+    logger.info( '%d instances are still live', len(stillLive) )
+    with open( dataDirPath + '/liveAgents.json','w' ) as outFile:
+        json.dump( stillLive, outFile, indent=2 )
+
     logger.info( 'finished' )
