@@ -161,7 +161,7 @@ async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.
 
             if dlFileName:
                 destDirPath = '%s/%s' % (dlDirPath, iid)
-                logger.info( 'downloading %s from %s to %s',
+                logger.debug( 'downloading %s from %s to %s',
                     dlFileName, iidAbbrev, destDirPath )
                 await asyncssh.scp( (conn, dlFileName), destDirPath, preserve=True, recurse=True )
                 #logger.info( 'downloaded from %s to %s', iidAbbrev, destDirPath )
@@ -362,7 +362,8 @@ def tellInstances( instancesSpec, command=None, resultsLogFilePath=None,
     mainTiming = eventTiming('main')
     # the main loop
     eventLoop = asyncio.get_event_loop()
-    eventLoop.set_debug(True)
+    if logger.getEffectiveLevel() < logging.INFO:
+        eventLoop.set_debug(True)
     if stopOnSigterm:
         eventLoop.add_signal_handler(signal.SIGTERM, sigtermHandler)
     try:
