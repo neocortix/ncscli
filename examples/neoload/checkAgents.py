@@ -135,6 +135,7 @@ def checkLogs( liveInstances, dataDirPath ):
                 os.path.getsize( logFilePath ), fileModDateTime.strftime( '%H:%M:%S' ) 
                 )
             '''
+            connected = False
             with open( logFilePath ) as logFile:
                 for line in logFile:
                     line = line.rstrip()
@@ -145,6 +146,10 @@ def checkLogs( liveInstances, dataDirPath ):
                         theseErrors = errorsByIid.get( iid, [] )
                         theseErrors.append( line )
                         errorsByIid[iid] = theseErrors
+                    if 'Neoload Web : CONNECTED status : READY' in line:
+                        connected = True
+                if not connected:
+                    logger.warning( 'instance %s did not connect to nlweb', iidAbbrev )
         '''
         logFilePath = os.path.join( logsDirPath, logDir, 'neoload-log4j.log' )
         if not os.path.isfile( logFilePath ):
@@ -281,7 +286,8 @@ def queryNlWebForResources( nlWebUrl, nlWebToken ):
             for controller in zone['controllers']:
                 logger.info( '  Controller "%s" %s %s', controller['name'], controller['version'], controller['status'] )
             for lg in zone['loadgenerators']:
-                logger.info( '  LG "%s" %s %s', lg['name'], lg['version'], lg['status'] )
+                logger.debug( '  LG "%s" %s %s', lg['name'], lg['version'], lg['status'] )
+            logger.info( '  %d LGs listed by nlweb in Zone %s', len(zone['loadgenerators']), zone['id'] )
 
 
 if __name__ == "__main__":
@@ -337,8 +343,9 @@ if __name__ == "__main__":
     liveInstances = []
     deadInstances = []
     for iid in startedIids:
+        reqParams = {"show-device-info":True}
         try:
-            response = ncs.queryNcsSc( 'instances/%s' % iid, authToken, maxRetries=1)
+            response = ncs.queryNcsSc( 'instances/%s' % iid, authToken, reqParams=reqParams, maxRetries=1)
         except Exception as exc:
             logger.warning( 'querying instance status got exception (%s) %s',
                 type(exc), exc )
