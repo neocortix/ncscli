@@ -15,7 +15,7 @@ import startForwarders  # expected to be in the same directory
 
 
 neoloadVersion = '7.7'  # '7.6' and '7.7 are currently supported
-nlWebWanted = True
+nlWebWanted = False
 
 class g_:
     signaled = False
@@ -93,7 +93,7 @@ def commandInstance( inst, cmd, timeLimit ):
 
 def configureAgent( inst, port, timeLimit=500 ):
     iid = inst['instanceId']
-    logger.info( 'would configure agent on instance %s for port %d', iid[0:16], port )
+    logger.debug( 'would configure agent on instance %s for port %d', iid[0:16], port )
     rc = 1
     # generate a command to modify agent.properties on the instance
     configDirPath = '~/neoload%s/conf' % neoloadVersion
@@ -103,7 +103,7 @@ def configureAgent( inst, port, timeLimit=500 ):
         cmd = "echo not using NeoLoad Web"
     cmd += " && sed -i 's/NCS_LG_PORT/%d/' ~/neoload%s/conf/agent.properties" % (port, neoloadVersion)
     cmd += " && sed -i 's/NCS_LG_HOST/%s/' ~/neoload%s/conf/agent.properties" % (forwarderHost, neoloadVersion)
-    logger.info( 'cmd: %s', cmd )
+    logger.debug( 'cmd: %s', cmd )
     rc = commandInstance( inst, cmd, timeLimit=timeLimit )
     return rc
 
