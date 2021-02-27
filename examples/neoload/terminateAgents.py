@@ -16,7 +16,10 @@ logger = logging.getLogger(__name__)
 
 
 if __name__ == "__main__":
-    logging.basicConfig()
+    logFmt = '%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s'
+    logDateFmt = '%Y/%m/%d %H:%M:%S'
+    formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
+    logging.basicConfig(format=logFmt, datefmt=logDateFmt)
     logger.setLevel(logging.INFO)
     logger.debug( 'the logger is configured' )
 
@@ -29,6 +32,9 @@ if __name__ == "__main__":
     authToken = args.authToken or os.getenv('NCS_AUTH_TOKEN')
 
     inFilePath = args.inFilePath
+    if os.path.isdir( inFilePath ):
+        inFilePath = os.path.join( inFilePath, 'recruitLaunched.json' )
+        logger.info( 'a directory path was given; reading from %s', inFilePath )
     with open( inFilePath ) as inFile:
         instances = json.load( inFile )
         if instances:
@@ -39,3 +45,4 @@ if __name__ == "__main__":
             else:
                 logger.info( 'no authToken given, so not terminating')
             ncs.purgeKnownHosts( instances )
+    logger.info( 'finished' )
