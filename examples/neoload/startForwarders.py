@@ -15,16 +15,17 @@ logger.setLevel(logging.INFO)
 
 
 def startForwarders( agentInstances, forwarderHost='localhost',
-    portRangeStart=7102, maxPort = 7199,
+    portRangeStart=7100, maxPort = 7199,
     portMap=None,
     forwardingCsvFilePath = 'agentForwarding.csv'
     ):
+    forwarders = []
+    mappings = []
     with open( forwardingCsvFilePath, 'w' ) as csvOutFile:
         print( 'forwarding', 'instanceId', 'instHost', 'instSshPort', 'assignedPort',
             sep=',', file=csvOutFile
             )
         assignedPort = portRangeStart
-        mappings = []
         for inst in agentInstances:
             iid = inst['instanceId']
             if portMap:
@@ -55,6 +56,11 @@ def startForwarders( agentInstances, forwarderHost='localhost',
             else:
                 mapping = '%s:%d' % (forwarderHost, assignedPort)
                 mappings.append( mapping )
+                forwarder = {
+                    'instanceId': iid, 'host': instHost,
+                    'port': assignedPort, 'mapping': mapping
+                }
+                forwarders.append( forwarder )
                 print( mapping, iid, instHost, instPort, assignedPort,
                     sep=',', file=csvOutFile
                     )
@@ -62,6 +68,7 @@ def startForwarders( agentInstances, forwarderHost='localhost',
     logger.info( 'forwarding ports for %d agents', len(mappings) )
     if mappings:
         print( 'forwarding:', ', '.join(mappings) )
+    return forwarders
 
 
 if __name__ == "__main__":
@@ -78,7 +85,7 @@ if __name__ == "__main__":
     ap.add_argument( '--forwarderHost', help='IP addr (or host name) of the forwarder host',
         default='localhost' )
     ap.add_argument( '--portRangeStart', type=int, help='first port number to forward',
-        default=7102 )
+        default=7100 )
     ap.add_argument( '--maxPort', type=int, help='maximum port number to forward',
         default=7199 )
     ap.add_argument( '--forwardingCsvFilePath', help='output CSV file for later reference',
