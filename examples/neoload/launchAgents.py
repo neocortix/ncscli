@@ -13,7 +13,6 @@ import ncscli.tellInstances as tellInstances
 import startForwarders  # expected to be in the same directory
 
 
-
 neoloadVersion = '7.7'  # '7.6' and '7.7 are currently supported
 nlWebWanted = False
 
@@ -155,7 +154,7 @@ try:
     )
     if rc == 0:
         forwarderHost = 'YourHostHere'
-        portRangeStart=7102
+        portRangeStart=7100
         launchedJsonFilePath = outDataDir +'/recruitLaunched.json'
         launchedInstances = []
         # get details of launched instances from the json file
@@ -166,7 +165,7 @@ try:
             except Exception as exc:
                 logger.warning( 'could not load json (%s) %s', type(exc), exc )
         startedInstances = [inst for inst in launchedInstances if inst['state'] == 'started' ]
-        logger.info( 'started %d instances', len(startedInstances) )
+        logger.info( '%d instances were launched', len(startedInstances) )
 
         if neoloadVersion == '7.7':
             agentLogFilePath = '/root/.neotys/neoload/v7.7/logs/agent.log'
@@ -228,12 +227,15 @@ try:
 
             # start the ssh port-forwarding
             logger.info( 'would forward ports for %d instances', len(goodInstances) )
-            startForwarders.startForwarders( goodInstances,
+            forwarders = startForwarders.startForwarders( goodInstances,
                 forwarderHost=forwarderHost,
                 portMap=portMap,
                 portRangeStart=portRangeStart, maxPort=portRangeStart+100,
                 forwardingCsvFilePath=outDataDir+'/agentForwarding.csv'
                 )
+            if len( forwarders ) < len( goodInstances ):
+                logger.warning( 'some instances could not be forwarded to' )
+            logger.debug( 'forwarders: %s', forwarders )
         if launchedInstances:
             print( 'when you want to terminate these instances, use python3 terminateAgents.py "%s"'
                 % (outDataDir + '/recruitLaunched.json'))
