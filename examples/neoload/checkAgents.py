@@ -275,6 +275,7 @@ def queryNlWebForResources( nlWebUrl, nlWebToken ):
     headers = {  "Accept": "application/json", "accountToken": nlWebToken }
     url = nlWebUrl+'/v3/resources/zones'
 
+    logger.info( 'querying: %s', nlWebUrl )
     resp = requests.get( url, headers=headers )
     if (resp.status_code < 200) or (resp.status_code >= 300):
         logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
