@@ -11,8 +11,10 @@ import logging
 import os
 import subprocess
 import sys
-
+# third-party modules
 import psutil
+import requests
+# neocortix modules
 import ncscli.ncs as ncs
 import ncscli.tellInstances as tellInstances
 
@@ -271,7 +273,6 @@ def queryMongoForLGs( mongoHost ):
     return resources
 
 def queryNlWebForResources( nlWebUrl, nlWebToken ):
-    import requests
     headers = {  "Accept": "application/json", "accountToken": nlWebToken }
     url = nlWebUrl+'/v3/resources/zones'
 
