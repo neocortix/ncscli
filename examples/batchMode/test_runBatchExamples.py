@@ -145,6 +145,9 @@ def test_runBatchK6():
 def test_runBatchLoadtest():
     check_batchRunner_example( 'runBatchLoadtest', 'worker_*.csv' )
 
+def test_runBatchLocation():
+    check_batchRunner_example( 'runBatchLocation', 'frame_*.out' )
+
 def test_runBatchPing():
     check_batchRunner_example( 'runBatchPing', 'frame_*.out' )
 
