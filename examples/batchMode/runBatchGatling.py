@@ -43,6 +43,7 @@ try:
     rc = batchRunner.runBatch(
         frameProcessor = gatlingFrameProcessor(),
         commonInFilePath = 'gatlingWorker',
+        pushDeviceLocs=True,
         authToken = os.getenv('NCS_AUTH_TOKEN') or 'YourAuthTokenHere',
         encryptFiles=False,
         timeLimit = 89*60,

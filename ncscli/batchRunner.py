@@ -48,7 +48,7 @@ class g_:
     signaled = False
     frameDetails = {}
     dataDirPath = None
-    deviceLocsWanted = True
+    #deviceLocsWanted = True
     frameProcessor = None
     framesToDo = collections.deque()
     nFramesWanted = None
@@ -347,7 +347,8 @@ def recruitInstance( launchedJsonFilePath, resultsLogFilePathIgnored ):
         deadline = min( g_.deadline, time.time() + args.instTimeLimit )
 
         rc = None
-        if g_.deviceLocsWanted:
+        #if g_.deviceLocsWanted:
+        if args.pushDeviceLocs:
             rc = pushDeviceLoc( inst )
             if rc:
                 logger.warning( 'rc from pushDeviceLoc was %d', rc )
@@ -516,7 +517,8 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
             jsonToKnownHosts.jsonToKnownHosts( startedInstances, khFile )
         
         goodInstances = []
-        if not g_.deviceLocsWanted:
+        #if not g_.deviceLocsWanted:
+        if not args.pushDeviceLocs:
             goodInstances = startedInstances
         elif startedInstances:
             returnCodes = pushDeviceLocs( startedInstances )
@@ -1265,6 +1267,7 @@ def createArgumentParser():
     ap.add_argument( '--commonInFilePath', help='a file to upload initially to all instances' )
     ap.add_argument( '--authToken', required=True, help='the NCS authorization token to use (required)' )
     ap.add_argument( '--outDataDir', help='output data darectory', default='./data/' )
+    ap.add_argument( '--pushDeviceLocs', type=boolArg, default=False, help='whether to store device location on each launched instance' )
     ap.add_argument( '--encryptFiles', type=boolArg, default=True, help='whether to encrypt files on launched instances' )
     ap.add_argument( '--filter', help='json to filter instances for launch' )
     ap.add_argument( '--frameTimeLimit', type=int, default=8*60*60, help='amount of time (in seconds) allowed for each frame' )
