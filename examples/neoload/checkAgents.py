@@ -300,7 +300,7 @@ if __name__ == "__main__":
     logger.setLevel(logging.WARNING)
 
     ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@' )
-    ap.add_argument( '--dataDirPath', required=True, help='the path to the directory for input and output data' )
+    ap.add_argument( '--dataDirPath', help='the path to the directory for input and output data' )
     ap.add_argument( '--neoloadVersion', default ='7.7', help='version of neoload to check for' )
     ap.add_argument( '--nlWebUrl', help='the URL of a neoload web server to query' )
     ap.add_argument( '--nlWebToken', help='a token for authorized access to a neoload web server' )
@@ -325,6 +325,9 @@ if __name__ == "__main__":
         mongoHost = 'yourNLWebMongoHost'
         queryMongoForLGs( mongoHost )
 
+    if not dataDirPath:
+        logger.info( 'no dataDirPath given, so not checking instance details' )
+        sys.exit( 0 )
     # get details of launched instances from the json file
     instancesFilePath = os.path.join( dataDirPath, 'liveAgents.json' )
     if not os.path.isfile( instancesFilePath ):
