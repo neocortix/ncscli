@@ -7,7 +7,9 @@ import os
 import subprocess
 import sys
 import time
-
+# third-party module(s)
+import requests
+# neocortix modules
 import ncscli.batchRunner as batchRunner
 import ncscli.tellInstances as tellInstances
 import startForwarders  # expected to be in the same directory
@@ -99,7 +101,7 @@ def configureAgent( inst, port, timeLimit=500 ):
     if nlWebWanted:
         cmd = "cat %s/nlweb.properties >> %s/agent.properties" % tuple( [configDirPath]*2 )
     else:
-        cmd = "echo not using NeoLoad Web"
+        cmd = "using standalone NeoLoad"
     cmd += " && sed -i 's/NCS_LG_PORT/%d/' ~/neoload%s/conf/agent.properties" % (port, neoloadVersion)
     cmd += " && sed -i 's/NCS_LG_HOST/%s/' ~/neoload%s/conf/agent.properties" % (forwarderHost, neoloadVersion)
     logger.debug( 'cmd: %s', cmd )
@@ -138,11 +140,25 @@ logger.setLevel(logging.INFO)
 dateTimeTag = datetime.datetime.now().strftime( '%Y-%m-%d_%H%M%S' )
 outDataDir = 'data/neoload_' + dateTimeTag
 
+# if you are forwarding from a host other than this one, change this forwarderHost-setting code
+forwarderHost = None
+try:
+    forwarderHost = requests.get( 'https://api.ipify.org' ).text
+except forwarderHost:
+    logger.warning( 'could not get public ip addr of this host')
+if not forwarderHost:
+    logger.error( 'forwarderHost not set')
+    exit(1)
+
+if nlWebWanted and not os.path.isfile( 'nlAgent/nlweb.properties'):
+    logger.error( 'the file nlAgent/nlweb.properties was not found')
+    sys.exit(1)
 try:
     # call runBatch to launch worker instances and install the load generator agent on them
     rc = batchRunner.runBatch(
         frameProcessor = neoloadFrameProcessor(),
         recruitOnly=True,
+        pushDeviceLocs=False,
         commonInFilePath = 'nlAgent',
         authToken = os.getenv('NCS_AUTH_TOKEN') or 'YourAuthTokenHere',
         encryptFiles=False,
@@ -153,7 +169,6 @@ try:
         nWorkers = 9
     )
     if rc == 0:
-        forwarderHost = 'YourHostHere'
         portRangeStart=7100
         launchedJsonFilePath = outDataDir +'/recruitLaunched.json'
         launchedInstances = []
@@ -189,7 +204,7 @@ try:
             timeLimit=30*60,
             knownHostsOnly=True
             )
-        logger.info( 'starter statuses: %s', stepStatuses )
+        logger.debug( 'starter statuses: %s', stepStatuses )
         # make a list of instances where the agent was started
         goodIids = []
         for status in stepStatuses:
@@ -237,8 +252,8 @@ try:
                 logger.warning( 'some instances could not be forwarded to' )
             logger.debug( 'forwarders: %s', forwarders )
         if launchedInstances:
-            print( 'when you want to terminate these instances, use python3 terminateAgents.py "%s"'
-                % (outDataDir + '/recruitLaunched.json'))
+            print( 'when you want to terminate these instances, use %s terminateAgents.py "%s"'
+                % (sys.executable, outDataDir))
     sys.exit( rc )
 except KeyboardInterrupt:
     logger.warning( 'an interuption occurred')
