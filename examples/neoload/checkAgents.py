@@ -362,7 +362,7 @@ if __name__ == "__main__":
             instState = inst['state']
             if instState not in ['started', 'stopped']:
                 logger.info( 'state "%s" for instance %s', instState, iid )
-            if 'isntanceId' not in inst:
+            if 'instanceId' not in inst:
                 inst['instanceId'] = iid
             if instState == 'started':
                 liveInstances.append( inst )
