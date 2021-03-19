@@ -544,6 +544,8 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
             def waiter():
                 thr = threading.current_thread()
                 while not thr.stopRequested:
+                    if g_.interrupted:
+                        break
                     time.sleep( 30 )
                     if not thr.stopRequested:
                         logger.info( 'waiting for installer' )
