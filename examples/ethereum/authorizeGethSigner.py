@@ -169,13 +169,13 @@ if __name__ == "__main__":
         logger.info( 'proposees: %s', proposees )
 
         # get authorized signers from each instance
-        signers = ncsgeth.collectAuthSigners( instances, configName )
-        logger.info( '%d authSigners: %s', len(signers), signers )
+        authSigners = ncsgeth.collectAuthSigners( instances, configName )
+        logger.info( '%d authSigners: %s', len(authSigners), authSigners )
 
-        allSigners = proposees.union( signers )
+        allSigners = proposees.union( authSigners )
         logger.info( '%d allSigners: %s', len(allSigners), allSigners )
 
-        nonauth = proposees - signers
+        nonauth = proposees - authSigners
         logger.info( '%d unauth: %s', len(nonauth), nonauth )
 
         # get primary account from each instance
@@ -195,7 +195,19 @@ if __name__ == "__main__":
             # execute upvote/downvote on each instance
             # maybe should do this only on (proposed or authorized) signers
             results = ncsgeth.authorizeSigner( instances, configName, victimAccount, shouldAuth )
-            logger.info( 'results: %s', results )
+            logger.debug( 'results: %s', results )
+            curSigners = ncsgeth.collectAuthSigners( instances, configName )
+            nowAuth = victimAccount in curSigners
+            logger.info( 'now authorized? %s', nowAuth )
+            timeLimit = 15 * 60
+            deadline = time.time() + timeLimit
+            while nowAuth != shouldAuth:
+                if time.time() >= deadline:
+                    logger.warning( 'took too long for auth/deauth to propagate')
+                    break
+                curSigners = ncsgeth.collectAuthSigners( instances, configName )
+                nowAuth = victimAccount in curSigners
+                logger.info( 'now authorized? %s', nowAuth )
         else:
             logger.info( 'want to deauth ALL')
             # load saved signers
@@ -218,6 +230,20 @@ if __name__ == "__main__":
                     logger.info( 'deauthorizing %s account %s', iid[0:16], victimAccount )
                     results = ncsgeth.authorizeSigner( authorizers, configName, victimAccount, False )
                     logger.info( 'authorizeSigner returned: %s', results )
+
+                    curSigners = ncsgeth.collectAuthSigners( authorizers, configName )
+                    nowAuth = victimAccount in curSigners
+                    logger.info( 'now authorized? %s', nowAuth )
+                    timeLimit = 5 * 60
+                    deadline = time.time() + timeLimit
+                    while nowAuth != shouldAuth:
+                        if time.time() >= deadline:
+                            logger.warning( 'took too long for auth/deauth to propagate')
+                            break
+                        curSigners = ncsgeth.collectAuthSigners( authorizers, configName )
+                        nowAuth = victimAccount in curSigners
+                        logger.info( 'now authorized? %s', nowAuth )
+
 
         #signingIids = [instancesByAccount[acct]['instanceId'] for acct in allSigners]
         #logger.info( 'signingIids: %s', signingIids )
