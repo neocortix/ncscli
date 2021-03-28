@@ -15,7 +15,7 @@ import ncscli.tellInstances as tellInstances
 
 
 #gethVersion = '1.9.25'  # '1.9.25' currently supported
-configName = 'priv_2'
+configName = 'priv_X'
 
 '''
 class g_:
@@ -73,7 +73,7 @@ try:
         encryptFiles=False,
         timeLimit = 60*60,
         instTimeLimit = 15*60,
-        filter = '{"dpr": ">=60","ram:":">=4000000000", "storage": ">=4000000000"}',
+        filter = '{"dpr": ">=52", "ram:": ">=4000000000", "storage": ">=4000000000"}',
         outDataDir = outDataDir,
         nWorkers = 12
     )
@@ -91,7 +91,7 @@ try:
         startedInstances = [inst for inst in launchedInstances if inst['state'] == 'started' ]
         logger.info( '%d instances were launched', len(startedInstances) )
 
-        starterCmd = 'geth --config netconfig/%s.config.toml --password pw.txt --mine --unlock $(cat accountAddr.txt) >> ether/%s/stdout.txt 2>>ether/%s/geth.log </dev/null &' % \
+        starterCmd = 'geth --config netconfig/%s.config.toml --password pw.txt --unlock $(cat accountAddr.txt) >> ether/%s/stdout.txt 2>>ether/%s/geth.log </dev/null &' % \
             (configName, configName, configName)
         # start the client on each instance 
         stepStatuses = tellInstances.tellInstances( startedInstances, command=starterCmd,
