@@ -45,7 +45,8 @@ def checkProcesses( liveInstances ):
     cmd = "ps -ef | grep -v grep | grep 'geth' > /dev/null"
     # check for a running geth process on each instance
     stepStatuses = tellInstances.tellInstances( goodInstances, cmd,
-        timeLimit=30*60,
+        timeLimit=15*60,
+        resultsLogFilePath = dataDirPath + '/checkProcesses.jlog',
         knownHostsOnly=True
         )
     #logger.info( 'proc statuses: %s', stepStatuses )
@@ -64,11 +65,12 @@ def retrieveLogs( liveInstances, farmDirPath ):
     # download the log file from each instance
     stepStatuses = tellInstances.tellInstances( goodInstances,
         download=nodeLogFilePath, downloadDestDir=dataDirPath +'/nodeLogs',
-        timeLimit=30*60,
+        timeLimit=15*60,
         knownHostsOnly=True
         )
     #logger.info( 'download statuses: %s', stepStatuses )
-    #TODO return errorsByIid
+    errorsByIid = {status['instanceId']: status['status'] for status in stepStatuses if status['status'] }
+    return errorsByIid
 
 def checkLogs( liveInstances, dataDirPath ):
     '''check contents of logs from nodes, save errorSummary.csv, return errorsByIid'''
@@ -200,6 +202,13 @@ if __name__ == "__main__":
 
     # get details of anchor nodes (possibly including non-anchor aws nodes)
     anchorInstances = ncsgeth.loadInstances( anchorNodesFilePath )
+    if not False:
+        for inst in anchorInstances:
+            if 'state' not in inst:
+                inst['state'] = 'started'
+        #with open( 'anchorInstances.json','w' ) as outFile:
+        #    json.dump( anchorInstances, outFile, indent=2 )
+
 
     # get details of launched instances from the json file
     instancesFilePath = os.path.join( dataDirPath, 'liveNodes.json' )
@@ -256,7 +265,8 @@ if __name__ == "__main__":
     badIids.extend( list( errorsByIid.keys() ) )
 
 
-    retrieveLogs( liveInstances, farmDirPath )
+    errorsByIid = retrieveLogs( liveInstances, farmDirPath )
+    badIids.extend( list( errorsByIid.keys() ) )
 
     errorsByIid = checkLogs( liveInstances, dataDirPath )
     if errorsByIid:
@@ -273,7 +283,7 @@ if __name__ == "__main__":
         logger.info( '%d authorizers', len(authorizers) )
         # terminate bad instances, deauthorizing any that are also authorized
         for iid in badIids:
-            logger.info( 'thinking about deauthorizing %s', iid[0:16])
+            #logger.info( 'thinking about deauthorizing %s', iid[0:16])
             wasSigner = iid in savedSigners
             #logger.info( 'saved signer? %s', wasSigner )
             if wasSigner:
@@ -297,7 +307,8 @@ if __name__ == "__main__":
         startedDateTime = universalizeDateTime( dateutil.parser.parse( startedAtStr ) )
         uptimeHrs = (now - startedDateTime).total_seconds() / 3600
         #logger.info( 'uptime %.1f hrs', uptimeHrs )
-        if uptimeHrs >= 18:
+        trustedThresh = 480
+        if uptimeHrs >= trustedThresh:
             wasSigner = iid in savedSigners
             if not wasSigner:
                 results = ncsgeth.collectPrimaryAccounts( [inst], configName )
