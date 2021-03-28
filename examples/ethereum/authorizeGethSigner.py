@@ -191,6 +191,10 @@ if __name__ == "__main__":
             if not victimAccount:
                 logger.error( 'can not %s account %s of inst %s', authStr, victimAccount, victimIid[0:16] )
                 sys.exit(1)
+            if shouldAuth:
+                logger.info( 'will start miner on inst %s', victimIid[0:16] )
+                victimInst = instancesByIid[victimIid]
+                ncsgeth.tellNodes( [victimInst], configName, '"miner.start(1)"' )
             logger.info( 'will %s account %s of inst %s', authStr, victimAccount, victimIid[0:16] )
             # execute upvote/downvote on each instance
             # maybe should do this only on (proposed or authorized) signers
