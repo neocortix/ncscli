@@ -14,8 +14,9 @@ import ncscli.batchRunner as batchRunner
 import ncscli.tellInstances as tellInstances
 
 
-#gethVersion = '1.9.25'  # '1.9.25' currently supported
-configName = 'priv_X'
+#gethVersion = '1.9.25'  # old version, deprecated
+gethVersion = '1.10.1'  # currently supported
+configName = 'priv_5'
 
 '''
 class g_:
@@ -30,8 +31,7 @@ class gethFrameProcessor(batchRunner.frameProcessor):
     '''defines details for installing a geth node on a worker'''
 
     def installerCmd( self ):
-        #if gethVersion == '1.9.25':
-        cmd = 'netconfig/installGeth1.9.25.sh'
+        cmd = 'netconfig/installGeth%s.sh' % gethVersion
         cmd += ' && geth init --datadir ether/%s netconfig/%s.genesis.json' % (configName, configName)
         cmd += ' && geth account new --datadir ether/%s --password pw.txt >accountInfo.txt' % (configName)
         cmd += r" && grep -o 'key:\s*\(.*\)' accountInfo.txt | grep -o '0x.*' > accountAddr.txt"
@@ -75,7 +75,7 @@ try:
         instTimeLimit = 15*60,
         filter = '{"dpr": ">=52", "ram:": ">=4000000000", "storage": ">=4000000000"}',
         outDataDir = outDataDir,
-        nWorkers = 12
+        nWorkers = 48
     )
     if rc == 0:
         #portRangeStart=7100
