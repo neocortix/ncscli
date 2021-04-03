@@ -131,6 +131,11 @@ def executeCmdOnInstance( cmd, inst, timeLimit=60 ):
 
 def tellNodes( instances, configName, cmd ):
     '''tell each instance to execute a geth command, in parallel'''
+    if not instances:
+        return []
+    if not configName:
+        logger.warning( 'no configName given')
+        return []
     cmd = ('geth attach ether/%s/geth.ipc --exec ' % configName ) + cmd
     nInstances = len( instances )
     with futures.ThreadPoolExecutor( max_workers=nInstances ) as executor:
@@ -165,7 +170,7 @@ def collectProposals( instances, configName ):
             cleaned = re.sub( r'(0x[^:]*):', r'"\g<1>":', stdout )
             # the json contains a dict of boolean values (for up/down vote) indexed by account addr
             props = json.loads( cleaned )
-            logger.info( 'props: %s', props )
+            logger.debug( 'props: %s', props )
             for account in props:
                 # OR this value into the cumulative dict
                 propSummary[account] = propSummary.get( account, False ) or props[account]
@@ -209,9 +214,75 @@ def collectPrimaryAccounts( instances, configName ):
         if not accts:
             continue
         account = accts[0]
-        logger.info( '%s account: %s', abbrevIid, account )
+        logger.debug( '%s account: %s', abbrevIid, account )
         instanceAccountPairs.append( {'instanceId': iid, 'accountAddr': account })
     return instanceAccountPairs
+
+def collectSignerInstances( instances, configName, includProposees=True ):
+    '''collects info about authorized signers and, optionally, true proposees; returns list of dicts'''
+    if not instances:
+        return []
+    instancesByIid = {inst['instanceId']: inst for inst in instances }
+    if not includProposees:
+        proposees = set()
+    else:
+        propsFound = collectProposals( instances, configName )
+        propSummary = propsFound['summary']
+        logger.debug( 'propSummary: %s', propSummary )
+
+        trueProps = [account for account in propSummary if propSummary[account]]
+        logger.debug( 'trueProps: %s', trueProps )
+        proposees = set( trueProps )
+        #logger.info( '%d proposees: %s', len(proposees), proposees )
+
+    authSigners = collectAuthSigners( instances, configName )
+    logger.info( '%d authSigners: %s', len(authSigners), authSigners )
+
+    allSigners = proposees.union( authSigners )
+    if not allSigners:
+        return []
+    # get primary accounts from each instance
+    instanceAccountPairs = collectPrimaryAccounts( instances, configName )
+    if not instanceAccountPairs:
+        return []
+    instancesByAccount = {pair['accountAddr']: instancesByIid[pair['instanceId']] for pair in instanceAccountPairs }
+
+    signerInfos = []
+    for signerId in allSigners:
+        if signerId not in instancesByAccount:
+            logger.warning( 'no instance for signer %s', signerId )
+            continue
+        inst = instancesByAccount[signerId]
+        iid = inst.get('instanceId')
+        if 'ssh' not in inst:
+            logger.warning( 'no ssh info for instance %s', iid )
+            continue
+        if 'host' not in inst['ssh']:
+            logger.warning( 'no ssh host for instance %s', iid )
+            continue
+        logger.debug( '%s: %s', signerId, inst['ssh']['host'] )
+        signerInfos.append({
+            'instanceId': iid, 'accountAddr': signerId, 'auth': signerId in authSigners
+        })
+    return signerInfos
+
+def startMiners( instances, configName ):
+    '''start miner on each instance'''
+    if not instances:
+        return []
+    cmd = '"miner.start(1)"'
+    results = tellNodes( instances, configName, cmd )
+    logger.debug( 'results: %s', results )
+    return results
+
+def stopMiners( instances, configName ):
+    '''stop miner on each instance'''
+    if not instances:
+        return []
+    cmd = '"miner.stop()"'
+    results = tellNodes( instances, configName, cmd )
+    logger.debug( 'results: %s', results )
+    return results
 
 def loadAnsibleInstances( invFilePath ):
     '''load instances from a json-style ansible inventory file'''
