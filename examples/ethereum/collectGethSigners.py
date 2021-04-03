@@ -25,30 +25,6 @@ import ncsgeth  # assumed to be in the same directory as this script
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-'''
-class g_:
-    signaled = False
-    interrupted = False
-
-def sigtermSignaled():
-    return False
-'''
-
-def parseLogLevel( arg ):
-    '''return a logging level (int) for the given case-insensitive level name'''
-    arg = arg.lower()
-    map = { 
-        'critical': logging.CRITICAL,
-        'error': logging.ERROR,
-        'warning': logging.WARNING,
-        'info': logging.INFO,
-        'debug': logging.DEBUG
-        }
-    if arg not in map:
-        logger.warning( 'the given logLevel "%s" is not recognized (using "info" level, instead)', arg )
-    setting = map.get( arg, logging.INFO )
-
-    return setting
 
 
 if __name__ == "__main__":
@@ -67,7 +43,7 @@ if __name__ == "__main__":
     ap.add_argument( '--logLevel', default ='info', help='verbosity of log (e.g. debug, info, warning, error)' )
     args = ap.parse_args()
 
-    logLevel = parseLogLevel( args.logLevel )
+    logLevel = ncsgeth.parseLogLevel( args.logLevel )
     logger.setLevel(logLevel)
     tellInstances.logger.setLevel( logLevel )
     logger.debug('the logger is configured')
@@ -89,6 +65,11 @@ if __name__ == "__main__":
         ncsInstances = ncsgeth.loadInstances( args.ncsInstances )
         if ncsInstances:
            instances.extend( ncsInstances )
+
+    logger.info( 'calling collectSignerInstances')
+    signerInfos = ncsgeth.collectSignerInstances( instances, args.configName )
+    logger.info( '%d signerInfos: %s', len( signerInfos), signerInfos )
+    logger.info( 'done collectSignerInstances')
 
     if instances:
         instancesByIid = {inst['instanceId']: inst for inst in instances }
