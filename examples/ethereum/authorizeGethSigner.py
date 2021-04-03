@@ -83,7 +83,7 @@ if __name__ == "__main__":
     logger.setLevel(logging.WARNING)
 
     ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@' )
-    #ap.add_argument( '--dataDirPath', help='the path to the directory for input and output data' )
+    ap.add_argument( '--dataDirPath', required=True, help='the path to the directory for input and output data' )
     ap.add_argument( '--auth', type=boolArg, required=True, help='true to authorize, false to deauthorize' )
     ap.add_argument( '--instanceId', required=True, help='id of the instance to auth or deauth' )
     ap.add_argument( '--configName', required=True, help='the name of the geth configuration' )
@@ -111,8 +111,8 @@ if __name__ == "__main__":
     shouldAuth = args.auth
     configName = args.configName
 
-    savedSignersFilePath = os.path.dirname( args.ncsInstances ) + '/savedSigners.json'
-    #savedSignersFilePath = os.path.join( dataDirPath, 'savedSigners.json' )
+    #savedSignersFilePath = os.path.dirname( args.ncsInstances ) + '/savedSigners.json'
+    savedSignersFilePath = os.path.join( args.dataDirPath, 'savedSigners.json' )
 
     # get details of launched instances from the json file
     if not os.path.isfile( invFilePath ):
@@ -142,6 +142,17 @@ if __name__ == "__main__":
             instances.append( inst )
     logger.info( 'inventory instances: %s', instances)
 
+    launchedInstancesFilePath = args.dataDirPath + '/recruitLaunched.json'
+    if not os.path.isfile( invFilePath ):
+        logger.error( 'no filefile "%s"', invFilePath )
+        sys.exit( 1 )
+    launchedInstances = []
+    with open( launchedInstancesFilePath, 'r') as jsonInFile:
+        try:
+            launchedInstances = json.load(jsonInFile)  # an array
+        except Exception as exc:
+            logger.warning( 'could not load json (%s) %s', type(exc), exc )
+
     if args.ncsInstances:
         ncsInstances = []
         with open( args.ncsInstances, 'r') as jsonInFile:
@@ -153,8 +164,8 @@ if __name__ == "__main__":
            instances.extend( ncsInstances )
     allIids = [inst['instanceId'] for inst in instances]
     if (victimIid != 'ALL') and  (victimIid not in allIids):
-        logger.error( '%s was not found in the given set of instances', victimIid )
-        sys.exit(1)
+        logger.warning( '%s was not found in the given set of instances', victimIid )
+        #sys.exit(1)
     if (victimIid == 'ALL') and  (shouldAuth != False ):
         logger.error( 'not willing to authorize all at once' )
         sys.exit(1)
@@ -195,11 +206,17 @@ if __name__ == "__main__":
                 logger.info( 'will start miner on inst %s', victimIid[0:16] )
                 victimInst = instancesByIid[victimIid]
                 ncsgeth.tellNodes( [victimInst], configName, '"miner.start(1)"' )
+            else:
+                victimInst = instancesByIid.get(victimIid)
+                if victimInst:
+                    logger.info( 'stopping miner on inst %s', victimIid[0:16] )
+                    ncsgeth.stopMiners( [victimInst], configName, )
             logger.info( 'will %s account %s of inst %s', authStr, victimAccount, victimIid[0:16] )
             # execute upvote/downvote on each instance
             # maybe should do this only on (proposed or authorized) signers
             results = ncsgeth.authorizeSigner( instances, configName, victimAccount, shouldAuth )
             logger.debug( 'results: %s', results )
+            
             curSigners = ncsgeth.collectAuthSigners( instances, configName )
             nowAuth = victimAccount in curSigners
             logger.info( 'now authorized? %s', nowAuth )
@@ -222,8 +239,23 @@ if __name__ == "__main__":
                         savedSigners = json.load(jsonInFile) # a dict of lists, indexed by iid
                     except Exception as exc:
                         logger.warning( 'could not load savedSigners json (%s) %s', type(exc), exc )
+            logger.info( '%d savedSigners: %s', len( savedSigners), savedSigners )
+            '''
+            signerInfos = ncsgeth.collectSignerInstances( anchorInstances+goodInstances, args.configName )  # a list
+            logger.info( '%d signerInfos: %s', len( signerInfos), signerInfos )
+            signersByIid = {signer['instanceId']: signer for signer in signerInfos }
+            # conversion coide to prioduce legacy savedSigners
+            savedSigners = {}
+            for signerInfo in signerInfos:
+                savedSigners[ signerInfo['instanceId'] ] = [signerInfo['accountAddr']]
+            logger.info( '%d savedSigners: %s', len( savedSigners), savedSigners )
+            if not savedSigners:
+                logger.info( 'there are NO signers' )
+            '''
+
+
             authorizers = findAuthorizers( instances, savedSigners, [] )
-            for inst in ncsInstances:
+            for inst in launchedInstances:
                 iid = inst['instanceId']
                 logger.info( 'thinking about deauthing %s', iid[0:16])
                 wasSigner = iid in savedSigners
@@ -247,6 +279,8 @@ if __name__ == "__main__":
                         curSigners = ncsgeth.collectAuthSigners( authorizers, configName )
                         nowAuth = victimAccount in curSigners
                         logger.info( 'now authorized? %s', nowAuth )
+                    logger.info( 'sleeping for 90 seconds' )
+                    time.sleep( 90 )
 
 
         #signingIids = [instancesByAccount[acct]['instanceId'] for acct in allSigners]
