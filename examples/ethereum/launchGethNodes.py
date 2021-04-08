@@ -73,7 +73,7 @@ try:
         encryptFiles=False,
         timeLimit = 60*60,
         instTimeLimit = 15*60,
-        filter = '{"dpr": ">=52", "ram:": ">=4000000000", "storage": ">=4000000000"}',
+        filter = '{"dpr": ">=52", "ram:": ">=4000000000", "storage": ">=20000000000"}',
         outDataDir = outDataDir,
         nWorkers = 48
     )
