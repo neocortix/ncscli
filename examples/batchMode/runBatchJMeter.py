@@ -17,12 +17,14 @@ class JMeterFrameProcessor(batchRunner.frameProcessor):
 
     JMeterFilePath = 'TestPlan.jmx'
     #JMeterFilePath = 'TestPlan_RampLong.jmx'
+    #JMeterFilePath = 'TestPlan_RampLong_MoreSlow.jmx'
+    #JMeterFilePath = 'TestPlan_RampLong_LessSlow.jmx'
 
     def frameOutFileName( self, frameNum ):
         return 'TestPlan_results_%03d.csv' % frameNum
 
     def frameCmd( self, frameNum ):
-        cmd = 'date && apache-jmeter-5.3/bin/jmeter -n -t %s -l TestPlan_results_%03d.csv -D httpclient4.time_to_live=20000 -D httpclient.reset_state_on_thread_group_iteration=true' % (
+        cmd = 'date && apache-jmeter-5.3/bin/jmeter -n -t %s -l TestPlan_results_%03d.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true' % (
             self.JMeterFilePath, frameNum
         )
         return cmd
