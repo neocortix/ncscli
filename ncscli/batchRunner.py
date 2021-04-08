@@ -29,6 +29,7 @@ import types
 import uuid
 
 # third-party module(s)
+import dateutil.parser
 import requests
 
 # neocortix modules
@@ -517,24 +518,37 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
             jsonToKnownHosts.jsonToKnownHosts( startedInstances, khFile )
         
         goodInstances = []
-        #if not g_.deviceLocsWanted:
-        if not args.pushDeviceLocs:
-            goodInstances = startedInstances
-        elif startedInstances:
-            returnCodes = pushDeviceLocs( startedInstances )
+        badInstances = []
+        if startedInstances:
+            returnCodes = checkInstanceClocks( startedInstances, timeLimit=40 )
+            if not any( returnCodes ):
+                logger.info( 'checkInstanceClocks found all good' )
+                goodInstances = startedInstances
+            else:
+                logger.warning( 'checkInstanceClocks returned %s', returnCodes )
+                for index, rc in enumerate( returnCodes ):
+                    if rc == 0:
+                        goodInstances.append( startedInstances[index] )
+                    else:
+                        badInstances.append( startedInstances[index] )
+
+        if goodInstances and args.pushDeviceLocs:
+            pushedInstances = []
+            returnCodes = pushDeviceLocs( goodInstances )
             badInstances = []
             for index, rc in enumerate( returnCodes ):
                 if rc == 0:
-                    goodInstances.append( startedInstances[index] )
+                    pushedInstances.append( goodInstances[index] )
                 else:
-                    badInstances.append( startedInstances[index] )
-            if badInstances:
-                logger.info( 'could not pushDeviceLoc to %d instances', len(badInstances) )
-                badIids = [inst['instanceId'] for inst in badInstances ]
-                logOperation( 'terminateBad', badIids, '<recruitInstances>' )
-                terminateInstances( args.authToken, badIids )
-                logger.info( 'purging host keys')
-                purgeHostKeys( badInstances )
+                    badInstances.append( goodInstances[index] )
+            goodInstances = pushedInstances
+        if badInstances:
+            logger.info( 'could not prepare %d instances', len(badInstances) )
+            badIids = [inst['instanceId'] for inst in badInstances ]
+            logOperation( 'terminateBad', badIids, '<recruitInstances>' )
+            terminateInstances( args.authToken, badIids )
+            logger.info( 'purging host keys')
+            purgeHostKeys( badInstances )
         if not goodInstances:
             return []
         # install something on goodInstances, if required, else just return goodInstances
@@ -906,6 +920,48 @@ def renderFramesOnInstance( inst ):
         saveProgress()
     return 0
 
+def stdCommandInstance( inst, cmd, timeLimit ):
+    sshSpecs = inst['ssh']
+    abbrevIid = inst['instanceId'][0:16]
+    #logInstallerOperation( iid, ['connect', sshSpecs['host'], sshSpecs['port']] )
+    returnCode = None
+    stderr=''
+    stdout=''
+    with subprocess.Popen(['ssh',
+                    '-p', str(sshSpecs['port']),
+                    '-o', 'ServerAliveInterval=360',
+                    '-o', 'ServerAliveCountMax=3',
+                    sshSpecs['user'] + '@' + sshSpecs['host'], cmd],
+                    encoding='utf8',
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                    ) as proc:
+        try:
+            (stdout, stderr) = proc.communicate( timeout=timeLimit )
+            #stdout = stdout.decode('utf8')
+            #stderr = stderr.decode('utf8')
+            returnCode = proc.returncode
+        except subprocess.TimeoutExpired:
+            logger.warning( 'command took too long for instance %s', abbrevIid )
+            proc.terminate()  # just sends sigterm
+            returnCode = 124
+            try:
+                # give it a chance to respond to sigterm
+                proc.wait( timeout=timeLimit/2 )
+            except Exception as exc:
+                logger.warning( 'got exception after timeout (%s) %s', type(exc), exc )
+                proc.kill()  # sends sigkill as a last resort
+                logger.warning( 'killed process for %s', abbrevIid )
+        except Exception as exc:
+            logger.warning( 'ssh threw exception (%s) %s', type(exc), exc )
+            returnCode = -1
+    if returnCode:
+        logger.warning( 'ssh returnCode %d', returnCode )
+    # not sure if this is needed
+    if (returnCode == 1) and ('closed by remote host' in stderr):
+        returnCode = 255
+
+    return {'returnCode': returnCode, 'stdout': stdout, 'stderr': stderr}
+
 def commandInstance( inst, cmd, timeLimit ):
     deadline = time.time() + timeLimit
     sshSpecs = inst['ssh']
@@ -963,6 +1019,49 @@ def commandInstance( inst, cmd, timeLimit ):
             return 0
     return 1
 
+def checkInstanceClock( inst, timeLimit, pastMax=6.0, futureMax=3.0 ):
+    '''check clock on instance, return bad if off by too much'''
+    cmd = 'date --iso-8601=seconds'
+    result = stdCommandInstance( inst, cmd, timeLimit=timeLimit )
+    logger.info( 'result %s', result )
+    if result['returnCode']:
+        return result['returnCode']
+    masterDateTime = datetime.datetime.now( datetime.timezone.utc )  # tz-aware
+    nodeDateTime = dateutil.parser.parse( result['stdout'] )
+    delta = masterDateTime - nodeDateTime
+    discrep = delta.total_seconds()
+    iid = inst['instanceId']
+    logger.info( 'discrep: %.1f seconds on inst %s',
+        discrep, iid )
+    dMin = -abs(futureMax)
+    dMax = abs(pastMax)
+    if discrep > dMax or discrep < dMin:
+        logger.warning( 'bad time discrep: %.1f', discrep )
+        return 1
+    return 0
+
+
+def checkInstanceClocks( instances, timeLimit ):
+    '''check clocks on instances, in parallel'''
+    returnCodes = []
+    nInstances = len(instances)
+    with futures.ThreadPoolExecutor( max_workers=nInstances ) as executor:
+        parIter = executor.map( checkInstanceClock, instances, [timeLimit]*nInstances,
+            timeout=timeLimit )
+        returnCodes = [None] * len(instances)
+        try:
+            index = 0
+            for returnCode in parIter:
+                returnCodes[index] = returnCode
+                index += 1
+                time.sleep( .1 )
+        except KeyboardInterrupt:
+            logger.warning( 'interrupted, setting flag')
+            g_.interrupted = True
+            raise
+        logger.debug( 'returnCodes: %s', returnCodes )
+    return returnCodes
+
 def pushDeviceLoc( inst, timeLimit=30 ):
     iid = inst['instanceId']
     logger.debug( 'would push deviceLoc to instance %s', iid[0:16] )
@@ -981,6 +1080,7 @@ def pushDeviceLoc( inst, timeLimit=30 ):
         rc = commandInstance( inst, cmd, timeLimit=timeLimit )
         logFrameState( -1, 'pushDeviceLocDone', iid, rc )
     return rc
+
 
 def pushDeviceLocs( instances, timeLimit=40 ):
     '''push device-location info to instances, in parallel'''
