@@ -155,9 +155,15 @@ if __name__ == "__main__":
     mappedFrameNumLocationUnitedStates = []
     mappedFrameNumLocationRussia = []
     mappedFrameNumLocationOther = []
+
+
+    mapConfigFileName = outputDir + "/mapConfig.csv" 
+    mapConfigFile = open(mapConfigFileName, "w",encoding='utf-8')
+    print("Location_id, Region, Filename",file=mapConfigFile)
     
     for i in range(0,len(completedJobs)):
         for j in range(0,len(launchedInstances)):
+            mapConfigString = "unknown"
             if launchedInstances[j]["instanceId"] == completedJobs[i][1]:
                 mappedFrameNumLocation.append([completedJobs[i][0],
                                            launchedInstances[j]["device-location"]["latitude"],
@@ -166,6 +172,7 @@ if __name__ == "__main__":
                                            launchedInstances[j]["device-location"]["country"]
                                            ])
                 if launchedInstances[j]["device-location"]["country"] == "United States":
+                    mapConfigString = "USA"
                     mappedFrameNumLocationUnitedStates.append([completedJobs[i][0],
                                                launchedInstances[j]["device-location"]["latitude"],
                                                launchedInstances[j]["device-location"]["longitude"],
@@ -173,6 +180,7 @@ if __name__ == "__main__":
                                                launchedInstances[j]["device-location"]["country"]
                                                ])
                 elif launchedInstances[j]["device-location"]["country"] == "Russia":
+                    mapConfigString = "Russia"
                     mappedFrameNumLocationRussia.append([completedJobs[i][0],
                                                launchedInstances[j]["device-location"]["latitude"],
                                                launchedInstances[j]["device-location"]["longitude"],
@@ -180,6 +188,7 @@ if __name__ == "__main__":
                                                launchedInstances[j]["device-location"]["country"]
                                                ])
                 else:
+                    mapConfigString = "Other"
                     mappedFrameNumLocationOther.append([completedJobs[i][0],
                                                launchedInstances[j]["device-location"]["latitude"],
                                                launchedInstances[j]["device-location"]["longitude"],
@@ -187,6 +196,9 @@ if __name__ == "__main__":
                                                launchedInstances[j]["device-location"]["country"]
                                                ])
                 
+                print("%03i, %s, TestPlan_results_%03i" % (completedJobs[i][0],mapConfigString,completedJobs[i][0]),file=mapConfigFile)
+
+    mapConfigFile.close()
 
     '''
     print("\nLocations:")
@@ -294,7 +306,7 @@ if __name__ == "__main__":
     startRelTimesAndMSPRsUnitedStatesMuxed = []
     startRelTimesAndMSPRsRussiaMuxed = []
     startRelTimesAndMSPRsOtherMuxed = []
-    clipTimeInSeconds = 3.00
+    clipTimeInSeconds = 4.00
 
     for i in range(0,len(culledRelativeResponseData)):
         # print(culledRelativeResponseData[i][3][4])
