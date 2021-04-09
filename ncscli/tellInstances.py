@@ -123,7 +123,7 @@ async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.
         #sshAgent = os.getenv( 'SSH_AUTH_SOCK' )
         #async with asyncssh.connect(host, port=port, username=user, password=password, known_hosts=None) as conn:
         async with asyncssh.connect(host, port=port, username=user,
-            keepalive_interval=15, keepalive_count_max=4,
+            keepalive_interval=15, keepalive_count_max=4, login_timeout=240,
             known_hosts=known_hosts, agent_path=sshAgent ) as conn:
             serverHostKey = conn.get_server_host_key()
             #logger.info( 'got serverHostKey (%s) %s', type(serverHostKey), serverHostKey )
@@ -146,7 +146,8 @@ async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.
                 logResult( 'operation', ['command', cmd], iid )
                 async with conn.create_process(cmd) as proc:
                     async for line in proc.stdout:
-                        logger.info('stdout[%s] %s', iidAbbrev, line.strip() )
+                        if line.strip():
+                            logger.info('stdout[%s] %s', iidAbbrev, line.strip() )
                         logResult( 'stdout', line.rstrip(), iid )
 
                     async for line in proc.stderr:
