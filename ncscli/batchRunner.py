@@ -535,7 +535,6 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
         if goodInstances and args.pushDeviceLocs:
             pushedInstances = []
             returnCodes = pushDeviceLocs( goodInstances )
-            badInstances = []
             for index, rc in enumerate( returnCodes ):
                 if rc == 0:
                     pushedInstances.append( goodInstances[index] )
@@ -1020,25 +1019,31 @@ def commandInstance( inst, cmd, timeLimit ):
     return 1
 
 def checkInstanceClock( inst, timeLimit, pastMax=6.0, futureMax=3.0 ):
-    '''check clock on instance, return bad if off by too much'''
+    '''check clock on instance, return non-zero rc if off by too much'''
+    iid = inst['instanceId']
+    logFrameState( -1, 'checkInstanceClockStarting', iid )
     cmd = 'date --iso-8601=seconds'
     result = stdCommandInstance( inst, cmd, timeLimit=timeLimit )
-    logger.info( 'result %s', result )
-    if result['returnCode']:
-        return result['returnCode']
+    #logger.debug( 'result %s', result )
+    rc = result['returnCode']
+    if rc:
+        logFrameState( -1, 'checkInstanceClockDone', iid, rc )
+        return rc
     masterDateTime = datetime.datetime.now( datetime.timezone.utc )  # tz-aware
     nodeDateTime = dateutil.parser.parse( result['stdout'] )
     delta = masterDateTime - nodeDateTime
     discrep = delta.total_seconds()
-    iid = inst['instanceId']
-    logger.info( 'discrep: %.1f seconds on inst %s',
+    logger.debug( 'discrep: %.1f seconds on inst %s',
         discrep, iid )
     dMin = -abs(futureMax)
     dMax = abs(pastMax)
     if discrep > dMax or discrep < dMin:
-        logger.warning( 'bad time discrep: %.1f', discrep )
-        return 1
-    return 0
+        logger.warning( 'bad time discrep: %.1f on inst %s', discrep, iid )
+        rc = 1
+    else:
+        rc = 0
+    logFrameState( -1, 'checkInstanceClockDone', iid, rc )
+    return rc
 
 
 def checkInstanceClocks( instances, timeLimit ):
