@@ -9,6 +9,7 @@ import datetime
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import time
@@ -55,17 +56,22 @@ def checkInstanceClocks( liveInstances, dataDirPath ):
     with open( jlogFilePath, 'rb' ) as inFile:
         for line in inFile:
             decoded = json.loads( line )
-            if 'stdout' in decoded:
+            if decoded.get( 'stdout' ):
                 #logger.info( decoded )
                 masterDateTime = dateutil.parser.parse( decoded['dateTime'] )
-                nodeDateTime = dateutil.parser.parse( decoded['stdout'] )
-                delta = masterDateTime - nodeDateTime
-                discrep =delta.total_seconds()
-                logger.info( 'discrep: %.1f seconds on inst %s',
-                    discrep, decoded['instanceId'] )
-                if discrep > 4 or discrep < -1:
-                    logger.warning( 'bad time discrep: %.1f', discrep )
-                    errorsByIid[ decoded['instanceId'] ] = {'discrep': discrep }
+                try:
+                    nodeDateTime = dateutil.parser.parse( decoded['stdout'] )
+                except Exception as exc:
+                    logger.warning( 'exception parsing %s', decoded['stdout'] )
+                    errorsByIid[ decoded['instanceId'] ] = {'exception': exc }
+                else:
+                    delta = masterDateTime - nodeDateTime
+                    discrep =delta.total_seconds()
+                    logger.info( 'discrep: %.1f seconds on inst %s',
+                        discrep, decoded['instanceId'] )
+                    if discrep > 4 or discrep < -1:
+                        logger.warning( 'bad time discrep: %.1f', discrep )
+                        errorsByIid[ decoded['instanceId'] ] = {'discrep': discrep }
     logger.info( '%d errorsByIid: %s', len(errorsByIid), errorsByIid )
     return errorsByIid
 
@@ -136,6 +142,7 @@ def checkLogs( liveInstances, dataDirPath ):
             '''
             connected = False
             sealed = False
+            latestSealLine = None
             with open( logFilePath ) as logFile:
                 for line in logFile:
                     line = line.rstrip()
@@ -143,7 +150,7 @@ def checkLogs( liveInstances, dataDirPath ):
                         continue
                     if 'ERROR' in line:
                         if 'Ethereum peer removal failed' in line:
-                            logger.info( 'ignoring "peer removal failed"')
+                            logger.debug( 'ignoring "peer removal failed" for %s', iidAbbrev )
                             continue
                         logger.info( '%s: %s', iidAbbrev, line )
                         theseErrors = errorsByIid.get( iid, [] )
@@ -153,10 +160,19 @@ def checkLogs( liveInstances, dataDirPath ):
                         connected = True
                     elif 'Successfully sealed' in line:
                         sealed = True
+                        latestSealLine = line
                 if not connected:
                     logger.warning( 'instance %s did not initialize fully', iidAbbrev )
                 if sealed:
-                    logger.info( 'instance %s has successfully sealed', iidAbbrev )
+                    #logger.info( 'instance %s has successfully sealed', iidAbbrev )
+                    logger.debug( '%s latestSealLine: %s', iidAbbrev, latestSealLine )
+                    pat = r'\[(.*\|.*)\]'
+                    dateStr = re.search( pat, latestSealLine ).group(1)
+                    if dateStr:
+                        dateStr = dateStr.replace( '|', ' ' )
+                        latestSealDateTime = dateutil.parser.parse( dateStr )
+                        logger.info( 'latestSealDateTime: %s', latestSealDateTime.isoformat() )
+
     logger.info( 'found errors for %d instance(s)', len(errorsByIid) )
     #print( 'errorsByIid', errorsByIid  )
     summaryCsvFilePath = os.path.join( dataDirPath, 'errorSummary.csv' )
@@ -218,6 +234,7 @@ if __name__ == "__main__":
     #ap.add_argument( '--gethVersion', default ='1.9.25', help='version of geth' )
     ap.add_argument( '--configName', default ='priv_2', help='version of geth' )
     ap.add_argument( '--logLevel', default ='info', help='verbosity of log (e.g. debug, info, warning, error)' )
+    ap.add_argument( '--maxNewAuths', type=int, default=0, help='maximum nmber of new authorized signers (default 0)' )
     args = ap.parse_args()
 
     logLevel = ncsgeth.parseLogLevel( args.logLevel )
@@ -232,6 +249,8 @@ if __name__ == "__main__":
     farmDirPath = 'ether/%s' % configName
 
     anchorNodesFilePath = args.anchorNodes
+
+    maxNewAuths = args.maxNewAuths
 
     if not anchorNodesFilePath:
         logger.error( 'no anchorNodes given')
@@ -371,7 +390,6 @@ if __name__ == "__main__":
 
     # authorize good instances that have been up for long enough
     trustedThresh = 12  # hours
-    maxNewAuths = 0
     nNewAuths = 0
     sleepAmt = 15
     if badIids:
