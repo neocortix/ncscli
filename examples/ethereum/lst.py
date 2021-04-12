@@ -18,16 +18,18 @@ if __name__ == "__main__":
     logDateFmt = '%Y/%m/%d %H:%M:%S'
     formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
     logging.basicConfig(format=logFmt, datefmt=logDateFmt)
-    logger.setLevel(logging.WARNING)
+    logger.setLevel(logging.INFO)
 
     ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@' )
     ap.add_argument( 'configName', help='the name of the network configuration' )
+    ap.add_argument( '--startBlock', type=int, default=1, help='the starting block number to list' )
     args = ap.parse_args()
 
     configName = args.configName  # 'priv_5'
 
     w3 = Web3(Web3.IPCProvider( 'ether/%s/geth.ipc' % configName ))
-    #w3 = Web3(Web3.HTTPProvider("http://34.222.xx.yy:8545") )
+    #w3 = Web3(Web3.HTTPProvider('http://34.222.208.234:8646') )  # node 4
+    #w3 = Web3(Web3.HTTPProvider("http://52.36.184.119:8646") )  # node 5
 
     w3.middleware_onion.inject(geth_poa_middleware, layer=0)
 
@@ -39,22 +41,31 @@ if __name__ == "__main__":
     allAccounts = set()
     allContracts = set()
 
+    startingBlock = min( args.startBlock, latestBlockNumber )
+
     if latestBlockNumber:
-        timeStamp = eth.get_block(1).timestamp
+        timeStamp = eth.get_block(startingBlock).timestamp
         # all ethereum timestamps are seconds since utc epoch
         dt = datetime.datetime.fromtimestamp(timeStamp )
-        print( 'block 1 dateTime (iso)', dt.isoformat() )
+        print( 'block', startingBlock, 'dateTime (iso)', dt.isoformat() )
+        prevBlockTimeStamp = timeStamp
 
-    for blk in range( latestBlockNumber+1 ):  # latestBlockNumber+1
+    for blk in range( startingBlock, latestBlockNumber+1 ):
         block = eth.get_block( blk, True )
         timeStamp = block.timestamp
         iso = datetime.datetime.fromtimestamp( timeStamp )
-        if (block.number % 1000) == 0:
+        if (block.number % 2000) == 0:
             print( 'checking', block.number, 'of', latestBlockNumber,
                 iso, 'gasLimit', block.gasLimit  )
             #print( block.keys() )
+        if timeStamp >= (prevBlockTimeStamp + 45):
+            print( 'timeStamp gap %.2f minutes for block %d at %s' % (
+                (timeStamp-prevBlockTimeStamp)/60.0, blk, iso)
+                )
+        prevBlockTimeStamp = timeStamp
         for element in block.transactions:
             #print( element )
+            #print( 'full tx hash', element.hash.hex() )
             allAccounts.add( element['from'] )
             allAccounts.add( element['to'] if element['to'] else '' )
             src = element['from'][0:abbrevLen] if element['from'] else None
