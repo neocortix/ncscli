@@ -40,6 +40,8 @@ def universalizeDateTime( dt ):
 
 def checkInstanceClocks( liveInstances, dataDirPath ):
     jlogFilePath = dataDirPath + '/checkInstanceClocks.jlog'
+    allIids = [inst['instanceId'] for inst in liveInstances ]
+    unfoundIids = set( allIids )
     cmd = "date --iso-8601=seconds"
     # check for a running geth process on each instance
     stepStatuses = tellInstances.tellInstances( liveInstances, cmd,
@@ -56,6 +58,7 @@ def checkInstanceClocks( liveInstances, dataDirPath ):
     with open( jlogFilePath, 'rb' ) as inFile:
         for line in inFile:
             decoded = json.loads( line )
+            iid = decoded['instanceId']
             if decoded.get( 'stdout' ):
                 #logger.info( decoded )
                 masterDateTime = dateutil.parser.parse( decoded['dateTime'] )
@@ -63,15 +66,21 @@ def checkInstanceClocks( liveInstances, dataDirPath ):
                     nodeDateTime = dateutil.parser.parse( decoded['stdout'] )
                 except Exception as exc:
                     logger.warning( 'exception parsing %s', decoded['stdout'] )
-                    errorsByIid[ decoded['instanceId'] ] = {'exception': exc }
+                    errorsByIid[ iid ] = {'exception': exc }
                 else:
+                    unfoundIids.discard( iid )
                     delta = masterDateTime - nodeDateTime
                     discrep =delta.total_seconds()
                     logger.info( 'discrep: %.1f seconds on inst %s',
-                        discrep, decoded['instanceId'] )
+                        discrep, iid )
                     if discrep > 4 or discrep < -1:
                         logger.warning( 'bad time discrep: %.1f', discrep )
-                        errorsByIid[ decoded['instanceId'] ] = {'discrep': discrep }
+                        errorsByIid[ iid ] = {'discrep': discrep }
+    if unfoundIids:
+        logger.warning( 'unfoundIids: %s', unfoundIids )
+        for iid in list( unfoundIids ):
+            if iid not in errorsByIid:
+                errorsByIid[ iid ] = {'found': False }
     logger.info( '%d errorsByIid: %s', len(errorsByIid), errorsByIid )
     return errorsByIid
 
@@ -239,7 +248,7 @@ if __name__ == "__main__":
 
     logLevel = ncsgeth.parseLogLevel( args.logLevel )
     logger.setLevel(logLevel)
-    tellInstances.logger.setLevel( logLevel )
+    tellInstances.logger.setLevel( logging.WARNING )  # logLevel
     logger.debug('the logger is configured')
 
     dataDirPath = args.dataDirPath
@@ -389,11 +398,13 @@ if __name__ == "__main__":
             terminatedIids.append( iid )
 
     # authorize good instances that have been up for long enough
+    #TODO skip this if maxNewAuths <= 0 
     trustedThresh = 12  # hours
     nNewAuths = 0
     sleepAmt = 15
     if badIids:
         sleepAmt = 90  # longer to avoid possible trouble
+    authorizers = findAuthorizers( anchorInstances+liveInstances, savedSigners, badIids )
     now = datetime.datetime.now( datetime.timezone.utc )
     for inst in goodInstances:
         # limit the loop to <= maxNewAuths auths per run
@@ -411,7 +422,6 @@ if __name__ == "__main__":
             if not wasSigner:
                 results = ncsgeth.collectPrimaryAccounts( [inst], configName )
                 if results[0]:
-                    authorizers = findAuthorizers( anchorInstances+liveInstances, savedSigners, badIids )
                     logger.info( '%d authorizers', len(authorizers) )
                     if not authorizers:
                         break
@@ -425,9 +435,11 @@ if __name__ == "__main__":
                     minerResults = ncsgeth.startMiners( [inst], configName )
                     logger.info( 'authorizing %s account %s', iid[0:16], primaryAccount )
                     authResults = ncsgeth.authorizeSigner( authorizers, configName, primaryAccount, True )
-                    logger.info( 'authResults:  %s', authResults )
-                    waitForAuth( primaryAccount, True, authorizers, configName, timeLimit=15*60 )
-                    nNewAuths += 1
+                    #logger.info( 'authResults:  %s', authResults )
+                    good = waitForAuth( primaryAccount, True, authorizers, configName, timeLimit=15*60 )
+                    if good:
+                        authorizers.append( inst )
+                        nNewAuths += 1
 
     terminatedIids = set( terminatedIids )
     stillLive = [inst for inst in liveInstances if inst['instanceId'] not in terminatedIids]
