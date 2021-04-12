@@ -89,7 +89,7 @@ if __name__ == "__main__":
     ap.add_argument( '--configName', required=True, help='the name of the geth configuration' )
     ap.add_argument( '--account', help='the account to auth or deatuh (default is determined by instance' )
     ap.add_argument( '--invFile', help='the path an ansible inventory file in json form' )
-    ap.add_argument( '--ncsInstances', help='the path an ncs instances file' )
+    #ap.add_argument( '--ncsInstances', help='the path an ncs instances file' )
     ap.add_argument( '--logLevel', default ='info', help='verbosity of log (e.g. debug, info, warning, error)' )
     args = ap.parse_args()
 
@@ -111,7 +111,6 @@ if __name__ == "__main__":
     shouldAuth = args.auth
     configName = args.configName
 
-    #savedSignersFilePath = os.path.dirname( args.ncsInstances ) + '/savedSigners.json'
     savedSignersFilePath = os.path.join( args.dataDirPath, 'savedSigners.json' )
 
     # get details of launched instances from the json file
@@ -153,9 +152,12 @@ if __name__ == "__main__":
         except Exception as exc:
             logger.warning( 'could not load json (%s) %s', type(exc), exc )
 
-    if args.ncsInstances:
-        ncsInstances = []
-        with open( args.ncsInstances, 'r') as jsonInFile:
+    liveNodesFilePath = os.path.join( args.dataDirPath, 'liveNodes.json' )
+    ncsInstances = []
+    if not os.path.isfile( liveNodesFilePath ):
+        logger.warning( 'did not find "%s"', liveNodesFilePath )
+    else:
+        with open( liveNodesFilePath, 'r') as jsonInFile:
             try:
                 ncsInstances = json.load(jsonInFile)  # an array
             except Exception as exc:
@@ -257,9 +259,9 @@ if __name__ == "__main__":
             authorizers = findAuthorizers( instances, savedSigners, [] )
             for inst in launchedInstances:
                 iid = inst['instanceId']
-                logger.info( 'thinking about deauthing %s', iid[0:16])
                 wasSigner = iid in savedSigners
-                logger.info( 'saved signer? %s', wasSigner )
+                logger.info( 'instance %s saved signer? %s ', iid[0:16], wasSigner)
+                #logger.info( 'saved signer? %s', wasSigner )
                 if wasSigner:
                     # victim is first account in savedSigners list for this instance
                     victimAccount = savedSigners[iid][0]
