@@ -76,14 +76,14 @@ if __name__ == "__main__":
         propsFound = ncsgeth.collectProposals( instances, args.configName )
         propSummary = propsFound['summary']
         proposees = set( propSummary.keys() )
-        logger.info( '%d proposees: %s', len(proposees), proposees )
+        logger.debug( '%d proposees: %s', len(proposees), proposees )
         logger.info( 'propSummary: %s', propSummary )
 
         signers = ncsgeth.collectAuthSigners( instances, args.configName )
         logger.info( '%d authSigners: %s', len(signers), signers )
 
         allSigners = proposees.union( signers )
-        logger.info( '%d allSigners: %s', len(allSigners), allSigners )
+        logger.debug( '%d allSigners: %s', len(allSigners), allSigners )
 
         nonauth = proposees - signers
         logger.info( '%d unauth: %s', len(nonauth), nonauth )
@@ -107,7 +107,7 @@ if __name__ == "__main__":
                 if 'host' not in inst['ssh']:
                     logger.warning( 'no ssh host for instance %s', iid )
                     continue
-                logger.info( '%s: %s', signerId, inst['ssh']['host'] )
+                logger.debug( '%s: %s', signerId, inst['ssh']['host'] )
                 print( iid, signerId, signerId in signers, sep=',', file = sys.stdout )
 
             if savedSignersFilePath:
