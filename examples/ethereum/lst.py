@@ -89,12 +89,12 @@ if __name__ == "__main__":
                             )
                 #print( 'tx keys:', element.keys() )
 
-    print( 'all Accounts found' )
+    print( 'Accounts found in transactions' )
     for account in ( list( allAccounts ) ):  # sorted
         if account:
             bal = w3.fromWei( eth.get_balance( account ), 'ether' )
         else:
             bal = 0
         print( 'acct', account or 'null', 'bal', bal )
-    print( 'all Contracts found' )
+    print( 'Contracts found in transactions' )
     print( sorted( list( allContracts ) ) )
