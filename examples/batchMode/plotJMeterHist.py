@@ -17,14 +17,14 @@ And saves "elapsed" value for rows that do match the specified label text(transa
 '''
 LOCATION = os.getcwd()
 TRANSACTION_NAME = 'HTTP Request'  #replace the transaction name with your transaction name
+LATENCY_DIR = 'latency'
 
 def extract_latency_data():
-
-    FILE_TO_WRITE =""       
+    os.makedirs( LATENCY_DIR, exist_ok=True )
     for file in os.listdir(LOCATION):
         try: #extract latency data from csv files that begin with TestPlan_
             if file.startswith("TestPlan_") and file.endswith(".csv"):
-                FILE_TO_WRITE = "new_"+os.path.basename(file)
+                FILE_TO_WRITE = os.path.join( LATENCY_DIR, os.path.basename(file) )
                 df = pd.read_csv(file)
                 x = []
                 x = df.loc[df['label'] == TRANSACTION_NAME] #filter out all the rows for which the label column does not contain value GetDistribution
@@ -45,8 +45,10 @@ Make sure the files that need to be merged have unique names from other file.
 https://jdhao.github.io/2019/06/24/python_glob_case_sensitivity/
 '''
 def merge_latency_data():
-    try:    
-        files = glob.glob("./new_TestPlan_results_*.csv") #extract_data function generates csv files that start with new_TestPlan_results
+    try:
+        #extract_data function generates csv files that start with "latency/TestPlan_results_"
+        globPat = os.path.join( LATENCY_DIR, "TestPlan_results_*.csv")
+        files = glob.glob( globPat )
         dataframes = [pd.read_csv(p) for p in files]
         merged_dataframe = pd.concat(dataframes, axis=1)
         merged_dataframe.to_csv("./responsetime_histogram.csv", index=False)
