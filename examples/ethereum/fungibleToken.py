@@ -15,12 +15,13 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser( description=__doc__,
         fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( 'action', help='the action to perform', 
-        choices=['deploy', 'mint', 'balance', 'name', 'symbol', 'totalSupply', 'transfer']
+        choices=['deploy', 'mint', 'allowance', 'approve', 'balance', 'name',
+            'symbol', 'totalSupply', 'transfer', 'transferFrom']
         )
     ap.add_argument( 'configName', help='the network configuration to use' )
     ap.add_argument( '--addr', help='the contract address for a transaction or query' )
-    ap.add_argument( '--name', help='the name of the token' )
-    ap.add_argument( '--symbol', help='the symbol (short name) of the token' )
+    ap.add_argument( '--name', help='the name of the token for deploy' )
+    ap.add_argument( '--symbol', help='the symbol (short name) of the token for deploy' )
     ap.add_argument( '--from', help='the source account addr for a transaction or query' )
     ap.add_argument( '--to', help='the destination account addr for a transaction' )
     ap.add_argument( '--amount', type=int, help='the amount for a transaction' )
@@ -97,7 +98,7 @@ if __name__ == "__main__":
         print( result )
     elif args.action == 'mint':
         if not contractAddress:
-            sys.exit( 'error: no contract --addr passed for set')
+            sys.exit( 'error: no contract --addr passed for mint')
         if not args.amount:  # should test for  None instead
             sys.exit( 'error: no --amount passed for mint')
         amount = args.amount
@@ -116,9 +117,48 @@ if __name__ == "__main__":
         receipt = eth.waitForTransactionReceipt( tx )
         #print( 'receipt', receipt )
         print( 'transaction hash:', receipt.transactionHash.hex() )
+    elif args.action == 'approve':
+        if args.amount == None:
+            sys.exit( 'error: no --amount passed for approve')
+        if args.amount <= 0:
+            sys.exit( 'error: non-positive --amount passed for approve')
+        amount = args.amount
+        spender = args.to
+        if not spender:
+            spender = eth.accounts[0]
+            print( 'approving the primary account (which may not make sense)', file=sys.stderr )
+        eth.default_account = eth.accounts[0]
+        setter = eth.contract( address=contractAddress, abi=metacontract['abi'] )
+        decimalShift = setter.functions.decimals().call()
+        shiftedAmount = amount / (10**decimalShift)
+        print( 'decimalShift', decimalShift, 'shiftedAmount', shiftedAmount )
+
+        tx = setter.functions.approve( spender, amount ).transact({ 'gas': 100000, 'gasPrice': 1 })
+        print( 'waiting for receipt')
+        receipt = eth.waitForTransactionReceipt( tx )
+        #print( 'receipt', receipt )
+        print( 'transaction hash:', receipt.transactionHash.hex() )
+    elif args.action == 'allowance':
+        srcAddr = fromArg
+        if not srcAddr:
+            srcAddr = eth.accounts[0]
+            print( 'using default account as allowance approver', file=sys.stderr )
+        checkedApprover = Web3.toChecksumAddress( srcAddr )
+        spender = args.to
+        if not spender:
+            spender = eth.accounts[0]
+            print( 'using default account as allowance spender', file=sys.stderr )
+        checkedSpender = Web3.toChecksumAddress( spender )
+        print( 'approver:', checkedApprover, 'spender:', checkedSpender, file=sys.stderr )
+        getter = eth.contract( address=contractAddress, abi=metacontract['abi'] )
+        result = getter.functions.allowance( checkedApprover, checkedSpender ).call()
+        decimalShift = getter.functions.decimals().call()
+        #print( 'decimalShift', decimalShift )
+        print( result / (10**decimalShift) )
+        print( 'unshifted allowance', result )
     elif args.action == 'transfer':
         if not args.amount:  # maybe could test for  None instead
-            sys.exit( 'error: no --amount passed for mint')
+            sys.exit( 'error: no --amount passed for transfer')
         if args.amount <= 0:
             sys.exit( 'error: non-positive --amount passed for transfer')
         amount = args.amount
@@ -138,3 +178,32 @@ if __name__ == "__main__":
         receipt = eth.waitForTransactionReceipt( tx )
         #print( 'receipt', receipt )
         print( 'transaction hash:', receipt.transactionHash.hex() )
+    elif args.action == 'transferFrom':
+        if args.amount == None:
+            sys.exit( 'error: no --amount passed for transferFrom')
+        if args.amount <= 0:
+            sys.exit( 'error: non-positive --amount passed for transferFrom')
+        amount = args.amount
+        srcAddr = fromArg
+        if not srcAddr:
+            srcAddr = eth.accounts[0]
+            print( 'using default account to transfer from', file=sys.stderr )
+        checkedSrc = Web3.toChecksumAddress( srcAddr )
+        destAddr = args.to
+        if not destAddr:
+            destAddr = eth.accounts[0]
+            print( 'using default account to transfer to', file=sys.stderr )
+        eth.default_account = eth.accounts[0]
+        print( 'from:', checkedSrc, 'to:', destAddr, 'by:', eth.default_account,
+            'amount:', amount,
+            file=sys.stderr )
+        setter = eth.contract( address=contractAddress, abi=metacontract['abi'] )
+        tx = setter.functions.transferFrom( checkedSrc, destAddr, amount ).transact(
+            { 'gas': 100000, 'gasPrice': 1 }
+            )
+        print( 'waiting for receipt')
+        receipt = eth.waitForTransactionReceipt( tx )
+        #print( 'receipt', receipt )
+        print( 'transaction hash:', receipt.transactionHash.hex() )
+    else:
+        print( args.action, 'not implemented', file=sys.stderr )
