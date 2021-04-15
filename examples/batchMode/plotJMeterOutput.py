@@ -116,9 +116,18 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( '--dataDirPath', required=True, help='the path to to directory for input and output data' )
     ap.add_argument( '--logY', type=boolArg, help='whether to use log scale on Y axis', default=False)
+    ap.add_argument( '--rampStepDuration', type=float, default=0, help='duration, in seconds, of ramp step' )
+    ap.add_argument( '--SLODuration', type=float, default=0, help='SLO duration, in seconds' )
+    ap.add_argument( '--SLOResponseTimeMax', type=float, default=0, help='SLO RT threshold, in seconds' )
+
     args = ap.parse_args()
 
     logger.info( 'plotting data in directory %s', os.path.realpath(args.dataDirPath)  )
+
+    # new arguments for SLOcomparison plot
+    rampStepDurationSeconds = args.rampStepDuration
+    SLODurationSeconds = args.SLODuration
+    SLOResponseTimeMaxSeconds = args.SLOResponseTimeMax
 
     #mpl.rcParams.update({'font.size': 28})
     #mpl.rcParams['axes.linewidth'] = 2 #set the value globally
@@ -306,10 +315,12 @@ if __name__ == "__main__":
     startRelTimesAndMSPRsUnitedStatesMuxed = []
     startRelTimesAndMSPRsRussiaMuxed = []
     startRelTimesAndMSPRsOtherMuxed = []
+    startRelTimesAndMSPRsAllMuxed = []
     clipTimeInSeconds = 4.00
 
     for i in range(0,len(culledRelativeResponseData)):
         # print(culledRelativeResponseData[i][3][4])
+        startRelTimesAndMSPRsAllMuxed.append([culledRelativeResponseData[i][1],culledRelativeResponseData[i][2],culledRelativeResponseData[i][5] ])
         if culledRelativeResponseData[i][3][4]=="United States" :
             startRelTimesAndMSPRsUnitedStatesMuxed.append([culledRelativeResponseData[i][1],culledRelativeResponseData[i][2],culledRelativeResponseData[i][5] ])
         elif culledRelativeResponseData[i][3][4]=="Russia" :     
@@ -320,10 +331,12 @@ if __name__ == "__main__":
     startRelTimesAndMSPRsUnitedStates = [flattenList(getColumn(startRelTimesAndMSPRsUnitedStatesMuxed,0)),flattenList(getColumn(startRelTimesAndMSPRsUnitedStatesMuxed,1)),flattenList(getColumn(startRelTimesAndMSPRsUnitedStatesMuxed,2))]
     startRelTimesAndMSPRsRussia = [flattenList(getColumn(startRelTimesAndMSPRsRussiaMuxed,0)),flattenList(getColumn(startRelTimesAndMSPRsRussiaMuxed,1)),flattenList(getColumn(startRelTimesAndMSPRsRussiaMuxed,2))]
     startRelTimesAndMSPRsOther = [flattenList(getColumn(startRelTimesAndMSPRsOtherMuxed,0)),flattenList(getColumn(startRelTimesAndMSPRsOtherMuxed,1)),flattenList(getColumn(startRelTimesAndMSPRsOtherMuxed,2))]
+    startRelTimesAndMSPRsAll = [flattenList(getColumn(startRelTimesAndMSPRsAllMuxed,0)),flattenList(getColumn(startRelTimesAndMSPRsAllMuxed,1)),flattenList(getColumn(startRelTimesAndMSPRsAllMuxed,2))]
 
     # print(len(startRelTimesAndMSPRsUnitedStates[0]))
     # print(len(startRelTimesAndMSPRsRussia[0]))
     # print(len(startRelTimesAndMSPRsOther[0]))
+    # print(len(startRelTimesAndMSPRsAll[0]))
 
     # now split out the response data by label
     startRelTimesAndMSPRsUnitedStatesByLabel = [[[],[],reducedLabels[i]] for i in range(0,len(reducedLabels))] 
@@ -547,3 +560,81 @@ if __name__ == "__main__":
     plt.ylabel("Requests per second", fontsize=32*fontFactor)  
     plt.savefig( outputDir+'/deliveredLoad.png', bbox_inches='tight' )
     #plt.show()
+
+
+    if (rampStepDurationSeconds>0 and SLODurationSeconds>0 and SLOResponseTimeMaxSeconds>0):
+        print("\nAnalyzing data for SLO Comparison\n")
+        # compute means and 95th percentiles in each rampStepDurationSeconds window 
+        MaxPlotValue = 1000
+        startRelTimesAllFloat = [float(startRelTimesAndMSPRsAll[0][i]) for i in range(0,len(startRelTimesAndMSPRsAll[0]))]
+        maxDurationFound = max(startRelTimesAllFloat)
+
+        numWindows = int(maxDurationFound/rampStepDurationSeconds) + 1
+        ResponseTimesInWindows = []
+        MeanResponseTimesInWindows = []
+        PercentileResponseTimesInWindows = []
+        for i in range(0,numWindows):
+            ResponseTimesInWindows.append([])
+            MeanResponseTimesInWindows.append(0)
+            PercentileResponseTimesInWindows.append(0)
+
+        # segment the values into the windows
+        for i in range(0,len(startRelTimesAndMSPRsAll[0])):
+            window = int(startRelTimesAndMSPRsAll[0][i]/rampStepDurationSeconds)
+            ResponseTimesInWindows[window].append(startRelTimesAndMSPRsAll[1][i])
+
+        # compute means and percentiles within each window
+        for i in range(0,numWindows):
+            MeanResponseTimesInWindows[i] = np.mean(ResponseTimesInWindows[i])
+            PercentileResponseTimesInWindows[i] = np.percentile(ResponseTimesInWindows[i],95)
+
+        # check 95th percentiles against SLO for PASS/FAIL
+        numSLOwindows = int(min(SLODurationSeconds,maxDurationFound)/rampStepDurationSeconds)
+        SLOstatus = "PASS"
+        for i in range(0,numSLOwindows):
+            if PercentileResponseTimesInWindows[i]>SLOResponseTimeMaxSeconds:
+                SLOstatus = "FAIL"
+
+        # prepare arrays for plotting
+        meanPlotArray = []
+        percentilePlotArray = []
+        SLOPlotArray = [[0,MaxPlotValue],[0,SLOResponseTimeMaxSeconds],[min(SLODurationSeconds,maxDurationFound),SLOResponseTimeMaxSeconds],[min(SLODurationSeconds,maxDurationFound),MaxPlotValue]]
+        for i in range(0,numWindows):
+            meanPlotArray.append([i*rampStepDurationSeconds,MeanResponseTimesInWindows[i]])
+            meanPlotArray.append([min((i+1)*rampStepDurationSeconds,maxDurationFound),MeanResponseTimesInWindows[i]])
+            percentilePlotArray.append([i*rampStepDurationSeconds,PercentileResponseTimesInWindows[i]])
+            percentilePlotArray.append([min((i+1)*rampStepDurationSeconds,maxDurationFound),PercentileResponseTimesInWindows[i]])
+
+        # plot SLO Comparison 
+        plotMarkerSize = 3
+        fig = plt.figure(11, figsize=figSize1)
+        ax1 = fig.add_subplot()
+
+        plt.plot(startRelTimesAndMSPRsAll[0],startRelTimesAndMSPRsAll[1], linestyle='', color=(0.0, 0.6, 1.0),marker='o',markersize=plotMarkerSize, alpha=0.03)
+        plt.plot(getColumn(meanPlotArray,0),getColumn(meanPlotArray,1), linewidth = 5,linestyle='-', color=(1.0, 0.7, 0.2))
+        plt.plot(getColumn(percentilePlotArray,0),getColumn(percentilePlotArray,1), linewidth = 5,linestyle='-', color=(1.0, 0.0, 1.0))
+        if SLOstatus=="PASS":
+            plt.plot(getColumn(SLOPlotArray,0),getColumn(SLOPlotArray,1), linewidth = 8,linestyle='-', color=(0.0, 0.8, 0.0))
+            ax1.text(min(SLODurationSeconds,maxDurationFound)/2, clipTimeInSeconds - 0.1, 'PASS SLO', fontsize=50, fontweight='bold',color=(0.0,0.8,0.0),verticalalignment='top', horizontalalignment='center')
+        else:
+            plt.plot(getColumn(SLOPlotArray,0),getColumn(SLOPlotArray,1), linewidth = 8,linestyle='-', color=(1.0, 0.0, 0.0))
+            ax1.text(min(SLODurationSeconds,maxDurationFound)/2, clipTimeInSeconds - 0.1, 'FAIL SLO', fontsize=50, fontweight='bold',color=(1.0,0.0,0.0),verticalalignment='top', horizontalalignment='center')
+    
+
+        if not logYWanted:
+            plt.ylim([0,clipTimeInSeconds])
+        else:
+            plt.ylim( [.01, 10] )
+            plt.yscale( 'log' )
+            ax = plt.gca()
+            ax.yaxis.set_major_locator( mpl.ticker.FixedLocator([ .02, .05, .1, .2, .5, 1, 2, 5, 10]) )
+            ax.yaxis.set_major_formatter(mpl.ticker.ScalarFormatter())
+    
+        plt.title("Response Times (s) - Mean, 95th Percentile, and SLO\n", fontsize=42*fontFactor)  
+        plt.xlabel("Time during Test (s)", fontsize=32*fontFactor)  
+        plt.ylabel("Response Times (s)", fontsize=32*fontFactor)  
+        plt.savefig( outputDir+'/SLOcomparison.png', bbox_inches='tight' )
+        #plt.show()    
+        # plt.clf()
+        # plt.close()  
+
