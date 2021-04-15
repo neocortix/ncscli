@@ -50,7 +50,7 @@ try:
         encryptFiles=False,
         timeLimit = 80*60,
         instTimeLimit = 12*60,
-        frameTimeLimit = 10*60,
+        frameTimeLimit = 11*60,
         filter = '{"dpr": ">=48","ram:":">=2800000000","app-version": ">=2.1.11"}',
         outDataDir = outDataDir,
         startFrame = 1,
@@ -60,7 +60,15 @@ try:
         autoscaleMax = 2
     )
     if (rc == 0) and os.path.isfile( outDataDir +'/recruitLaunched.json' ):
-        rc2 = subprocess.call( [sys.executable, 'plotJMeterOutput.py', '--dataDirPath', outDataDir],
+        rampStepDuration = 60
+        SLODuration = 240
+        SLOResponseTimeMax = 1.5
+
+        rc2 = subprocess.call( [sys.executable, 'plotJMeterOutput.py',
+            '--dataDirPath', outDataDir,
+            '--rampStepDuration', str(rampStepDuration), '--SLODuration', str(SLODuration),
+            '--SLOResponseTimeMax', str(SLOResponseTimeMax)
+            ],
             stdout=subprocess.DEVNULL )
         if rc2:
             logger.warning( 'plotJMeterOutput exited with returnCode %d', rc2 )
