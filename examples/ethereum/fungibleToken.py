@@ -5,13 +5,42 @@ deploys or uses an ERC-20 fungible token contract
 import argparse
 import datetime
 import json
+import logging
 import sys
 
 from web3 import Web3
 from web3.middleware import geth_poa_middleware
 
 
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+
+def parseLogLevel( arg ):
+    '''return a logging level (int) for the given case-insensitive level name'''
+    arg = arg.lower()
+    map = {
+        'critical': logging.CRITICAL,
+        'error': logging.ERROR,
+        'warning': logging.WARNING,
+        'info': logging.INFO,
+        'debug': logging.DEBUG
+        }
+    if arg not in map:
+        logger.warning( 'the given logLevel "%s" is not recognized (using "info" level, instead)', arg )
+    setting = map.get( arg, logging.INFO )
+
+    return setting
+
+
 if __name__ == "__main__":
+    # configure logger formatting
+    logFmt = '%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s'
+    logDateFmt = '%Y/%m/%d %H:%M:%S'
+    formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
+    logging.basicConfig(format=logFmt, datefmt=logDateFmt)
+    logger.setLevel(logging.WARNING)
+
     ap = argparse.ArgumentParser( description=__doc__,
         fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( 'action', help='the action to perform', 
@@ -25,7 +54,12 @@ if __name__ == "__main__":
     ap.add_argument( '--from', help='the source account addr for a transaction or query' )
     ap.add_argument( '--to', help='the destination account addr for a transaction' )
     ap.add_argument( '--amount', type=int, help='the amount for a transaction' )
+    ap.add_argument( '--logLevel', default ='info', help='verbosity of log (e.g. debug, info, warning, error)' )
     args = ap.parse_args()
+
+    logLevel = parseLogLevel( args.logLevel )
+    logger.setLevel(logLevel)
+    logger.debug('the logger is configured')
 
     fromArg = vars(args)['from']  # workaround for 'from' keyword problem
 
@@ -69,15 +103,15 @@ if __name__ == "__main__":
         srcAddr = fromArg
         if not srcAddr:
             srcAddr = eth.accounts[0]
-            print( 'using default account to get balance of', file=sys.stderr )
+            logger.info( 'using default account to get balance of' )
         checkedAddr = Web3.toChecksumAddress( srcAddr )
-        print( 'from', checkedAddr, file=sys.stderr )
+        logger.info( 'from: %s', checkedAddr )
         getter = eth.contract( address=contractAddress, abi=metacontract['abi'] )
         result = getter.functions.balanceOf( checkedAddr ).call()
         decimalShift = getter.functions.decimals().call()
-        print( 'decimalShift', decimalShift )
+        logger.debug( 'decimalShift: %d', decimalShift )
         print( result / (10**decimalShift) )
-        print( 'unshifted bal', result )
+        logger.info( 'unshifted bal: %s', result )
     elif args.action == 'name':
         if not contractAddress:
             sys.exit( 'error: no contract --addr passed for getting name')
@@ -91,11 +125,12 @@ if __name__ == "__main__":
         result = getter.functions.symbol().call()
         print( result )
     elif args.action == 'totalSupply':
-        if not contractAddress:
-            sys.exit( 'error: no contract --addr passed for getting totalSupply')
         getter = eth.contract( address=contractAddress, abi=metacontract['abi'] )
         result = getter.functions.totalSupply().call()
-        print( result )
+        decimalShift = getter.functions.decimals().call()
+        logger.debug( 'decimalShift: %d', decimalShift )
+        print( result / (10**decimalShift) )
+        logger.info( 'unshifted supply: %s', result )
     elif args.action == 'mint':
         if not contractAddress:
             sys.exit( 'error: no contract --addr passed for mint')
@@ -162,19 +197,20 @@ if __name__ == "__main__":
         if args.amount <= 0:
             sys.exit( 'error: non-positive --amount passed for transfer')
         amount = args.amount
+        logger.info( 'unshifted amount: %d', amount)
         srcAddr = fromArg
         if not srcAddr:
             srcAddr = eth.accounts[0]
-            print( 'using default account to transfer from', file=sys.stderr )
+            logger.info( 'using default account to transfer from' )
         checkedAddr = Web3.toChecksumAddress( srcAddr )
         destAddr = args.to
         if not destAddr:
             destAddr = eth.accounts[0]
-            print( 'using default account to transfer to', file=sys.stderr )
+            logger.info( 'using default account to transfer to' )
         eth.default_account = srcAddr
         setter = eth.contract( address=contractAddress, abi=metacontract['abi'] )
         tx = setter.functions.transfer( destAddr, amount ).transact({ 'gas': 100000, 'gasPrice': 1 })
-        print( 'waiting for receipt')
+        logger.info( 'waiting for receipt')
         receipt = eth.waitForTransactionReceipt( tx )
         #print( 'receipt', receipt )
         print( 'transaction hash:', receipt.transactionHash.hex() )
