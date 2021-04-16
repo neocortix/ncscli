@@ -85,7 +85,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@' )
     ap.add_argument( '--dataDirPath', required=True, help='the path to the directory for input and output data' )
     ap.add_argument( '--auth', type=boolArg, required=True, help='true to authorize, false to deauthorize' )
-    ap.add_argument( '--instanceId', required=True, help='id of the instance to auth or deauth' )
+    ap.add_argument( '--instanceId', required=False, help='id of the instance to auth or deauth' )
     ap.add_argument( '--configName', required=True, help='the name of the geth configuration' )
     ap.add_argument( '--account', help='the account to auth or deatuh (default is determined by instance' )
     ap.add_argument( '--invFile', help='the path an ansible inventory file in json form' )
@@ -103,12 +103,19 @@ if __name__ == "__main__":
         logger.error( 'no --invFile was given' )
         sys.exit( 1 )
 
+    shouldAuth = args.auth
     victimIid = args.instanceId
     if not victimIid:
-        logger.error( 'no --instanceId was given' )
+        logger.info( 'no --instanceId was given' )
+        #sys.exit( 1 )
+
+    if not victimIid and not args.account:
+        logger.error( 'neither --instanceId nor --account was given' )
+        sys.exit( 1 )
+    if shouldAuth and not victimIid:
+        logger.error( 'not willing to authorize one without an iid' )
         sys.exit( 1 )
 
-    shouldAuth = args.auth
     configName = args.configName
 
     savedSignersFilePath = os.path.join( args.dataDirPath, 'savedSigners.json' )
@@ -204,16 +211,18 @@ if __name__ == "__main__":
             if not victimAccount:
                 logger.error( 'can not %s account %s of inst %s', authStr, victimAccount, victimIid[0:16] )
                 sys.exit(1)
-            if shouldAuth:
-                logger.info( 'will start miner on inst %s', victimIid[0:16] )
-                victimInst = instancesByIid[victimIid]
-                ncsgeth.tellNodes( [victimInst], configName, '"miner.start(1)"' )
-            else:
-                victimInst = instancesByIid.get(victimIid)
-                if victimInst:
-                    logger.info( 'stopping miner on inst %s', victimIid[0:16] )
-                    ncsgeth.stopMiners( [victimInst], configName, )
-            logger.info( 'will %s account %s of inst %s', authStr, victimAccount, victimIid[0:16] )
+            if victimIid:
+                # start or stop miner
+                if shouldAuth :
+                    logger.info( 'will start miner on inst %s', victimIid[0:16] )
+                    victimInst = instancesByIid[victimIid]
+                    ncsgeth.tellNodes( [victimInst], configName, '"miner.start(1)"' )
+                else:
+                    victimInst = instancesByIid.get(victimIid)
+                    if victimInst:
+                        logger.info( 'stopping miner on inst %s', victimIid[0:16] )
+                        ncsgeth.stopMiners( [victimInst], configName, )
+            logger.info( 'will %s account %s of inst %s', authStr, victimAccount, victimIid )
             # execute upvote/downvote on each instance
             # maybe should do this only on (proposed or authorized) signers
             results = ncsgeth.authorizeSigner( instances, configName, victimAccount, shouldAuth )
