@@ -32,6 +32,39 @@ def parseLogLevel( arg ):
 
     return setting
 
+def getName( contractAddress, metacontract ):
+    result = None
+    if contractAddress and metacontract and 'abi' in metacontract:
+        try:
+            getter = eth.contract( address=contractAddress, abi=metacontract['abi'] )
+            result = getter.functions.name().call()
+        except Exception as exc:
+            logger.warning( 'got exception %s (%s)', type(exc), exc )
+    return result
+
+def getSymbol( contractAddress, metacontract ):
+    result = None
+    if contractAddress and metacontract and 'abi' in metacontract:
+        try:
+            getter = eth.contract( address=contractAddress, abi=metacontract['abi'] )
+            result = getter.functions.symbol().call()
+        except Exception as exc:
+            logger.warning( 'got exception %s (%s)', type(exc), exc )
+    return result
+
+def getTotalSupply( contractAddress, metacontract ):
+    result = None
+    if contractAddress and metacontract and 'abi' in metacontract:
+        try:
+            getter = eth.contract( address=contractAddress, abi=metacontract['abi'] )
+            supply = getter.functions.totalSupply().call()
+            decimalShift = getter.functions.decimals().call()
+            logger.debug( 'decimalShift: %d', decimalShift )
+            return (supply, decimalShift )
+        except Exception as exc:
+            logger.warning( 'got exception %s (%s)', type(exc), exc )
+    return result
+
 
 if __name__ == "__main__":
     # configure logger formatting
@@ -44,7 +77,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser( description=__doc__,
         fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( 'action', help='the action to perform', 
-        choices=['deploy', 'mint', 'allowance', 'approve', 'balance', 'name',
+        choices=['deploy', 'mint', 'allowance', 'approve', 'balance', 'info', 'name',
             'symbol', 'totalSupply', 'transfer', 'transferFrom']
         )
     ap.add_argument( 'configName', help='the network configuration to use' )
@@ -71,12 +104,17 @@ if __name__ == "__main__":
 
     contractFilePath = 'contracts/ERC20PresetMinterPauser.json'
     metacontract = None
-    with open( contractFilePath, 'r') as jsonInFile:
-        try:
-            metacontract = json.load(jsonInFile)  # a dict
-        except Exception as exc:
-            #logger.warning( 'could not load json (%s) %s', type(exc), exc )
-            raise
+    try:
+        with open( contractFilePath, 'r') as jsonInFile:
+            try:
+                metacontract = json.load(jsonInFile)  # a dict
+            except Exception as exc:
+                logger.error( 'could not load json (%s) %s', type(exc), exc )
+                sys.exit( 1 )
+    except Exception as exc:
+            logger.error( 'could not open %s (%s)', contractFilePath, type(exc) )
+            sys.exit( 1 )
+
 
     contractAddress = args.addr
     if args.action != 'deploy' and not contractAddress:
@@ -92,10 +130,20 @@ if __name__ == "__main__":
         eth.default_account = eth.accounts[0]
         bytecode = metacontract['bytecode']
         contractor = eth.contract(abi=metacontract['abi'], bytecode=bytecode)
-        tx = contractor.constructor( tokenName, symbol ).transact( {'gas': 3000000,'gasPrice': 1} )
-        print( 'transaction hash:', tx.hex() )
-        print( 'waiting for receipt')
-        receipt = eth.waitForTransactionReceipt( tx )
+        try:
+            tx = contractor.constructor( tokenName, symbol ).transact( {'gas': 3000000,'gasPrice': 1} )
+        except Exception as exc:
+            logger.error( 'deploy got exception (%s) %s', type(exc), exc )
+            sys.exit( 1 )
+        logger.info( 'transaction hash: %s', tx.hex() )
+        logger.info( 'waiting for receipt')
+        try:
+            receipt = eth.waitForTransactionReceipt( tx )
+        except Exception as exc:
+            logger.warning( 'waiting for receipt for transaction %s got exception (%s) %s',
+                tx.hex(), type(exc), exc )
+            logger.info( 'the deploy may or may not have gone through')
+            sys.exit( 1 )
         print( 'contract address:', receipt.contractAddress )
     elif args.action == 'balance':
         if not contractAddress:
@@ -115,42 +163,58 @@ if __name__ == "__main__":
     elif args.action == 'name':
         if not contractAddress:
             sys.exit( 'error: no contract --addr passed for getting name')
-        getter = eth.contract( address=contractAddress, abi=metacontract['abi'] )
-        result = getter.functions.name().call()
+        result = getName( contractAddress, metacontract )
         print( result )
     elif args.action == 'symbol':
         if not contractAddress:
             sys.exit( 'error: no contract --addr passed for getting symbol')
-        getter = eth.contract( address=contractAddress, abi=metacontract['abi'] )
-        result = getter.functions.symbol().call()
+        result = getSymbol( contractAddress, metacontract )
         print( result )
     elif args.action == 'totalSupply':
-        getter = eth.contract( address=contractAddress, abi=metacontract['abi'] )
-        result = getter.functions.totalSupply().call()
-        decimalShift = getter.functions.decimals().call()
-        logger.debug( 'decimalShift: %d', decimalShift )
-        print( result / (10**decimalShift) )
-        logger.info( 'unshifted supply: %s', result )
+        tup = getTotalSupply( contractAddress, metacontract )
+        if tup and len(tup) >= 2:
+            unshifted = tup[0]
+            decimalShift = tup[1]
+            logger.info( 'unshifted supply: %s', unshifted )
+            print( unshifted / (10**decimalShift) )
+    elif args.action == 'info':
+        result = {'name': None, 'symbol': None, 'totalSupply': None }
+        result['name'] = getName( contractAddress, metacontract )
+        result['symbol'] = getSymbol( contractAddress, metacontract )
+        tup = getTotalSupply( contractAddress, metacontract )
+        if tup and len(tup) >= 2:
+            unshifted = tup[0]
+            decimalShift = tup[1]
+            logger.info( 'unshifted supply: %s', unshifted )
+            result['totalSupply'] = unshifted / (10**decimalShift)
+            result['totalSupplyUnshifted'] = unshifted
+            print( json.dumps( result ) )
     elif args.action == 'mint':
-        if not contractAddress:
-            sys.exit( 'error: no contract --addr passed for mint')
         if not args.amount:  # should test for  None instead
             sys.exit( 'error: no --amount passed for mint')
         amount = args.amount
         destAddr = args.to
         if not destAddr:
             destAddr = eth.accounts[0]
-            print( 'using default account to mint to', file=sys.stderr )
+            logger.info( 'using default account to mint to' )
         eth.default_account = eth.accounts[0]
         setter = eth.contract( address=contractAddress, abi=metacontract['abi'] )
         decimalShift = setter.functions.decimals().call()
         shiftedAmount = amount / (10**decimalShift)
-        print( 'decimalShift', decimalShift, 'shiftedAmount', shiftedAmount )
-
-        tx = setter.functions.mint( destAddr, amount ).transact({ 'gas': 100000, 'gasPrice': 1 })
-        print( 'waiting for receipt')
-        receipt = eth.waitForTransactionReceipt( tx )
-        #print( 'receipt', receipt )
+        logger.info( 'decimalShift: %d, shiftedAmount %.18g', decimalShift, shiftedAmount )
+        try:
+            tx = setter.functions.mint( destAddr, amount ).transact({ 'gas': 100000, 'gasPrice': 1 })
+        except Exception as exc:
+            logger.error( 'mint got exception (%s) %s', type(exc), exc )
+            sys.exit( 1 )
+        logger.info( 'waiting for receipt')
+        try:
+            receipt = eth.waitForTransactionReceipt( tx )
+        except Exception as exc:
+            logger.warning( 'waiting for receipt for mint transaction %s got exception (%s) %s',
+                tx.hex(), type(exc), exc )
+            logger.info( 'the mint may or may not have gone through')
+            sys.exit( 1 )
         print( 'transaction hash:', receipt.transactionHash.hex() )
     elif args.action == 'approve':
         if args.amount == None:
@@ -209,10 +273,20 @@ if __name__ == "__main__":
             logger.info( 'using default account to transfer to' )
         eth.default_account = srcAddr
         setter = eth.contract( address=contractAddress, abi=metacontract['abi'] )
-        tx = setter.functions.transfer( destAddr, amount ).transact({ 'gas': 100000, 'gasPrice': 1 })
-        logger.info( 'waiting for receipt')
-        receipt = eth.waitForTransactionReceipt( tx )
-        #print( 'receipt', receipt )
+        try:
+            tx = setter.functions.transfer( destAddr, amount ).transact({ 'gas': 100000, 'gasPrice': 1 })
+        except Exception as exc:
+            logger.error( 'transfer got exception (%s) %s', type(exc), exc )
+            logger.info( 'you may want to try again')
+            sys.exit( 1 )
+        logger.info( 'waiting for receipt for transaction %s', tx.hex() )
+        try:
+            receipt = eth.waitForTransactionReceipt( tx )
+        except Exception as exc:
+            logger.warning( 'waiting for receipt for transaction %s got exception (%s) %s',
+                tx.hex(), type(exc), exc )
+            logger.info( 'the transaction may or may not have gone through')
+            sys.exit( 1 )
         print( 'transaction hash:', receipt.transactionHash.hex() )
     elif args.action == 'transferFrom':
         if args.amount == None:
