@@ -520,7 +520,7 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
         goodInstances = []
         badInstances = []
         if startedInstances:
-            returnCodes = checkInstanceClocks( startedInstances, timeLimit=40 )
+            returnCodes = checkInstanceClocks( startedInstances, timeLimit=120 )
             if not any( returnCodes ):
                 logger.info( 'checkInstanceClocks found all good' )
                 goodInstances = startedInstances
@@ -1053,13 +1053,16 @@ def checkInstanceClocks( instances, timeLimit ):
     with futures.ThreadPoolExecutor( max_workers=nInstances ) as executor:
         parIter = executor.map( checkInstanceClock, instances, [timeLimit]*nInstances,
             timeout=timeLimit )
-        returnCodes = [None] * len(instances)
+        returnCodes = [124] * len(instances)
         try:
             index = 0
-            for returnCode in parIter:
-                returnCodes[index] = returnCode
-                index += 1
-                time.sleep( .1 )
+            try:
+                for returnCode in parIter:
+                    returnCodes[index] = returnCode
+                    index += 1
+                    time.sleep( .1 )
+            except Exception as exc:
+                logger.error( 'exception iterating tasks (%s) %s', type(exc), exc )
         except KeyboardInterrupt:
             logger.warning( 'interrupted, setting flag')
             g_.interrupted = True
