@@ -72,21 +72,6 @@ try:
             stdout=subprocess.DEVNULL )
         if rc2:
             logger.warning( 'plotJMeterOutput exited with returnCode %d', rc2 )
-        scriptDirPath = os.path.dirname(os.path.realpath(__file__))
-        workingDir = os.getcwd()
-        try:
-            os.chdir(outDataDir)
-            # based on Harinder's neocortix_jmeter_histogram
-            rc2 = subprocess.call( [sys.executable, scriptDirPath+'/plotJMeterHist.py'] )
-            if rc2:
-                logger.warning( 'plotJMeterHist.py exited with returnCode %d', rc2 )
-
-            # based on Harinder's neocortix_jmeter_multi_graphs
-            rc2 = subprocess.call( [sys.executable, scriptDirPath+'/plotJMeterMulti.py'] )
-            if rc2:
-                logger.warning( 'plotJMeterMulti.py exited with returnCode %d', rc2 )
-        finally:
-           os.chdir(workingDir)
     sys.exit( rc )
 except KeyboardInterrupt:
     logger.warning( 'an interuption occurred')
