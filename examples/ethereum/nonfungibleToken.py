@@ -32,16 +32,6 @@ def parseLogLevel( arg ):
 
     return setting
 
-def getBaseUri( contractAddress, metacontract ):
-    result = None
-    if contractAddress and metacontract and 'abi' in metacontract:
-        try:
-            getter = eth.contract( address=contractAddress, abi=metacontract['abi'] )
-            result = getter.functions.baseURI().call()
-        except Exception as exc:
-            logger.warning( 'got exception %s (%s)', type(exc), exc )
-    return result
-
 def getName( contractAddress, metacontract ):
     result = None
     if contractAddress and metacontract and 'abi' in metacontract:
@@ -86,7 +76,7 @@ if __name__ == "__main__":
         fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( 'action', help='the action to perform', 
         choices=['deploy', 'mint', 'allowance', 'approve', 'balance', 'list', 'info', 'name',
-            'symbol', 'totalSupply', 'transfer', 'transferFrom']
+            'symbol', 'totalSupply', 'transferFrom']
         )
     ap.add_argument( 'configName', help='the network configuration to use' )
     ap.add_argument( '--addr', help='the contract address for a transaction or query' )
@@ -95,7 +85,8 @@ if __name__ == "__main__":
     ap.add_argument( '--baseUri', help='the base URI of the token for deploy' )
     ap.add_argument( '--from', help='the source account addr for a transaction or query' )
     ap.add_argument( '--to', help='the destination account addr for a transaction' )
-    ap.add_argument( '--amount', type=int, help='the amount for a transaction' )
+    #ap.add_argument( '--amount', type=int, help='the amount for a transaction' )
+    ap.add_argument( '--tokenId', type=int, help='the ID of the token' )
     ap.add_argument( '--logLevel', default ='info', help='verbosity of log (e.g. debug, info, warning, error)' )
     args = ap.parse_args()
 
@@ -185,18 +176,23 @@ if __name__ == "__main__":
         result['name'] = getName( contractAddress, metacontract )
         result['symbol'] = getSymbol( contractAddress, metacontract )
         result['totalSupply'] = getTotalSupply( contractAddress, metacontract )
-        result['baseURI'] = getBaseUri( contractAddress, metacontract )
         print( json.dumps( result ) )
     elif args.action == 'list':
         totalSupply = getTotalSupply( contractAddress, metacontract )
         logger.info( 'totalSupply: %d', totalSupply )
+        results = []
         for index in range( totalSupply ):
-            logger.info( 'querying %d of %d', index,  totalSupply )
+            result = {}
+            logger.debug( 'querying %d of %d', index,  totalSupply )
             getter = eth.contract( address=contractAddress, abi=metacontract['abi'] )
             tokenId = getter.functions.tokenByIndex( index ).call()
-            logger.info( 'tokenId: %d', tokenId )
+            result['tokenId'] = tokenId
             tokenUri = getter.functions.tokenURI( tokenId ).call()
-            logger.info( 'tokenUri: %s', tokenUri )
+            result['tokenUri'] = tokenUri
+            owner = getter.functions.ownerOf( tokenId ).call()
+            result['owner'] = owner
+            results.append( result )
+        print( json.dumps( results, indent=2 ) )
     elif args.action == 'mint':
         destAddr = args.to
         if not destAddr:
@@ -257,65 +253,34 @@ if __name__ == "__main__":
         #print( 'decimalShift', decimalShift )
         print( result / (10**decimalShift) )
         print( 'unshifted allowance', result )
-    elif args.action == 'transfer':
-        if not args.amount:  # maybe could test for  None instead
-            sys.exit( 'error: no --amount passed for transfer')
-        if args.amount <= 0:
-            sys.exit( 'error: non-positive --amount passed for transfer')
-        amount = args.amount
-        logger.info( 'unshifted amount: %d', amount)
+    elif args.action == 'transferFrom':
+        if args.tokenId == None:
+            sys.exit( 'error: no --tokenId passed for transferFrom')
+        if args.tokenId < 0:
+            sys.exit( 'error: negative --tokenId passed for transferFrom')
+        tokenId = args.tokenId
         srcAddr = fromArg
         if not srcAddr:
             srcAddr = eth.accounts[0]
             logger.info( 'using default account to transfer from' )
-        checkedAddr = Web3.toChecksumAddress( srcAddr )
-        destAddr = args.to
-        if not destAddr:
-            destAddr = eth.accounts[0]
-            logger.info( 'using default account to transfer to' )
-        eth.default_account = srcAddr
-        setter = eth.contract( address=contractAddress, abi=metacontract['abi'] )
-        try:
-            tx = setter.functions.transfer( destAddr, amount ).transact({ 'gas': 100000, 'gasPrice': 1 })
-        except Exception as exc:
-            logger.error( 'transfer got exception (%s) %s', type(exc), exc )
-            logger.info( 'you may want to try again')
-            sys.exit( 1 )
-        logger.info( 'waiting for receipt for transaction %s', tx.hex() )
-        try:
-            receipt = eth.waitForTransactionReceipt( tx )
-        except Exception as exc:
-            logger.warning( 'waiting for receipt for transaction %s got exception (%s) %s',
-                tx.hex(), type(exc), exc )
-            logger.info( 'the transaction may or may not have gone through')
-            sys.exit( 1 )
-        print( 'transaction hash:', receipt.transactionHash.hex() )
-    elif args.action == 'transferFrom':
-        if args.amount == None:
-            sys.exit( 'error: no --amount passed for transferFrom')
-        if args.amount <= 0:
-            sys.exit( 'error: non-positive --amount passed for transferFrom')
-        amount = args.amount
-        srcAddr = fromArg
-        if not srcAddr:
-            srcAddr = eth.accounts[0]
-            print( 'using default account to transfer from', file=sys.stderr )
         checkedSrc = Web3.toChecksumAddress( srcAddr )
         destAddr = args.to
         if not destAddr:
             destAddr = eth.accounts[0]
-            print( 'using default account to transfer to', file=sys.stderr )
+            logger.info( 'using default account to transfer to' )
         eth.default_account = eth.accounts[0]
         print( 'from:', checkedSrc, 'to:', destAddr, 'by:', eth.default_account,
-            'amount:', amount,
+            'tokenId:', tokenId,
             file=sys.stderr )
         setter = eth.contract( address=contractAddress, abi=metacontract['abi'] )
-        tx = setter.functions.transferFrom( checkedSrc, destAddr, amount ).transact(
-            { 'gas': 100000, 'gasPrice': 1 }
+        tx = setter.functions.safeTransferFrom( checkedSrc, destAddr, tokenId ).transact(
+            { 'gas': 200000, 'gasPrice': 1 }
             )
-        print( 'waiting for receipt')
+        logger.info( 'waiting for receipt')
         receipt = eth.waitForTransactionReceipt( tx )
-        #print( 'receipt', receipt )
+        if receipt['status'] != 1:
+            logger.error( 'transaction receipt contained error status')
+            logger.info( 'receipt: %s', receipt )
         print( 'transaction hash:', receipt.transactionHash.hex() )
     else:
         print( args.action, 'not implemented', file=sys.stderr )
