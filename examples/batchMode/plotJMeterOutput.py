@@ -631,10 +631,12 @@ if __name__ == "__main__":
         ResponseTimesInWindows = []
         MeanResponseTimesInWindows = []
         PercentileResponseTimesInWindows = []
+        Percentile5ResponseTimesInWindows = []
         for i in range(0,numWindows):
             ResponseTimesInWindows.append([])
             MeanResponseTimesInWindows.append(0)
             PercentileResponseTimesInWindows.append(0)
+            Percentile5ResponseTimesInWindows.append(0)
 
         # segment the values into the windows
         for i in range(0,len(startRelTimesAndMSPRsAll[0])):
@@ -645,6 +647,7 @@ if __name__ == "__main__":
         for i in range(0,numWindows):
             MeanResponseTimesInWindows[i] = np.mean(ResponseTimesInWindows[i])
             PercentileResponseTimesInWindows[i] = np.percentile(ResponseTimesInWindows[i],95)
+            Percentile5ResponseTimesInWindows[i] = np.percentile(ResponseTimesInWindows[i],5)
 
         # check 95th percentiles against SLO for PASS/FAIL
         numSLOwindows = int(min(SLODurationSeconds,maxDurationFound)/rampStepDurationSeconds)
@@ -658,12 +661,15 @@ if __name__ == "__main__":
         # prepare arrays for plotting
         meanPlotArray = []
         percentilePlotArray = []
+        percentile5PlotArray = []
         SLOPlotArray = [[0,MaxPlotValue],[0,SLOResponseTimeMaxSeconds],[min(SLODurationSeconds,maxDurationFound),SLOResponseTimeMaxSeconds],[min(SLODurationSeconds,maxDurationFound),MaxPlotValue]]
         for i in range(0,numWindows):
             meanPlotArray.append([i*rampStepDurationSeconds,MeanResponseTimesInWindows[i]])
             meanPlotArray.append([min((i+1)*rampStepDurationSeconds,maxDurationFound),MeanResponseTimesInWindows[i]])
             percentilePlotArray.append([i*rampStepDurationSeconds,PercentileResponseTimesInWindows[i]])
             percentilePlotArray.append([min((i+1)*rampStepDurationSeconds,maxDurationFound),PercentileResponseTimesInWindows[i]])
+            percentile5PlotArray.append([i*rampStepDurationSeconds,Percentile5ResponseTimesInWindows[i]])
+            percentile5PlotArray.append([min((i+1)*rampStepDurationSeconds,maxDurationFound),Percentile5ResponseTimesInWindows[i]])
 
         # plot SLO Comparison 
         plotMarkerSize = 3
@@ -671,8 +677,9 @@ if __name__ == "__main__":
         ax1 = fig.add_subplot()
 
         plt.plot(startRelTimesAndMSPRsAll[0],startRelTimesAndMSPRsAll[1], linestyle='', color=(0.0, 0.6, 1.0),marker='o',markersize=plotMarkerSize, alpha=0.03)
-        plt.plot(getColumn(meanPlotArray,0),getColumn(meanPlotArray,1), linewidth = 5,linestyle='-', color=(1.0, 0.7, 0.2))
-        plt.plot(getColumn(percentilePlotArray,0),getColumn(percentilePlotArray,1), linewidth = 5,linestyle='-', color=(1.0, 0.0, 1.0))
+        plt.plot(getColumn(percentilePlotArray,0),getColumn(percentilePlotArray,1), linewidth = 5,linestyle='-', color=(1.0, 0.0, 1.0), label="95%ile")
+        plt.plot(getColumn(meanPlotArray,0),getColumn(meanPlotArray,1), linewidth = 5,linestyle='-', color=(1.0, 0.7, 0.2), label="Mean")
+        plt.plot(getColumn(percentile5PlotArray,0),getColumn(percentile5PlotArray,1), linewidth = 5,linestyle='-', color=(0.5, 0.0, 0.5), label="5%ile")
         if SLOstatus=="PASS":
             plt.plot(getColumn(SLOPlotArray,0),getColumn(SLOPlotArray,1), linewidth = 8,linestyle='-', color=(0.0, 0.8, 0.0))
             ax1.text(min(SLODurationSeconds,maxDurationFound)/2, clipTimeInSeconds - 0.1, 'PASS SLO', fontsize=50, fontweight='bold',color=(0.0,0.8,0.0),verticalalignment='top', horizontalalignment='center')
@@ -690,7 +697,9 @@ if __name__ == "__main__":
             ax.yaxis.set_major_locator( mpl.ticker.FixedLocator([ .02, .05, .1, .2, .5, 1, 2, 5, 10]) )
             ax.yaxis.set_major_formatter(mpl.ticker.ScalarFormatter())
     
-        plt.title("Response Times (s) - Mean, 95th Percentile, and SLO\n", fontsize=42*fontFactor)  
+        lgnd = ax1.legend(fontsize='medium',loc="upper right")
+        
+        plt.title("Response Times (s) - Mean, 5th, 95th Percentile, and SLO\n", fontsize=42*fontFactor)  
         plt.xlabel("Time during Test (s)", fontsize=32*fontFactor)  
         plt.ylabel("Response Times (s)", fontsize=32*fontFactor)  
         plt.savefig( outputDir+'/SLOcomparison.png', bbox_inches='tight' )
@@ -994,6 +1003,7 @@ if __name__ == "__main__":
         axes[2,0].plot(startRelTimesAndMSPRsAll[0],startRelTimesAndMSPRsAll[1], linestyle='', color=(0.0, 0.6, 1.0),marker='o',markersize=plotMarkerSize, alpha=0.03)
         axes[2,0].plot(getColumn(percentilePlotArray,0),getColumn(percentilePlotArray,1), linewidth = 3,linestyle='-', color=(1.0, 0.0, 1.0), label="95%ile")
         axes[2,0].plot(getColumn(meanPlotArray,0),getColumn(meanPlotArray,1), linewidth = 3,linestyle='-', color=(1.0, 0.7, 0.2), label="Mean")
+        axes[2,0].plot(getColumn(percentile5PlotArray,0),getColumn(percentile5PlotArray,1), linewidth = 3,linestyle='-', color=(0.5, 0.0, 0.5), label="5%ile")
         if SLOstatus=="PASS":
             axes[2,0].plot(getColumn(SLOPlotArray,0),getColumn(SLOPlotArray,1), linewidth = 3,linestyle='-', color=(0.0, 0.8, 0.0))
             axes[2,0].text(min(SLODurationSeconds,maxDurationFound)/2, clipTimeInSeconds - 0.1, 'PASS SLO', fontsize=20, fontweight='bold',color=(0.0,0.8,0.0),verticalalignment='top', horizontalalignment='center')
@@ -1006,7 +1016,7 @@ if __name__ == "__main__":
 
         lgnd = axes[2,0].legend(fontsize='medium',loc="upper right")
     
-        axes[2,0].set_title("Response Times (s) - Mean, 95th Percentile, and SLO")  
+        axes[2,0].set_title("Response Times (s) - Mean, 5th, 95th Percentile, and SLO")  
         axes[2,0].set_xlabel("Time during Test (s)")  
         axes[2,0].set_ylabel("Response Times (s)")  
 
@@ -1051,40 +1061,57 @@ if __name__ == "__main__":
 
     # Generate TestResults.html
 
-    primaryDateString1 = "January 1, 2000"
-    primaryDateString2 = "January 1, 2000"
-
-
     # datetime object containing current date and time
     primaryDateString1 = datetime.now().strftime("%B %d, %Y  %H:%M:%S")
 
-
-
     outputFileName = outputDir + "/TestResults.html"
-    copyfile("./LoadTestHeader_002.jpg", outputDir + "/LoadTestHeader_002.jpg")
+    copyfile("./LoadTestHeader_005.jpg", outputDir + "/LoadTestHeader_005.jpg")
     outputFile = open(outputFileName, "w",encoding='utf-8')
 
     print("<HTML>",file=outputFile)
     print("<HEAD>",file=outputFile)
     print("<TITLE>%s</TITLE>" % (primaryDateString1 + "_SecuritySummary.html"),file=outputFile)
     print("<META HTTP-EQUIV=\"Content-Type\" CONTENT=\"text/html; charset=iso-8859-1\">",file=outputFile)
+    print("<style> table, th, td { border: 2px solid #444444; border-collapse:collapse; }\n th, td { padding: 5px; }</style>",file=outputFile) 
     print("</HEAD>",file=outputFile)
-    print("<Body style=\"background-color:Black;\">",file=outputFile)
+    print("<Body style=\"background-color:#eeeeee;\">",file=outputFile)
     print("<center>",file=outputFile)
-    print("<img src=\"./LoadTestHeader_002.jpg\" width=1000>",file=outputFile)
 
-    print("<h1 style=\"font-family:'Arial';color:White;font-size:20pt\">%s</h1>" % primaryDateString1,file=outputFile)
+
+    print("<TABLE style=\"border:3px solid #888888;background-color:White \"><TR><TD>",file=outputFile)
+
+    print("<center>",file=outputFile)
+
+    print("<img src=\"./LoadTestHeader_005.jpg\" width=1000>",file=outputFile)
+
+    print("<TABLE style=\"border:2px solid #444444;background-color:White;font-family:'Arial';color:Black;font-size:16pt;font-weight:bold\">",file=outputFile)
+    print("<TR><TD>Test Date:</TD><TD>%s</TD></TR>" % primaryDateString1,file=outputFile)
+    print("<TR><TD>Number of Instances:</TD><TD>%i</TD></TR>" % len(culledRelativeResponseData),file=outputFile)
+    print("<TR><TD>Maximum Delivered Load:</TD><TD>%.2f Requests/Second</TD></TR>" % max(deliveredLoad),file=outputFile)
+    print("<TR><TD>Test Result:</TD><TD>%s</TD></TR>" % SLOstatus,file=outputFile)
+    print("</TABLE>",file=outputFile)
     print("<BR><BR>",file=outputFile)
 
-
     print("<img src=\"./graphs3.png\" width=900>",file=outputFile)
-    print("<BR><BR><BR>",file=outputFile)
+    print("<BR><BR><BR><BR>",file=outputFile)
 
+    print("</center>",file=outputFile)
+    print("</TR></TD></TABLE>",file=outputFile)
+    print("<BR><BR>",file=outputFile)
+
+    print("<TABLE style=\"border:3px solid #888888;background-color:White;width:1016px \"><TR><TD>",file=outputFile)
+
+    print("<center>",file=outputFile)
+
+    print("<BR><BR><BR>",file=outputFile)
     print("<img src=\"./graphs2.png\" width=900>",file=outputFile)
     print("<BR><BR><BR>",file=outputFile)
 
     print("<img src=\"./worldMap.png\" width=600>",file=outputFile)
     print("<BR><BR><BR>",file=outputFile)
+
+    print("</center>",file=outputFile)
+    print("</TR></TD></TABLE>",file=outputFile)
 
     print("</center>",file=outputFile)
 
