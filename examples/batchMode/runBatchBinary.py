@@ -40,6 +40,6 @@ if __name__ == "__main__":
         outDataDir = outDataDirName,
         encryptFiles = False,
         startFrame = 1,
-        endFrame = 3
+        endFrame = 10
     )
     sys.exit( rc )
