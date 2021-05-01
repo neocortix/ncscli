@@ -10,7 +10,7 @@ class pythonFrameProcessor(batchRunner.frameProcessor):
     '''defines details for using python in a simple batch job'''
  
     def installerCmd( self ):
-        return 'sudo apt-get -qq -y install python3-matplotlib > /dev/null' 
+        return 'sudo apt-get -qq update && sudo apt-get -qq -y install python3-matplotlib > /dev/null' 
    
     workerScriptPath = 'plotFrame.py'
     frameFileType = 'png'
