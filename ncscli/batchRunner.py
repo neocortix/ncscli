@@ -1018,7 +1018,7 @@ def commandInstance( inst, cmd, timeLimit ):
             return 0
     return 1
 
-def checkInstanceClock( inst, timeLimit, pastMax=6.0, futureMax=3.0 ):
+def checkInstanceClock( inst, timeLimit, pastMax=6.0, futureMax=4.0 ):
     '''check clock on instance, return non-zero rc if off by too much'''
     iid = inst['instanceId']
     logFrameState( -1, 'checkInstanceClockStarting', iid )
