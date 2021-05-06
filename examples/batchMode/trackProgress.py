@@ -141,6 +141,7 @@ if __name__ == "__main__":
     frameTimeLimit = 0
     timeLimit = 0
     elapsed = 0
+    hasRunSome = False
     finalMsg = None
     outDataDir = None
     batchRunnerJLogPath = None
@@ -148,6 +149,10 @@ if __name__ == "__main__":
     throughputFile = None
     brResults = {}
     lastUpdateTime = datetime.datetime.fromtimestamp(0, tz=datetime.timezone.utc)
+    if realTimeWanted:
+        startDateTime = datetime.datetime.now( datetime.timezone.utc )
+    else:
+        startDateTime = None
     for line in inFile:
         try:
             logger.debug( '%s', line)
@@ -177,12 +182,12 @@ if __name__ == "__main__":
                 nRecruiting = int( numPart )
                 phase = 'Launching %d instances' % nRecruiting
                 phaseChange = True
-            elif 'launchScInstances allocated' in line:
+            elif 'launchScInstances allocated' in line and not hasRunSome:
                 numPart = line.split('allocated ')[1].split(' instances' )[0]
                 nAllocated = int( numPart )
                 phase = 'Allocated %d instances' % nAllocated
                 phaseChange = True
-            elif 'instance(s) launched so far' in line:
+            elif 'instance(s) launched so far' in line and not hasRunSome:
                 numPart = line.split('launchScInstances ')[1].split(' instance(s)')[0]
                 nLaunched = int( numPart )
                 phase = 'Launched %d instances' % nLaunched
@@ -192,7 +197,8 @@ if __name__ == "__main__":
                 nInstInstances = int( numPart )
                 phase = 'Installing on %d instances' % nInstInstances
                 phaseChange = True
-            elif 'good installs' in line:
+            elif 'good installs' in line or 'would compute frames' in line:
+                hasRunSome = True
                 phase = 'Running on Instances'
                 phaseChange = True
                 if pbar and frameTimeLimit > 0:
@@ -230,10 +236,7 @@ if __name__ == "__main__":
                         timeLimit = startingArgs['timeLimit']
                         frameTimeLimit = startingArgs['frameTimeLimit']
                         instTimeLimit = startingArgs['instTimeLimit']
-                    if realTimeWanted:
-                        startDateTime = datetime.datetime.now( datetime.timezone.utc )
-                    else:
-                        startDateTime = brResults.get( 'startDateTime' )
+                    startDateTime = brResults.get( 'startDateTime' )
                     logger.debug( 'startDateTime: %s', startDateTime )
                 if pbar and timeLimit > 0:
                     pbar.total=timeLimit
@@ -279,8 +282,11 @@ if __name__ == "__main__":
         if finalMsg:
             statusbar.update( demo=finalMsg, force=True )
     if pbar:
-        logger.debug( 'closing pbar' )
-        pbar.clear()
+        logger.debug( 'finishing pbar' )
+        # top it up to 100%, while avoiding negative increment
+        increment = max( 0, (pbar.total-pbar.count) )
+        pbar.update( increment, force=True )
+        #pbar.clear()  # could clear it instead
     if manager:
         manager.stop()
     if throughputFile:
