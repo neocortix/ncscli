@@ -236,10 +236,12 @@ if __name__ == "__main__":
                         timeLimit = startingArgs['timeLimit']
                         frameTimeLimit = startingArgs['frameTimeLimit']
                         instTimeLimit = startingArgs['instTimeLimit']
-                    startDateTime = brResults.get( 'startDateTime' )
+                        if pbar and timeLimit > 0:
+                            logger.debug( 'pbar.total=timeLimit: %d', timeLimit )
+                            pbar.total=timeLimit
+                    if not realTimeWanted:
+                        startDateTime = brResults.get( 'startDateTime' )
                     logger.debug( 'startDateTime: %s', startDateTime )
-                if pbar and timeLimit > 0:
-                    pbar.total=timeLimit
 
             if realTimeWanted:
                 lineDateTime = datetime.datetime.now( datetime.timezone.utc )
@@ -263,7 +265,7 @@ if __name__ == "__main__":
                 logger.debug( 'lineDateTime: %s', lineDateTime )
                 if startDateTime:
                     elapsed = (lineDateTime - startDateTime).total_seconds()
-                    logger.debug( 'elapsed: %.1f', elapsed )
+                    logger.debug( 'elapsed: %.1f, startDateTime: %s', elapsed, startDateTime )
                     intElapsed = int(elapsed)
                     if intElapsed > pbar.count and intElapsed <= pbar.total:
                         pbar.update( intElapsed - pbar.count, force=True )
