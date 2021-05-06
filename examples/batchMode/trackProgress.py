@@ -166,7 +166,7 @@ if __name__ == "__main__":
                 outDataDir = line.split('args.outDataDir: ')[1].strip()
                 logger.debug( 'outDataDir: %s', outDataDir )
                 if dataBar:
-                    dataBar.update( ' Data dir: %s' % outDataDir )
+                    dataBar.update( '   Output: %s' % outDataDir )
                 batchRunnerJLogPath = os.path.join( outDataDir, 'batchRunner_results.jlog' )
                 logger.debug( 'batchRunnerJLogPath: %s', batchRunnerJLogPath )
                 throughputFilePath = os.path.join( outDataDir, 'trackedStderr.log' )
@@ -218,6 +218,7 @@ if __name__ == "__main__":
                     phaseChange = True
                 else:
                     msg = line.split('runBatch ')[1].strip()
+                    msg = msg.replace( 'computed', 'Completed', 1 )
                     finalMsg = 'SUCCESS. %s' % msg
                     phase = finalMsg
                     phaseChange = True
