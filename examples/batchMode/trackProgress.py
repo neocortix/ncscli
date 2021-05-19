@@ -10,13 +10,18 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 # third-party modules
 import dateutil.parser
 import enlighten
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.WARNING)
+logger.setLevel(logging.INFO)  # WARNING
+
+
+class g_:
+    interrupted = False
 
 
 def datetimeIsAware( dt ):
@@ -89,6 +94,16 @@ def parseInstallerLog( jlogFilePath ):
             logger.debug( '%d done (%d errors) by %s', nInstDone, nInstErr, line['dateTime'] )
     return {'nInstances': nInstances, 'nInstDone': nInstDone, 'nInstErr': nInstErr  }
 
+def clocker():
+    thr = threading.current_thread()
+    while not thr.stopRequested:
+        if g_.interrupted:
+            break
+        time.sleep( .5 )
+        if not thr.stopRequested:
+            if statusbar and phase:
+                statusbar.update( demo=phase, force=True )
+
 
 if __name__ == "__main__":
     # configure logger formatting
@@ -134,165 +149,180 @@ if __name__ == "__main__":
     if sleepy:
         time.sleep( 2 )
 
-    # prepare to loop for every input line
-    nInstances = 0
-    nInstDone = 0
-    nFailed = 0
-    frameTimeLimit = 0
-    timeLimit = 0
-    elapsed = 0
-    hasRunSome = False
-    finalMsg = None
-    outDataDir = None
-    batchRunnerJLogPath = None
-    throughputFilePath = None
-    throughputFile = None
-    brResults = {}
-    lastUpdateTime = datetime.datetime.fromtimestamp(0, tz=datetime.timezone.utc)
-    if realTimeWanted:
-        startDateTime = datetime.datetime.now( datetime.timezone.utc )
-    else:
-        startDateTime = None
-    for line in inFile:
-        try:
-            logger.debug( '%s', line)
-            if throughputFile:
-                throughputFile.write( line )
-                throughputFile.flush()
-            if sleepy:
-                time.sleep( .033 )
-            phaseChange = False
-            if 'runBatch args.outDataDir' in line:
-                outDataDir = line.split('args.outDataDir: ')[1].strip()
-                logger.debug( 'outDataDir: %s', outDataDir )
-                if dataBar:
-                    dataBar.update( '   Output: %s' % outDataDir )
-                batchRunnerJLogPath = os.path.join( outDataDir, 'batchRunner_results.jlog' )
-                logger.debug( 'batchRunnerJLogPath: %s', batchRunnerJLogPath )
-                throughputFilePath = os.path.join( outDataDir, 'trackedStderr.log' )
-                if not os.path.isfile( throughputFilePath ):
-                    logger.debug( 'log file path: %s', throughputFilePath )
-                    if not os.path.isdir( outDataDir ):
-                        logger.debug( 'creating dir: %s', outDataDir )
-                        os.makedirs( outDataDir, exist_ok=True )
-                    throughputFile = open( throughputFilePath, 'w' )
+    clockerWanted = True
+    clockThread = None
+    if clockerWanted:
+        # start a clock thread to maintain a ticking clock effect
+        clockThread = threading.Thread( target=clocker )
+        clockThread.stopRequested = False
+        clockThread.start()
+
+    try:
+        # prepare to loop for every input line
+        nInstances = 0
+        nInstDone = 0
+        nFailed = 0
+        frameTimeLimit = 0
+        timeLimit = 0
+        elapsed = 0
+        hasRunSome = False
+        finalMsg = None
+        outDataDir = None
+        batchRunnerJLogPath = None
+        throughputFilePath = None
+        throughputFile = None
+        brResults = {}
+        lastUpdateTime = datetime.datetime.fromtimestamp(0, tz=datetime.timezone.utc)
+        if realTimeWanted:
+            startDateTime = datetime.datetime.now( datetime.timezone.utc )
+        else:
+            startDateTime = None
+        for line in inFile:
+            try:
+                logger.debug( '%s', line)
+                if throughputFile:
                     throughputFile.write( line )
-            elif 'recruitInstances recruiting' in line:
-                numPart = line.split('recruiting ')[1].split(' instances' )[0]
-                nRecruiting = int( numPart )
-                phase = 'Launching %d instances' % nRecruiting
-                phaseChange = True
-            elif 'launchScInstances allocated' in line and not hasRunSome:
-                numPart = line.split('allocated ')[1].split(' instances' )[0]
-                nAllocated = int( numPart )
-                phase = 'Allocated %d instances' % nAllocated
-                phaseChange = True
-            elif 'instance(s) launched so far' in line and not hasRunSome:
-                numPart = line.split('launchScInstances ')[1].split(' instance(s)')[0]
-                nLaunched = int( numPart )
-                phase = 'Launched %d instances' % nLaunched
-                phaseChange = True
-            elif 'recruitInstances calling tellInstances to install on' in line:
-                numPart = line.split('to install on ')[1].split(' instances' )[0]
-                nInstInstances = int( numPart )
-                phase = 'Installing on %d instances' % nInstInstances
-                phaseChange = True
-            elif 'good installs' in line or 'would compute frames' in line:
-                hasRunSome = True
-                phase = 'Running on Instances'
-                phaseChange = True
-                if pbar and frameTimeLimit > 0:
-                    pbar.total = int( min( elapsed + frameTimeLimit, timeLimit ) )
-            elif 'renderFramesOnInstance finished' in line:
-                nInstDone += 1
-            elif 'renderFramesOnInstance computeFailed' in line:
-                nFailed += 1
-                nInstDone += 1
-            elif 'runBatch terminating' in line:
-                phase = 'Tidying up'
-                phaseChange = True
-            elif 'runBatch computed' in line:
-                if 'computed 0 frames' in line:
-                    finalMsg = 'ERROR. Zero frames computed; see %s' % throughputFilePath
-                    phase = finalMsg
+                    throughputFile.flush()
+                if sleepy:
+                    time.sleep( .033 )
+                phaseChange = False
+                if 'runBatch args.outDataDir' in line:
+                    outDataDir = line.split('args.outDataDir: ')[1].strip()
+                    logger.debug( 'outDataDir: %s', outDataDir )
+                    if dataBar:
+                        dataBar.update( '   Output: %s' % outDataDir, force=True )
+                    batchRunnerJLogPath = os.path.join( outDataDir, 'batchRunner_results.jlog' )
+                    logger.debug( 'batchRunnerJLogPath: %s', batchRunnerJLogPath )
+                    throughputFilePath = os.path.join( outDataDir, 'trackedStderr.log' )
+                    if not os.path.isfile( throughputFilePath ):
+                        logger.debug( 'log file path: %s', throughputFilePath )
+                        if not os.path.isdir( outDataDir ):
+                            logger.debug( 'creating dir: %s', outDataDir )
+                            os.makedirs( outDataDir, exist_ok=True )
+                        throughputFile = open( throughputFilePath, 'w' )
+                        throughputFile.write( line )
+                elif 'recruitInstances recruiting' in line:
+                    numPart = line.split('recruiting ')[1].split(' instances' )[0]
+                    nRecruiting = int( numPart )
+                    phase = 'Launching %d instances' % nRecruiting
                     phaseChange = True
-                else:
-                    msg = line.split('runBatch ')[1].strip()
-                    msg = msg.replace( 'computed', 'Completed', 1 )
-                    finalMsg = 'SUCCESS. %s' % msg
-                    phase = finalMsg
+                elif 'launchScInstances allocated' in line and not hasRunSome:
+                    numPart = line.split('allocated ')[1].split(' instances' )[0]
+                    nAllocated = int( numPart )
+                    phase = 'Allocated %d instances' % nAllocated
                     phaseChange = True
-            elif 'plotting data' in line:
-                phase = 'Analyzing and plotting results'
-                phaseChange = True
-            #elif '<stdout>' in line:
-            #    logger.debug( '%s %s', lineDateTime, '<stdout>' )
+                elif 'instance(s) launched so far' in line and not hasRunSome:
+                    numPart = line.split('launchScInstances ')[1].split(' instance(s)')[0]
+                    nLaunched = int( numPart )
+                    phase = 'Launched %d instances' % nLaunched
+                    phaseChange = True
+                elif 'recruitInstances calling tellInstances to install on' in line:
+                    numPart = line.split('to install on ')[1].split(' instances' )[0]
+                    nInstInstances = int( numPart )
+                    phase = 'Installing on %d instances' % nInstInstances
+                    phaseChange = True
+                elif 'good installs' in line or 'would compute frames' in line:
+                    hasRunSome = True
+                    phase = 'Running on Instances'
+                    phaseChange = True
+                    if pbar and frameTimeLimit > 0:
+                        pbar.total = int( min( elapsed + frameTimeLimit, timeLimit ) )
+                elif 'renderFramesOnInstance finished' in line:
+                    nInstDone += 1
+                elif 'renderFramesOnInstance computeFailed' in line:
+                    nFailed += 1
+                    nInstDone += 1
+                elif 'runBatch terminating' in line:
+                    phase = 'Tidying up'
+                    phaseChange = True
+                elif 'runBatch computed' in line:
+                    if 'computed 0 frames' in line:
+                        finalMsg = 'ERROR. Zero frames computed; see %s' % throughputFilePath
+                        phase = finalMsg
+                        phaseChange = True
+                    else:
+                        msg = line.split('runBatch ')[1].strip()
+                        msg = msg.replace( 'computed', 'Completed', 1 )
+                        finalMsg = 'SUCCESS. %s' % msg
+                        phase = finalMsg
+                        phaseChange = True
+                elif 'plotting data' in line:
+                    phase = 'Analyzing and plotting results'
+                    phaseChange = True
+                #elif '<stdout>' in line:
+                #    logger.debug( '%s %s', lineDateTime, '<stdout>' )
 
-            if batchRunnerJLogPath:
-                if not brResults and os.path.isfile( batchRunnerJLogPath ):
-                    logger.debug( 'would read %s', batchRunnerJLogPath )
-                    brResults = parseBatchRunnerLog( batchRunnerJLogPath )
-                    startingArgs = brResults.get( 'startingArgs' )
-                    if startingArgs:
-                        timeLimit = startingArgs['timeLimit']
-                        frameTimeLimit = startingArgs['frameTimeLimit']
-                        instTimeLimit = startingArgs['instTimeLimit']
-                        if pbar and timeLimit > 0:
-                            logger.debug( 'pbar.total=timeLimit: %d', timeLimit )
-                            pbar.total=timeLimit
-                    if not realTimeWanted:
-                        startDateTime = brResults.get( 'startDateTime' )
-                    logger.debug( 'startDateTime: %s', startDateTime )
+                if batchRunnerJLogPath:
+                    if not brResults and os.path.isfile( batchRunnerJLogPath ):
+                        logger.debug( 'would read %s', batchRunnerJLogPath )
+                        brResults = parseBatchRunnerLog( batchRunnerJLogPath )
+                        startingArgs = brResults.get( 'startingArgs' )
+                        if startingArgs:
+                            timeLimit = startingArgs['timeLimit']
+                            frameTimeLimit = startingArgs['frameTimeLimit']
+                            instTimeLimit = startingArgs['instTimeLimit']
+                            if pbar and timeLimit > 0:
+                                logger.debug( 'pbar.total=timeLimit: %d', timeLimit )
+                                pbar.total=timeLimit
+                        if not realTimeWanted:
+                            startDateTime = brResults.get( 'startDateTime' )
+                        logger.debug( 'startDateTime: %s', startDateTime )
 
-            if realTimeWanted:
-                lineDateTime = datetime.datetime.now( datetime.timezone.utc )
-            else:
-                lineDateTime = None
-                # extract the dateTime stamp from the line
-                parts = line.split()
-                if len( parts[0] ) >= 19:
-                    # in this case, it hopefully is an iso-like date stamp without embedded spaces
-                    dateTimePart =  parts[0]
+                if realTimeWanted:
+                    lineDateTime = datetime.datetime.now( datetime.timezone.utc )
                 else:
-                    # in this case, it hopefully is human-friendly dateTime stamp with 1 embedded space
-                    dateTimePart = ' '.join( parts[0:2] )
-                try:
-                    lineDateTime = dateutil.parser.parse( dateTimePart )
-                    lineDateTime = universalizeDateTime( lineDateTime )
-                except Exception:
-                    # ignore any failure to parse dateTime
-                    pass
-            if pbar and lineDateTime:
-                logger.debug( 'lineDateTime: %s', lineDateTime )
-                if startDateTime:
-                    elapsed = (lineDateTime - startDateTime).total_seconds()
-                    logger.debug( 'elapsed: %.1f, startDateTime: %s', elapsed, startDateTime )
-                    intElapsed = int(elapsed)
-                    if intElapsed > pbar.count and intElapsed <= pbar.total:
-                        pbar.update( intElapsed - pbar.count, force=True )
+                    lineDateTime = None
+                    # extract the dateTime stamp from the line
+                    parts = line.split()
+                    if len( parts[0] ) >= 19:
+                        # in this case, it hopefully is an iso-like date stamp without embedded spaces
+                        dateTimePart =  parts[0]
+                    else:
+                        # in this case, it hopefully is human-friendly dateTime stamp with 1 embedded space
+                        dateTimePart = ' '.join( parts[0:2] )
+                    try:
+                        lineDateTime = dateutil.parser.parse( dateTimePart )
+                        lineDateTime = universalizeDateTime( lineDateTime )
+                    except Exception:
+                        # ignore any failure to parse dateTime
+                        pass
+                if pbar and lineDateTime:
+                    logger.debug( 'lineDateTime: %s', lineDateTime )
+                    if startDateTime:
+                        elapsed = (lineDateTime - startDateTime).total_seconds()
+                        logger.debug( 'elapsed: %.1f, startDateTime: %s', elapsed, startDateTime )
+                        intElapsed = int(elapsed)
+                        if intElapsed > pbar.count and intElapsed <= pbar.total:
+                            pbar.update( intElapsed - pbar.count, force=True )
 
-            if statusbar:
-                beenAWhile = lineDateTime and \
-                    lineDateTime > lastUpdateTime + datetime.timedelta(seconds=1)
-                if phaseChange or beenAWhile:
-                    statusbar.update( demo=phase, force=True )
-                    lastUpdateTime = datetime.datetime.now( datetime.timezone.utc )
-                    if sleepy:
-                        time.sleep( 1 )
-        except Exception as exc:
-            logger.warning( 'got exception (%s) %s', type(exc), exc, exc_info=False )
-    if statusbar:
-        if finalMsg:
-            statusbar.update( demo=finalMsg, force=True )
-    if pbar:
-        logger.debug( 'finishing pbar' )
-        # top it up to 100%, while avoiding negative increment
-        increment = max( 0, (pbar.total-pbar.count) )
-        pbar.update( increment, force=True )
-        #pbar.clear()  # could clear it instead
-    if manager:
-        manager.stop()
-    if throughputFile:
-        throughputFile.close()
-    if sleepy:
-        time.sleep( 1 )
+                if statusbar:
+                    beenAWhile = lineDateTime and \
+                        lineDateTime > lastUpdateTime + datetime.timedelta(seconds=1)
+                    if phaseChange or beenAWhile:
+                        statusbar.update( demo=phase, force=True )
+                        lastUpdateTime = datetime.datetime.now( datetime.timezone.utc )
+                        if sleepy:
+                            time.sleep( 1 )
+            except Exception as exc:
+                logger.warning( 'got exception (%s) %s', type(exc), exc, exc_info=False )
+        if statusbar:
+            if finalMsg:
+                statusbar.update( demo=finalMsg, force=True )
+        if pbar:
+            logger.debug( 'finishing pbar' )
+            # top it up to 100%, while avoiding negative increment
+            increment = max( 0, (pbar.total-pbar.count) )
+            pbar.update( increment, force=True )
+            #pbar.clear()  # could clear it instead
+            if sleepy:
+                time.sleep( 1 )
+    finally:
+        if clockThread:
+            clockThread.stopRequested = True
+            clockThread.join( timeout=60 )
+            if clockThread.is_alive():
+                logger.warning( 'the clock thread did not stop')
+        if manager:
+            manager.stop()
+        if throughputFile:
+            throughputFile.close()
