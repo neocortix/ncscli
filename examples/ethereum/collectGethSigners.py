@@ -97,7 +97,7 @@ if __name__ == "__main__":
             logger.info( 'iterating allSigners')
             for signerId in allSigners:
                 if signerId not in instancesByAccount:
-                    logger.warning( 'no instance for signer %s', signerId )
+                    logger.debug( 'no instance for signer %s', signerId )
                     continue
                 inst = instancesByAccount[signerId]
                 iid = inst.get('instanceId')
