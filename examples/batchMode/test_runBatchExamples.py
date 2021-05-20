@@ -131,7 +131,7 @@ def test_runBatchK6():
         if rc != 0:
             pytest.xfail( '"go" compiler not found (for building k6Worker/k6)' )
         # build the ARM executable
-        rc = subprocess.call( 'GOARCH=arm64 GOOS=linux GOPATH=$PWD/go go get github.com/loadimpact/k6', shell=True )
+        rc = subprocess.call( 'GOARCH=arm64 GOOS=linux GOPATH=$PWD/go go get go.k6.io/k6', shell=True )
         assert rc==0, 'could not build k6 for Arm64'
         # copy ARM executable to k6worker dir
         rc = subprocess.call( 'cp -p go/bin/linux_arm64/k6 k6Worker', shell=True )
