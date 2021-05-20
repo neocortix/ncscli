@@ -185,6 +185,7 @@ def collectAuthSigners( instances, configName ):
         results = tellNodes( instances, configName, cmd )
         for result in results:
             if result['returnCode'] != 0:
+                logger.warning( 'skipping due to bad RC for %s', result )
                 continue
             stdout = result['stdout']
             sigs = json.loads( stdout )
