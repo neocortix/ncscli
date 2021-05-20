@@ -24,7 +24,12 @@ class pingFrameProcessor(batchRunner.frameProcessor):
 
 
 # configure logger formatting
-logging.basicConfig()
+#logging.basicConfig()
+logger = logging.getLogger(__name__)
+logFmt = '%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s'
+logDateFmt = '%Y/%m/%d %H:%M:%S'
+formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
+logging.basicConfig(format=logFmt, datefmt=logDateFmt)
 
 dateTimeTag = datetime.datetime.now().strftime( '%Y-%m-%d_%H%M%S' )
 outDataDir = 'data/ping_' + dateTimeTag
@@ -37,7 +42,7 @@ rc = batchRunner.runBatch(
     outDataDir = outDataDir,
     autoscaleMax = 1.5,
     startFrame = 1,
-    endFrame = 3
+    endFrame = 6
  )
 
 sys.exit( rc )
