@@ -305,6 +305,155 @@ def getLiveInstances( startedIids, authToken ):
             #    deadInstances.append( inst )
     return liveInstances
 
+def launchEdgeNodes( dataDirPath, db, args ):
+    '''recruits edge nodes, updates database; may sys.exit'''
+    startDateTime = datetime.datetime.now( datetime.timezone.utc )
+    dateTimeTagFormat = '%Y-%m-%d_%H%M%S'  # cant use iso format dates in filenames because colons
+    dateTimeTag = startDateTime.strftime( dateTimeTagFormat )
+
+    launchedJsonFilePath = os.path.join( dataDirPath, 'launched_%s.json' % dateTimeTag )
+    resultsLogFilePath = os.path.join( dataDirPath, 'startGeth_%s.jlog' % dateTimeTag )
+
+    logger.info( 'the launch filter is %s', args.filter )
+    if args.count and (args.count > 0):
+        nToLaunch = args.count
+    elif args.target and (args.target > 0):
+        logger.info( 'launcher target: %s', args.target )
+        # try to reach target by counting existing working instances and launching more
+        mQuery =  {'state': 'checked' }
+        nExisting = db['checkedInstances'].count_documents( mQuery )
+        logger.info( '%d workers checked', nExisting )
+        nToLaunch = int( (args.target - nExisting) * 1.5 )
+        nToLaunch = max( nToLaunch, 0 )
+
+        nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
+        logger.info( '%d devices available', nAvail )
+
+        nToLaunch = min( nToLaunch, nAvail )
+        nToLaunch = min( nToLaunch, 60 )
+    else:
+        sys.exit( 'error: no positive --count or --target supplied')
+    logger.info( 'would launch %d instances', nToLaunch )
+    if nToLaunch <= 0:
+        logger.debug( 'NOT launching additional instances' )
+        return
+    logger.info( 'local files %s and %s', launchedJsonFilePath, resultsLogFilePath )
+
+    if not args.installerFileName:
+        logger.error( 'no installer script file name; use --installerFileName to supply one' )
+        raise ValueError( 'no installer script file name' )
+    if not os.path.isfile( args.installerFileName ):
+        logger.error( 'installer script file not found (%s)', args.installerFileName )
+        raise ValueError( 'installer script file not found' )
+    # launch and install, passing name of installer script to upload and run
+    (goodInstances, badStatuses) = recruitInstances( nToLaunch, launchedJsonFilePath, True,
+        resultsLogFilePath, args.installerFileName )
+    if nToLaunch:
+        collName = 'launchedInstances'
+        logger.info( 'ingesting into %s', collName )
+        ingestJson( launchedJsonFilePath, dbName, collName, append=True )
+        # remove the launchedJsonFile to avoid local accumulation of data
+        os.remove( launchedJsonFilePath )
+        if not os.path.isfile( resultsLogFilePath ):
+            logger.warning( 'no results file %s', resultsLogFilePath )
+        else:
+            ingestJson( resultsLogFilePath, dbName, 'startGeth_'+dateTimeTag, append=False )
+            # remove the resultsLogFile to avoid local accumulation of data
+            #os.remove( resultsLogFilePath )
+        for statusRec in badStatuses:
+            statusRec['status'] = str(statusRec['status'])
+            statusRec['dateTime'] = startDateTime.isoformat()
+            statusRec['_id' ] = statusRec['instanceId']
+            db['badInstalls'].insert_one( statusRec )
+    else:
+        logger.warning( 'no instances recruited' )
+    return
+
+def checkEdgeNodes( dataDirPath, db, args ):
+    '''checks status of edge nodes, updates database'''
+    if not db.list_collection_names():
+        logger.warn( 'no collections found for db %s', dbName )
+        return
+    checkerTimeLimit = args.timeLimit
+    startedInstances = getStartedInstances( db )
+
+    instancesByIid = {inst['instanceId']: inst for inst in startedInstances }
+
+    wereChecked = list( db['checkedInstances'].find() ) # fully iterates the cursor, getting all records
+    checkedByIid = { inst['_id']: inst for inst in wereChecked }
+    # after checking, each checked instance will have "state" set to "checked", "failed", "inaccessible", or "terminated"
+    # "checkable" instances are ones that are started, not badly installed, and not badly checked
+    checkables = []
+    for iid, inst in instancesByIid.items():
+        if iid in checkedByIid and checkedByIid[iid]['state'] != 'checked':
+            pass
+        elif db['badInstalls'].find_one( {'_id': iid }):
+            pass
+            #logger.info('skipping badinstalled instance %s', iid )
+        else:
+            checkables.append( inst )
+    logger.info( '%d instances checkable', len(checkables) )
+    checkedDateTime = datetime.datetime.now( datetime.timezone.utc )
+    checkedDateTimeStr = checkedDateTime.isoformat()
+    dateTimeTagFormat = '%Y-%m-%d_%H%M%S'  # cant use iso format dates in filenames because colons
+    dateTimeTag = checkedDateTime.strftime( dateTimeTagFormat )
+    
+    # find out which checkable instances are live
+    checkableIids = [inst['instanceId'] for inst in checkables ]
+    liveInstances = getLiveInstances( checkableIids, args.authToken )
+    liveIidSet = set( [inst['instanceId'] for inst in liveInstances ] )
+
+    coll = db['checkedInstances']
+    # update a checkedInstances record for each checkable instance, creating any that do not exist
+    for inst in checkables:
+        iid = inst['instanceId']
+        abbrevIid = iid[0:16]
+        launchedDateTimeStr = inst.get( 'started-at' )
+        instCheck = checkedByIid.get( iid )
+        if 'ram' in inst:
+            ramMb = inst['ram']['total'] / 1000000
+        else:
+            ramMb = 0
+        if instCheck:
+            nFailures = instCheck.get( 'nFailures', 0)
+            reasonTerminated = instCheck.get( 'reasonTerminated', None)
+        else:
+            nFailures = 0
+            reasonTerminated = None
+            coll.insert_one( {'_id': iid,
+                'devId': inst.get('device-id'),
+                'launchedDateTime': launchedDateTimeStr,
+                'ssh': inst.get('ssh'),
+                'ramMb': ramMb,
+                'nFailures': 0,
+                'nExceptions': 0,
+            } )
+        if iid in liveIidSet:
+            state = 'checked'
+        else:
+            state = 'terminated'
+            nFailures += 1
+            reasonTerminated = 'foundDead'
+        coll.update_one( {'_id': iid},
+            { "$set": { "state": state, 'nFailures': nFailures,
+                'reasonTerminated': reasonTerminated,
+                'checkedDateTime': checkedDateTimeStr } },
+            upsert=True
+            )
+    return
+    '''
+    resultsLogFilePath=dataDirPath+('/checkInstances_%s.jlog' % dateTimeTag)
+    workerCmd = 'stat --format=%%y ether/%s/geth.log' % args.configName
+    logger.info( 'calling tellInstances on %d instances', len(checkables))
+    stepStatuses = tellInstances.tellInstances( checkables, workerCmd,
+        resultsLogFilePath=resultsLogFilePath,
+        download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
+        timeLimit=checkerTimeLimit, upload=None, stopOnSigterm=True,
+        knownHostsOnly=False
+        )
+    '''
+
+
 if __name__ == "__main__":
     startTime = time.time()
     # configure logger formatting
@@ -354,149 +503,9 @@ if __name__ == "__main__":
     dbName = 'geth_' + args.farm
     db = mclient[dbName]
     if args.action == 'launch':
-        startDateTime = datetime.datetime.now( datetime.timezone.utc )
-        dateTimeTagFormat = '%Y-%m-%d_%H%M%S'  # cant use iso format dates in filenames because colons
-        dateTimeTag = startDateTime.strftime( dateTimeTagFormat )
-
-        launchedJsonFilePath = os.path.join( dataDirPath, 'launched_%s.json' % dateTimeTag )
-        resultsLogFilePath = os.path.join( dataDirPath, 'startGeth_%s.jlog' % dateTimeTag )
-
-        logger.info( 'the launch filter is %s', args.filter )
-        if args.count and (args.count > 0):
-            nToLaunch = args.count
-        elif args.target and (args.target > 0):
-            logger.info( 'launcher target: %s', args.target )
-            # try to reach target by counting existing working instances and launching more
-            mQuery =  {'state': 'checked' }
-            nExisting = db['checkedInstances'].count_documents( mQuery )
-            logger.info( '%d workers checked', nExisting )
-            nToLaunch = int( (args.target - nExisting) * 1.5 )
-            nToLaunch = max( nToLaunch, 0 )
-
-            nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
-            logger.info( '%d devices available', nAvail )
-
-            nToLaunch = min( nToLaunch, nAvail )
-            nToLaunch = min( nToLaunch, 60 )
-        else:
-            sys.exit( 'error: no positive --count or --target supplied')
-        logger.info( 'would launch %d instances', nToLaunch )
-        if nToLaunch <= 0:
-            logger.debug( 'NOT launching additional instances' )
-            sys.exit()
-        logger.info( 'local files %s and %s', launchedJsonFilePath, resultsLogFilePath )
-
-        if not args.installerFileName:
-            logger.error( 'no installer script file name; use --installerFileName to supply one' )
-            raise ValueError( 'no installer script file name' )
-        if not os.path.isfile( args.installerFileName ):
-            logger.error( 'installer script file not found (%s)', args.installerFileName )
-            raise ValueError( 'installer script file not found' )
-        # launch and install, passing name of installer script to upload and run
-        (goodInstances, badStatuses) = recruitInstances( nToLaunch, launchedJsonFilePath, True,
-            resultsLogFilePath, args.installerFileName )
-        if nToLaunch:
-            collName = 'launchedInstances'
-            logger.info( 'ingesting into %s', collName )
-            ingestJson( launchedJsonFilePath, dbName, collName, append=True )
-            # remove the launchedJsonFile to avoid local accumulation of data
-            os.remove( launchedJsonFilePath )
-            if not os.path.isfile( resultsLogFilePath ):
-                logger.warning( 'no results file %s', resultsLogFilePath )
-            else:
-                ingestJson( resultsLogFilePath, dbName, 'startGeth_'+dateTimeTag, append=False )
-                # remove the resultsLogFile to avoid local accumulation of data
-                #os.remove( resultsLogFilePath )
-            for statusRec in badStatuses:
-                statusRec['status'] = str(statusRec['status'])
-                statusRec['dateTime'] = startDateTime.isoformat()
-                statusRec['_id' ] = statusRec['instanceId']
-                db['badInstalls'].insert_one( statusRec )
-        else:
-            logger.warning( 'no instances recruited' )
+        launchEdgeNodes( dataDirPath, db, args )
     elif args.action == 'check':
-        if not db.list_collection_names():
-            logger.warn( 'no collections found found for db %s', dbName )
-            sys.exit()
-        checkerTimeLimit = args.timeLimit
-        startedInstances = getStartedInstances( db )
-
-        instancesByIid = {inst['instanceId']: inst for inst in startedInstances }
-
-        wereChecked = list( db['checkedInstances'].find() ) # fully iterates the cursor, getting all records
-        checkedByIid = { inst['_id']: inst for inst in wereChecked }
-        # after checking, each checked instance will have "state" set to "checked", "failed", "inaccessible", or "terminated"
-        # "checkable" instances are ones that are started, not badly installed, and not badly checked
-        checkables = []
-        for iid, inst in instancesByIid.items():
-            if iid in checkedByIid and checkedByIid[iid]['state'] != 'checked':
-                pass
-            elif db['badInstalls'].find_one( {'_id': iid }):
-                pass
-                #logger.info('skipping badinstalled instance %s', iid )
-            else:
-                checkables.append( inst )
-        logger.info( '%d instances checkable', len(checkables) )
-        checkedDateTime = datetime.datetime.now( datetime.timezone.utc )
-        checkedDateTimeStr = checkedDateTime.isoformat()
-        dateTimeTagFormat = '%Y-%m-%d_%H%M%S'  # cant use iso format dates in filenames because colons
-        dateTimeTag = checkedDateTime.strftime( dateTimeTagFormat )
-        
-        # find out which checkable instances are live
-        checkableIids = [inst['instanceId'] for inst in checkables ]
-        liveInstances = getLiveInstances( checkableIids, args.authToken )
-        liveIidSet = set( [inst['instanceId'] for inst in liveInstances ] )
-
-        coll = db['checkedInstances']
-        # update a checkedInstances record for each checkable instance, creating any that do not exist
-        for inst in checkables:
-            iid = inst['instanceId']
-            abbrevIid = iid[0:16]
-            launchedDateTimeStr = inst.get( 'started-at' )
-            instCheck = checkedByIid.get( iid )
-            if 'ram' in inst:
-                ramMb = inst['ram']['total'] / 1000000
-            else:
-                ramMb = 0
-            if instCheck:
-                nFailures = instCheck.get( 'nFailures', 0)
-                reasonTerminated = instCheck.get( 'reasonTerminated', None)
-            else:
-                nFailures = 0
-                reasonTerminated = None
-                coll.insert_one( {'_id': iid,
-                    'devId': inst.get('device-id'),
-                    'launchedDateTime': launchedDateTimeStr,
-                    'ssh': inst.get('ssh'),
-                    'ramMb': ramMb,
-                    'nFailures': 0,
-                    'nExceptions': 0,
-                } )
-            if iid in liveIidSet:
-                state = 'checked'
-            else:
-                state = 'terminated'
-                nFailures += 1
-                reasonTerminated = 'foundDead'
-            coll.update_one( {'_id': iid},
-                { "$set": { "state": state, 'nFailures': nFailures,
-                    'reasonTerminated': reasonTerminated,
-                    'checkedDateTime': checkedDateTimeStr } },
-                upsert=True
-                )
-            
-
-        '''
-        resultsLogFilePath=dataDirPath+('/checkInstances_%s.jlog' % dateTimeTag)
-        workerCmd = 'stat --format=%%y ether/%s/geth.log' % args.configName
-        logger.info( 'calling tellInstances on %d instances', len(checkables))
-        stepStatuses = tellInstances.tellInstances( checkables, workerCmd,
-            resultsLogFilePath=resultsLogFilePath,
-            download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
-            timeLimit=checkerTimeLimit, upload=None, stopOnSigterm=True,
-            knownHostsOnly=False
-            )
-        '''
+        checkEdgeNodes( dataDirPath, db, args )
     elif args.action == 'terminateBad':
         if not args.authToken:
             sys.exit( 'error: can not terminate because no authToken was passed')
