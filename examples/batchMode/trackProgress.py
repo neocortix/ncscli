@@ -67,33 +67,6 @@ def parseBatchRunnerLog( jlogFilePath ):
     else:
         return {}
 
-def parseInstallerLog( jlogFilePath ):
-    installerLog = readJLog(jlogFilePath)
-    logger.debug( 'found %d jlog lines', len(installerLog) )
-
-    nInstances = 0
-    nInstDone = 0
-    nInstErr = 0
-    for line in installerLog:
-        if 'operation' in line and 'tellInstances' in line['operation']:
-            tellInstancesOp = line['operation'][1]
-            logger.debug( 'tellInstances: %s', tellInstancesOp )
-
-            iids = tellInstancesOp['args']['instanceIds']
-            logger.debug( 'iids: %s', iids )
-            nInstances = len(iids)
-            logger.debug( 'installing on %d instances', nInstances )
-
-            timeLimit = tellInstancesOp['args']['timeLimit']
-            logger.debug( 'timeLimit %d', timeLimit )
-        elif 'returncode' in line:
-            logger.debug( '%s', line )
-            nInstDone += 1
-            if line['returncode'] != 0:
-                nInstErr += 1
-            logger.debug( '%d done (%d errors) by %s', nInstDone, nInstErr, line['dateTime'] )
-    return {'nInstances': nInstances, 'nInstDone': nInstDone, 'nInstErr': nInstErr  }
-
 def clocker():
     thr = threading.current_thread()
     while not thr.stopRequested:
@@ -135,7 +108,7 @@ if __name__ == "__main__":
         bar_format='{desc}'
         )
 
-    pbar = manager.counter(total=1, desc=' Progress:',
+    pbar = manager.counter(total=100, count=1, desc=' Progress:',
         bar_format='{desc}{desc_pad}{bar}|{percentage:3.0f}% ',
         color='blue', series = [' ','▌','█']
         )
@@ -164,6 +137,7 @@ if __name__ == "__main__":
         nFailed = 0
         frameTimeLimit = 0
         timeLimit = 0
+        estTotTime = 0
         elapsed = 0
         hasRunSome = False
         finalMsg = None
@@ -228,7 +202,7 @@ if __name__ == "__main__":
                     phase = 'Running on Instances'
                     phaseChange = True
                     if pbar and frameTimeLimit > 0:
-                        pbar.total = int( min( elapsed + frameTimeLimit, timeLimit ) )
+                        pbar.total = int( min( elapsed + frameTimeLimit, estTotTime ) )
                 elif 'renderFramesOnInstance finished' in line:
                     nInstDone += 1
                 elif 'renderFramesOnInstance computeFailed' in line:
@@ -246,6 +220,7 @@ if __name__ == "__main__":
                         msg = line.split('runBatch ')[1].strip()
                         msg = msg.replace( 'computed', 'Completed', 1 )
                         finalMsg = 'SUCCESS. %s' % msg
+                        logger.debug( 'found success' )
                         phase = finalMsg
                         phaseChange = True
                 elif 'plotting data' in line:
@@ -263,9 +238,13 @@ if __name__ == "__main__":
                             timeLimit = startingArgs['timeLimit']
                             frameTimeLimit = startingArgs['frameTimeLimit']
                             instTimeLimit = startingArgs['instTimeLimit']
-                            if pbar and timeLimit > 0:
-                                logger.debug( 'pbar.total=timeLimit: %d', timeLimit )
-                                pbar.total=timeLimit
+                            estTotTime = int( min(timeLimit, instTimeLimit*1.7 + frameTimeLimit) )
+                            if pbar and estTotTime > 0:
+                                logger.debug( 'pbar.total=estTotTime: %d', estTotTime )
+                                pbar.total=estTotTime
+                                fakeElapsed = int( round( estTotTime/100 ))
+                                if fakeElapsed > pbar.count and fakeElapsed <= pbar.total:
+                                    pbar.update( fakeElapsed - pbar.count, force=True )
                         if not realTimeWanted:
                             startDateTime = brResults.get( 'startDateTime' )
                         logger.debug( 'startDateTime: %s', startDateTime )
@@ -294,13 +273,16 @@ if __name__ == "__main__":
                         elapsed = (lineDateTime - startDateTime).total_seconds()
                         logger.debug( 'elapsed: %.1f, startDateTime: %s', elapsed, startDateTime )
                         intElapsed = int(elapsed)
-                        if intElapsed > pbar.count and intElapsed <= pbar.total:
-                            pbar.update( intElapsed - pbar.count, force=True )
+                        constrainedElapsed = min( intElapsed, pbar.total * 98 / 100 )
+                        if constrainedElapsed > pbar.count and constrainedElapsed <= pbar.total:
+                            pbar.update( constrainedElapsed - pbar.count, force=True )
 
                 if statusbar:
                     beenAWhile = lineDateTime and \
                         lineDateTime > lastUpdateTime + datetime.timedelta(seconds=1)
                     if phaseChange or beenAWhile:
+                        if 'SUCCESS' in phase:
+                            logger.debug( 'displaying success' )
                         statusbar.update( demo=phase, force=True )
                         lastUpdateTime = datetime.datetime.now( datetime.timezone.utc )
                         if sleepy:
