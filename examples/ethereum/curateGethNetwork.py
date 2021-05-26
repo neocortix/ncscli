@@ -35,6 +35,7 @@ except ImportError:
     sys.path.append( ncscliPath )
     os.environ["PATH"] += os.pathsep + ncscliPath
     import ncs
+import jsonToKnownHosts
 import tellInstances
 
 logger = logging.getLogger(__name__)
@@ -163,12 +164,23 @@ def terminateNcsScInstances( authToken, instanceIds ):
             with open( terminationLogFilePath, 'a' ) as logFile:
                 for iid in instanceIds:
                     print( dateTimeStr, iid, sep=',', file=logFile )
-        except:
+        except Exception as exc:
             logger.warning( 'got exception (%s) appending to terminationLogFile %s',
                 type(exc), terminationLogFilePath )
         return []  # empty list meaning none may have been terminated
     else:
         return instanceIds
+
+def purgeHostKeys( instanceRecs ):
+    '''try to purgeKnownHosts; warn if any exception'''
+    logger.info( 'purgeKnownHosts for %d instances', len(instanceRecs) )
+    try:
+        ncs.purgeKnownHosts( instanceRecs )
+    except Exception as exc:
+        logger.warning( 'exception from purgeKnownHosts (%s) %s', type(exc), exc, exc_info=True )
+        return 1
+    else:
+        return 0
 
 def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted,
     resultsLogFilePath, installerFileName ):
@@ -223,6 +235,10 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted,
     startedInstances = [inst for inst in launchedInstances if inst['state'] == 'started' ]
     if not startedInstances:
         return ([], [])
+    # add instances to knownHosts
+    with open( os.path.expanduser('~/.ssh/known_hosts'), 'a' ) as khFile:
+        jsonToKnownHosts.jsonToKnownHosts( startedInstances, khFile )
+
     if not sigtermSignaled():
         installerCmd = '%s %s'% (installerFileName, args.configName ) 
         logger.info( 'calling tellInstances to install on %d instances', len(startedInstances))
@@ -369,10 +385,70 @@ def launchEdgeNodes( dataDirPath, db, args ):
         logger.warning( 'no instances recruited' )
     return
 
+def checkGethProcesses( instances, dataDirPath ):
+    logger.info( 'checking %d instance(s)', len(instances) )
+
+    cmd = "ps -ef | grep -v grep | grep 'geth' > /dev/null"
+    # check for a running geth process on each instance
+    stepStatuses = tellInstances.tellInstances( instances, cmd,
+        timeLimit=15*60,
+        resultsLogFilePath = dataDirPath + '/checkProcesses.jlog',
+        knownHostsOnly=True
+        )
+    #logger.info( 'proc statuses: %s', stepStatuses )
+    errorsByIid = {status['instanceId']: status['status'] for status in stepStatuses if status['status'] }
+    logger.info( 'errorsByIid: %s', errorsByIid )
+    return errorsByIid
+
+def checkInstanceClocks( liveInstances, dataDirPath ):
+    jlogFilePath = dataDirPath + '/checkInstanceClocks.jlog'
+    allIids = [inst['instanceId'] for inst in liveInstances ]
+    unfoundIids = set( allIids )
+    cmd = "date --iso-8601=seconds"
+    # check for a running geth process on each instance
+    stepStatuses = tellInstances.tellInstances( liveInstances, cmd,
+        timeLimit=2*60,
+        resultsLogFilePath = jlogFilePath,
+        knownHostsOnly=True, sshAgent=not True
+        )
+    #logger.info( 'proc statuses: %s', stepStatuses )
+    errorsByIid = {status['instanceId']: status for status in stepStatuses if status['status'] }
+    for iid, status in errorsByIid.items():
+        logger.warning( 'instance %s gave error "%s"', iid, status )
+
+    with open( jlogFilePath, 'rb' ) as inFile:
+        for line in inFile:
+            decoded = json.loads( line )
+            iid = decoded['instanceId']
+            if decoded.get( 'stdout' ):
+                #logger.info( decoded )
+                masterDateTime = dateutil.parser.parse( decoded['dateTime'] )
+                try:
+                    nodeDateTime = dateutil.parser.parse( decoded['stdout'] )
+                except Exception as exc:
+                    logger.warning( 'exception parsing %s', decoded['stdout'] )
+                    errorsByIid[ iid ] = {'exception': exc }
+                else:
+                    unfoundIids.discard( iid )
+                    delta = masterDateTime - nodeDateTime
+                    discrep =delta.total_seconds()
+                    logger.info( 'discrep: %.1f seconds on inst %s',
+                        discrep, iid )
+                    if discrep > 4 or discrep < -1:
+                        logger.warning( 'bad time discrep: %.1f', discrep )
+                        errorsByIid[ iid ] = {'discrep': discrep }
+    if unfoundIids:
+        logger.warning( 'unfoundIids: %s', unfoundIids )
+        for iid in list( unfoundIids ):
+            if iid not in errorsByIid:
+                errorsByIid[ iid ] = {'found': False }
+    logger.info( '%d errorsByIid: %s', len(errorsByIid), errorsByIid )
+    return errorsByIid
+
 def checkEdgeNodes( dataDirPath, db, args ):
     '''checks status of edge nodes, updates database'''
     if not db.list_collection_names():
-        logger.warn( 'no collections found for db %s', dbName )
+        logger.warning( 'no collections found for db %s', dbName )
         return
     checkerTimeLimit = args.timeLimit
     startedInstances = getStartedInstances( db )
@@ -421,6 +497,7 @@ def checkEdgeNodes( dataDirPath, db, args ):
             nFailures = 0
             reasonTerminated = None
             coll.insert_one( {'_id': iid,
+                'state': 'started',
                 'devId': inst.get('device-id'),
                 'launchedDateTime': launchedDateTimeStr,
                 'ssh': inst.get('ssh'),
@@ -440,6 +517,34 @@ def checkEdgeNodes( dataDirPath, db, args ):
                 'checkedDateTime': checkedDateTimeStr } },
             upsert=True
             )
+    checkables = [inst for inst in checkables if inst['instanceId'] in liveIidSet]
+
+    errorsByIid = checkInstanceClocks( liveInstances, dataDirPath )
+    for iid, err in errorsByIid.items():
+        if 'discrep' in err:
+            discrep = err['discrep']
+            logger.info( 'updating clockOffset %.1f for inst %s', discrep, iid[0:8] )
+            coll.update_one( {'_id': iid}, { "$set": { "clockOffset": discrep } } )
+            coll.update_one( {'_id': iid}, { "$inc": { "nFailures": 1 } } )
+        elif 'status' in err:
+            status = err['status']
+            logger.warning( 'instance %s gave status (%s) "%s"', iid[0:8], type(status), status )
+            if isinstance( status, Exception ):
+                coll.update_one( {'_id': iid}, { "$inc": { "nExceptions": 1 } } )
+            else:
+                coll.update_one( {'_id': iid}, { "$inc": { "nFailures": 1 } } )
+        else:
+            logger.warning( 'instance %s gave err (%s) "%s"', iid[0:8], type(err), err )
+        # change (or omit) this if wanting to allow more than one failure before marking it failed
+        coll.update_one( {'_id': iid}, { "$set": { "state": "failed" } } )
+
+
+    errorsByIid = checkGethProcesses( checkables, dataDirPath )
+    for iid, status in errorsByIid.items():
+        coll.update_one( {'_id': iid}, { "$inc": { "nFailures": 1 } } )
+        # change (or omit) this if wanting to allow more than one failure before marking it failed
+        coll.update_one( {'_id': iid}, { "$set": { "state": "failed" } } )
+
     return
     '''
     resultsLogFilePath=dataDirPath+('/checkInstances_%s.jlog' % dateTimeTag)
@@ -512,7 +617,8 @@ if __name__ == "__main__":
         terminatedDateTimeStr = datetime.datetime.now( datetime.timezone.utc ).isoformat()
         coll = db['checkedInstances']
         wereChecked = list( coll.find() ) # fully iterates the cursor, getting all records
-        toTerminate = []
+        toTerminate = []  # list of iids
+        toPurge = []  # list of instance-like dicts containing instanceId and ssh fields
         for checkedInst in wereChecked:
             state = checkedInst.get( 'state')
             #logger.info( 'checked state %s', state )
@@ -521,16 +627,17 @@ if __name__ == "__main__":
                 abbrevIid = iid[0:16]
                 logger.warning( 'would terminate %s', abbrevIid )
                 toTerminate.append( iid )
+                toPurge.append({ 'instanceId': iid, 'ssh': checkedInst['ssh'] })
+                coll.update_one( {'_id': iid}, { "$set": { 'reasonTerminated': state } } )
         logger.info( 'terminating %d instances', len( toTerminate ))
         terminated=terminateNcsScInstances( args.authToken, toTerminate )
         logger.info( 'actually terminated %d instances', len( terminated ))
+        purgeHostKeys( toPurge )
         # update states in checkedInstances
         for iid in terminated:
             coll.update_one( {'_id': iid},
                 { "$set": { "state": "terminated",
-                    'terminatedDateTime': terminatedDateTimeStr } },
-                upsert=False
-                )
+                    'terminatedDateTime': terminatedDateTimeStr } } )
     elif args.action == 'terminateAll':
         if not args.authToken:
             sys.exit( 'error: can not terminate because no authToken was passed')
@@ -542,6 +649,7 @@ if __name__ == "__main__":
         toTerminate = startedIids
         logger.info( 'terminating %d instances', len( toTerminate ))
         terminated=terminateNcsScInstances( args.authToken, toTerminate )
+        purgeHostKeys( startedInstances )
 
         # update states in checkedInstances
         coll = db['checkedInstances']
@@ -554,9 +662,8 @@ if __name__ == "__main__":
                     coll.update_one( {'_id': iid},
                         { "$set": { "state": "terminated",
                             'reasonTerminated': 'manual',
-                            'terminatedDateTime': terminatedDateTimeStr } },
-                        upsert=False
-                        )
+                            'terminatedDateTime': terminatedDateTimeStr } 
+                            } )
     elif args.action == 'reterminate':
         '''redundantly terminate instances that are listed as already terminated'''
         if not args.authToken:
@@ -575,6 +682,7 @@ if __name__ == "__main__":
         logger.info( 'reterminating %d instances', len( toTerminate ))
         terminated = terminateNcsScInstances( args.authToken, toTerminate )
         logger.info( 'reterminated %d instances', len( terminated ) )
+        #TODO purgeHostKeys
     else:
         logger.warning( 'action "%s" unimplemented', args.action )
     elapsed = time.time() - startTime
