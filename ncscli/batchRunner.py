@@ -570,7 +570,8 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
             stepStatuses = tellInstances.tellInstances( goodInstances, installerCmd,
                 resultsLogFilePath=resultsLogFilePath,
                 download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
-                timeLimit=min(args.instTimeLimit, args.timeLimit), upload=args.commonInFilePath, stopOnSigterm=not True,
+                timeLimit=min(args.instTimeLimit, args.timeLimit), upload=args.commonInFilePath,
+                stopOnSigterm=True,
                 knownHostsOnly=True
                 )
             narrator.stopRequested = True
