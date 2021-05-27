@@ -245,7 +245,7 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted,
         stepStatuses = tellInstances.tellInstances( startedInstances, installerCmd,
             resultsLogFilePath=resultsLogFilePath,
             download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
-            timeLimit=args.timeLimit, upload=args.uploads, stopOnSigterm=False,
+            timeLimit=args.timeLimit, upload=args.uploads, stopOnSigterm=True,
             knownHostsOnly=False
             )
         # COULD restore our handler because tellInstances may have overridden it
@@ -393,10 +393,10 @@ def checkGethProcesses( instances, dataDirPath ):
     stepStatuses = tellInstances.tellInstances( instances, cmd,
         timeLimit=15*60,
         resultsLogFilePath = dataDirPath + '/checkProcesses.jlog',
-        knownHostsOnly=True
+        knownHostsOnly=True, stopOnSigterm=True
         )
     #logger.info( 'proc statuses: %s', stepStatuses )
-    errorsByIid = {status['instanceId']: status['status'] for status in stepStatuses if status['status'] }
+    errorsByIid = {status['instanceId']: status for status in stepStatuses if status['status'] }
     logger.info( 'errorsByIid: %s', errorsByIid )
     return errorsByIid
 
@@ -409,7 +409,7 @@ def checkInstanceClocks( liveInstances, dataDirPath ):
     stepStatuses = tellInstances.tellInstances( liveInstances, cmd,
         timeLimit=2*60,
         resultsLogFilePath = jlogFilePath,
-        knownHostsOnly=True, sshAgent=not True
+        knownHostsOnly=True, sshAgent=not True, stopOnSigterm=True
         )
     #logger.info( 'proc statuses: %s', stepStatuses )
     errorsByIid = {status['instanceId']: status for status in stepStatuses if status['status'] }
@@ -444,6 +444,193 @@ def checkInstanceClocks( liveInstances, dataDirPath ):
                 errorsByIid[ iid ] = {'found': False }
     logger.info( '%d errorsByIid: %s', len(errorsByIid), errorsByIid )
     return errorsByIid
+
+def retrieveLogs( goodInstances, dataDirPath, farmDirPath ):
+    '''retrieve logs from nodes, storing them in dataDirPath/nodeLogs subdirectories'''
+    logger.info( 'retrieving logs for %d instance(s)', len(goodInstances) )
+
+    nodeLogFilePath = farmDirPath + '/geth.log'
+
+    # download the log file from each instance
+    stepStatuses = tellInstances.tellInstances( goodInstances,
+        download=nodeLogFilePath, downloadDestDir=dataDirPath +'/nodeLogs',
+        timeLimit=15*60,
+        knownHostsOnly=True, stopOnSigterm=True
+        )
+    #logger.info( 'download statuses: %s', stepStatuses )
+    errorsByIid = {status['instanceId']: status['status'] for status in stepStatuses if status['status'] }
+    return errorsByIid
+
+def checkLogs( liveInstances, dataDirPath ):
+    '''check contents of logs from nodes, save errorSummary.csv, return errorsByIid'''
+    logsDirPath = os.path.join( dataDirPath, 'nodeLogs' )
+    logDirs = os.listdir( logsDirPath )
+    logger.info( '%d logDirs found', len(logDirs ) )
+
+    liveIids = [inst['instanceId'] for inst in liveInstances]
+
+    errorsByIid = {}
+
+    for logDir in logDirs:
+        iid = logDir
+        iidAbbrev = iid[0:8]
+        if iid not in liveIids:
+            logger.debug( 'not checking non-live instance %s', iidAbbrev )
+            continue
+        logFilePath = os.path.join( logsDirPath, logDir, 'geth.log' )
+        if not os.path.isfile( logFilePath ):
+            logger.warning( 'no log file %s', logFilePath )
+        elif os.path.getsize( logFilePath ) <= 0:
+            logger.warning( 'empty log file "%s"', logFilePath )
+        else:
+            connected = False
+            sealed = False
+            latestSealLine = None
+            with open( logFilePath ) as logFile:
+                for line in logFile:
+                    line = line.rstrip()
+                    if not line:
+                        continue
+                    if 'ERROR' in line:
+                        if 'Ethereum peer removal failed' in line:
+                            logger.debug( 'ignoring "peer removal failed" for %s', iidAbbrev )
+                            continue
+                        logger.info( '%s: %s', iidAbbrev, line )
+                        theseErrors = errorsByIid.get( iid, [] )
+                        theseErrors.append( line )
+                        errorsByIid[iid] = theseErrors
+                    elif 'Started P2P networking' in line:
+                        connected = True
+                    elif 'Successfully sealed' in line:
+                        sealed = True
+                        latestSealLine = line
+                if not connected:
+                    logger.warning( 'instance %s did not initialize fully', iidAbbrev )
+                if sealed:
+                    #logger.info( 'instance %s has successfully sealed', iidAbbrev )
+                    logger.debug( '%s latestSealLine: %s', iidAbbrev, latestSealLine )
+                    pat = r'\[(.*\|.*)\]'
+                    dateStr = re.search( pat, latestSealLine ).group(1)
+                    if dateStr:
+                        dateStr = dateStr.replace( '|', ' ' )
+                        latestSealDateTime = dateutil.parser.parse( dateStr )
+                        logger.info( 'latestSealDateTime: %s', latestSealDateTime.isoformat() )
+
+    logger.info( 'found errors for %d instance(s)', len(errorsByIid) )
+    #print( 'errorsByIid', errorsByIid  )
+    summaryCsvFilePath = os.path.join( dataDirPath, 'errorSummary.csv' )
+    fileExisted = os.path.isfile( summaryCsvFilePath )
+    with open( summaryCsvFilePath, 'a' ) as csvOutFile:
+        if not fileExisted:
+            print( 'instanceId', 'msg',
+                sep=',', file=csvOutFile
+                )
+        for iid in errorsByIid:
+            lines = errorsByIid[iid]
+            logger.info( 'saving %d errors for %s', len(lines), iid[0:8])
+            for line in lines:
+                print( iid, line,
+                    sep=',', file=csvOutFile
+                )
+    return errorsByIid
+
+def lastGenDateTime( coll ):
+    '''return modification dateTime of a mongo collection, as a (hopefully) tz-aware datetime'''
+    found = coll.find().sort([( '$natural', -1 )]).limit(1)
+    if found:
+        return found[0]['_id'].generation_time
+    return None
+
+def ingestGethLog( logFile, coll ):
+    '''ingest records from a geth node log into a mongo collection'''
+    logger.info( 'would ingest %s into %s', logFile.name, coll )
+    datePat = r'\[(.*\|.*)\]'
+    lineDateTime = datetime.datetime.fromtimestamp( 0, datetime.timezone.utc )
+    lineLevel = None
+    recs = []
+    for line in logFile:
+        line = line.rstrip()
+        if not line:
+            continue
+        levelPart = line.split()[0]
+        if levelPart in ['INFO', 'WARN', 'ERROR']:
+            lineLevel = levelPart
+
+        lineDateTime = None
+        dateStr = re.search( datePat, line ).group(1)
+        if dateStr:
+            dateStr = dateStr.replace( '|', ' ' )
+            lineDateTime = dateutil.parser.parse( dateStr )
+        msg = line
+        recs.append( {
+            'dateTime': lineDateTime.isoformat(),
+            'level': lineLevel,
+            'msg': msg,
+            } )
+    if len(recs):
+        coll.insert_many( recs, ordered=True )
+        coll.create_index( 'dateTime' )
+        coll.create_index( 'level' )
+
+def processNodeLogFiles( dataDirPath ):
+    '''ingest all new or updated node logs; delete very old log files'''
+    logsDirPath = os.path.join( dataDirPath, 'nodeLogs' )
+    logDirs = os.listdir( logsDirPath )
+    logger.info( '%d logDirs found', len(logDirs ) )
+    # but first, delete very old log files
+    lookbackDays = 7
+    thresholdDateTime = datetime.datetime.now( datetime.timezone.utc ) \
+        - datetime.timedelta( days=lookbackDays )
+    #lookBackHours = 24
+    #newerThresholdDateTime = datetime.datetime.now( datetime.timezone.utc ) \
+    #    - datetime.timedelta( hours=lookBackHours )
+
+    for logDir in logDirs:
+        inFilePath = os.path.join( logsDirPath, logDir, 'geth.log' )
+        if os.path.isfile( inFilePath ):
+            fileModDateTime = datetime.datetime.fromtimestamp( os.path.getmtime( inFilePath ) )
+            fileModDateTime = universalizeDateTime( fileModDateTime )
+            if fileModDateTime <= thresholdDateTime:
+                os.remove( inFilePath )
+            #elif fileModDateTime <= newerThresholdDateTime:
+            #    logger.warning( 'old fileModDateTime for %s (%s)', logDir, fileModDateTime )
+    
+    # ingest all new or updated node logs
+    loggedCollNames = db.list_collection_names(
+        filter={ 'name': {'$regex': r'^nodeLog_.*'} } )
+    for logDir in logDirs:
+        # logDir is also the instanceId
+        inFilePath = os.path.join( logsDirPath, logDir, 'geth.log' )
+        if not os.path.isfile( inFilePath ):
+            logger.info( 'no file "%s"', inFilePath )
+            continue
+        elif os.path.getsize( inFilePath ) <= 0:
+            logger.warning( 'empty log file "%s"', inFilePath )
+            continue
+        collName = 'nodeLog_' + logDir
+        if collName in loggedCollNames:
+            existingGenTime = lastGenDateTime( db[collName] ) - datetime.timedelta(hours=1)
+            fileModDateTime = datetime.datetime.fromtimestamp( os.path.getmtime( inFilePath ) )
+            fileModDateTime = universalizeDateTime( fileModDateTime )
+            if existingGenTime >= fileModDateTime:
+                #logger.info( 'already posted %s %s %s',
+                #    logDir[0:8], fmtDt( existingGenTime ), fmtDt( fileModDateTime )  )
+                continue
+        logger.info( 'parsing log for %s', logDir[0:16] )
+        try:
+            with open( inFilePath, 'r' ) as logFile:
+                # for safety, ingest to a temp collection and then rename (with replace) when done
+                ingestGethLog( logFile, db['nodeLog_temp'] )
+                try:
+                    db['nodeLog_temp'].rename( collName, dropTarget=True )
+                except Exception as exc:
+                    logger.warning( 'exception (%s) renaming temp collection %s', type(exc), exc, exc_info=False )
+                #logger.debug( 'ingested %s', collName )
+        except Exception as exc:
+            logger.warning( 'exception (%s) ingesting %s', type(exc), inFilePath, exc_info=False )
+
+
+
 
 def checkEdgeNodes( dataDirPath, db, args ):
     '''checks status of edge nodes, updates database'''
@@ -518,6 +705,7 @@ def checkEdgeNodes( dataDirPath, db, args ):
             upsert=True
             )
     checkables = [inst for inst in checkables if inst['instanceId'] in liveIidSet]
+    logger.info( '%d instances checkable', len(checkables) )
 
     errorsByIid = checkInstanceClocks( liveInstances, dataDirPath )
     for iid, err in errorsByIid.items():
@@ -528,22 +716,40 @@ def checkEdgeNodes( dataDirPath, db, args ):
             coll.update_one( {'_id': iid}, { "$inc": { "nFailures": 1 } } )
         elif 'status' in err:
             status = err['status']
-            logger.warning( 'instance %s gave status (%s) "%s"', iid[0:8], type(status), status )
             if isinstance( status, Exception ):
                 coll.update_one( {'_id': iid}, { "$inc": { "nExceptions": 1 } } )
             else:
                 coll.update_one( {'_id': iid}, { "$inc": { "nFailures": 1 } } )
         else:
-            logger.warning( 'instance %s gave err (%s) "%s"', iid[0:8], type(err), err )
+            logger.warning( 'checkInstanceClocks instance %s gave status (%s) "%s"', iid[0:8], type(err), err )
         # change (or omit) this if wanting to allow more than one failure before marking it failed
         coll.update_one( {'_id': iid}, { "$set": { "state": "failed" } } )
+
+    checkables = [inst for inst in checkables if inst['instanceId'] not in errorsByIid]
+    logger.info( '%d instances checkable', len(checkables) )
 
 
     errorsByIid = checkGethProcesses( checkables, dataDirPath )
-    for iid, status in errorsByIid.items():
-        coll.update_one( {'_id': iid}, { "$inc": { "nFailures": 1 } } )
+    for iid, err in errorsByIid.items():
+        if 'status' in err:
+            status = err['status']
+            if isinstance( status, Exception ):
+                coll.update_one( {'_id': iid}, { "$inc": { "nExceptions": 1 } } )
+            else:
+                coll.update_one( {'_id': iid}, { "$inc": { "nFailures": 1 } } )
+        else:
+            logger.warning( 'checkGethProcesses for inst %s gave status (%s) "%s"', iid[0:8], type(err), err )
         # change (or omit) this if wanting to allow more than one failure before marking it failed
         coll.update_one( {'_id': iid}, { "$set": { "state": "failed" } } )
+
+    checkables = [inst for inst in checkables if inst['instanceId'] not in errorsByIid]
+    logger.info( '%d instances checkable', len(checkables) )
+
+    nodeDataDirPath = 'ether/%s' % args.configName
+    errorsByIid = retrieveLogs( checkables, dataDirPath, nodeDataDirPath )
+    checkLogs( checkables, dataDirPath )
+    processNodeLogFiles( dataDirPath )
+
 
     return
     '''
@@ -554,7 +760,7 @@ def checkEdgeNodes( dataDirPath, db, args ):
         resultsLogFilePath=resultsLogFilePath,
         download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
         timeLimit=checkerTimeLimit, upload=None, stopOnSigterm=True,
-        knownHostsOnly=False
+        knownHostsOnly=True, stopOnSigterm=True
         )
     '''
 
