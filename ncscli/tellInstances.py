@@ -366,6 +366,7 @@ def tellInstances( instancesSpec, command=None, resultsLogFilePath=None,
     if logger.getEffectiveLevel() < logging.INFO:
         eventLoop.set_debug(True)
     if stopOnSigterm:
+        origHandler = signal.getsignal( signal.SIGTERM )
         eventLoop.add_signal_handler(signal.SIGTERM, sigtermHandler)
     try:
         statuses = eventLoop.run_until_complete(run_multiple_clients(
@@ -378,6 +379,8 @@ def tellInstances( instancesSpec, command=None, resultsLogFilePath=None,
         logger.warning( 'run_until_complete gave exception (%s) %s', type(exc), exc )
         statuses = []
     #json.dump( statuses, sys.stdout, default=repr, indent=2 )
+    if stopOnSigterm and origHandler != None:
+        signal.signal( signal.SIGTERM, origHandler )
 
     if resultsLogFile:
         resultsLogFile.close()
