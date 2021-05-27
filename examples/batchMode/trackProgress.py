@@ -201,8 +201,9 @@ if __name__ == "__main__":
                     hasRunSome = True
                     phase = 'Running on Instances'
                     phaseChange = True
-                    if pbar and frameTimeLimit > 0:
-                        pbar.total = int( min( elapsed + frameTimeLimit, estTotTime ) )
+                    # could re-estimate total time sith code like this (but be more careful)
+                    #if pbar and frameTimeLimit > 0:
+                    #    pbar.total = int( min( elapsed + frameTimeLimit, estTotTime ) )
                 elif 'renderFramesOnInstance finished' in line:
                     nInstDone += 1
                 elif 'renderFramesOnInstance computeFailed' in line:
