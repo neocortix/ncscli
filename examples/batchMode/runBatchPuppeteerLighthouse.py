@@ -31,7 +31,10 @@ def untarResults( outDataDir ):
     tarFilePaths = glob.glob( outDataDir+'/Puppeteer_results_*.tar.gz' )
     for tarFilePath in tarFilePaths:
         with tarfile.open( tarFilePath, 'r' ) as tarFile:
-            tarFile.extractall( path=outDataDir )
+            try:
+                tarFile.extractall( path=outDataDir )
+            except Exception as exc:
+                logger.warning( 'could not untar %s; %s', tarFilePath, exc )
 
 
 # configure logger formatting
