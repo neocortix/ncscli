@@ -458,7 +458,7 @@ def purgeKnownHost( host, port ):
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
     if retCode != 0:
-        logger.error( 'returnd error code %s', retCode )
+        logger.warning( 'returned error code %s for host %s', retCode, host )
 
 def purgeKnownHosts( inRecs ):
     for inRec in inRecs:
