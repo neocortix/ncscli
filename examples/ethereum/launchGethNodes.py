@@ -70,10 +70,10 @@ try:
         pushDeviceLocs=False,
         commonInFilePath = 'netconfig',
         authToken = os.getenv('NCS_AUTH_TOKEN') or 'YourAuthTokenHere',
-        encryptFiles=False,
+        encryptFiles=not True,
         timeLimit = 60*60,
-        instTimeLimit = 15*60,
-        filter = '{"dpr": ">=52", "ram:": ">=4000000000", "storage": ">=20000000000"}',
+        instTimeLimit = 20*60,
+        filter = '{"dpr": ">=51", "ram:": ">=4000000000", "storage": ">=20000000000"}',
         outDataDir = outDataDir,
         nWorkers = 48
     )
