@@ -95,6 +95,9 @@ $pyx -m pip install --user --upgrade --no-cache-dir ncscli
 # install matplotlib for use by examples
 $pyx -m pip install --user matplotlib
 
+# install enlighten for use by examples
+$pyx -m pip install --user enlighten
+
 
 sitePackagesDir=$($pyx -m site --user-site)
 examplesSrcDir=$sitePackagesDir/ncsexamples/
