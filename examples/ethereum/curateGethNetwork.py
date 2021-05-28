@@ -156,7 +156,7 @@ def terminateNcsScInstances( authToken, instanceIds ):
     dateTimeStr = datetime.datetime.now( datetime.timezone.utc ).isoformat()
     try:
         ncs.terminateInstances( authToken, instanceIds )
-        logger.info( 'terminateInstances returned' )
+        logger.debug( 'terminateInstances returned' )
     except Exception as exc:
         logger.warning( 'got exception terminating %d instances (%s) %s', 
             len( instanceIds ), type(exc), exc )
@@ -392,7 +392,7 @@ def checkGethProcesses( instances, dataDirPath ):
     # check for a running geth process on each instance
     stepStatuses = tellInstances.tellInstances( instances, cmd,
         timeLimit=15*60,
-        resultsLogFilePath = dataDirPath + '/checkProcesses.jlog',
+        resultsLogFilePath = dataDirPath + '/checkGethProcesses.jlog',
         knownHostsOnly=True, stopOnSigterm=True
         )
     #logger.info( 'proc statuses: %s', stepStatuses )
@@ -543,7 +543,7 @@ def lastGenDateTime( coll ):
 
 def ingestGethLog( logFile, coll ):
     '''ingest records from a geth node log into a mongo collection'''
-    logger.info( 'would ingest %s into %s', logFile.name, coll )
+    logger.debug( 'would ingest %s into %s', logFile.name, coll.name )
     datePat = r'\[(.*\|.*)\]'
     lineDateTime = datetime.datetime.fromtimestamp( 0, datetime.timezone.utc )
     lineLevel = None
@@ -616,7 +616,7 @@ def processNodeLogFiles( dataDirPath ):
                 #logger.info( 'already posted %s %s %s',
                 #    logDir[0:8], fmtDt( existingGenTime ), fmtDt( fileModDateTime )  )
                 continue
-        logger.info( 'parsing log for %s', logDir[0:16] )
+        logger.info( 'ingesting log for %s', logDir[0:16] )
         try:
             with open( inFilePath, 'r' ) as logFile:
                 # for safety, ingest to a temp collection and then rename (with replace) when done
