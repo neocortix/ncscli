@@ -394,7 +394,7 @@ if __name__ == "__main__":
                 logger.info( 'authorizeSigner returned: %s', results )
                 waitForAuth( victimAccount, False, authorizers, configName, timeLimit=15*60 )
             logger.info( 'terminating %s', iid)
-            ncs.terminateInstances( authToken, badIids )
+            ncs.terminateInstances( authToken, [iid] )
             terminatedIids.append( iid )
 
     # authorize good instances that have been up for long enough
