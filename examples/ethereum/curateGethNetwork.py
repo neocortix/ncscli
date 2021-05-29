@@ -36,6 +36,7 @@ except ImportError:
     os.environ["PATH"] += os.pathsep + ncscliPath
     import ncs
 import jsonToKnownHosts
+import ncsgeth
 import tellInstances
 
 logger = logging.getLogger(__name__)
@@ -135,6 +136,18 @@ def ingestJson( srcFilePath, dbName, collectionName, append ):
         cmd.append( '--drop' )
     #logger.info( 'cmd: %s', cmd )
     subprocess.check_call( cmd )
+
+def importAnchorNodes( srcFilePath, db, collectionName ):
+    # uses some args from the global ArgumentParser
+    cmd = [
+        'mongoimport', '--host', args.mongoHost, '--port', str(args.mongoPort),
+        '-d', db.name, '-c', collectionName, '--jsonArray',
+        '--mode=upsert', '--upsertFields=instanceId',
+        srcFilePath
+    ]
+    #logger.info( 'cmd: %s', cmd )
+    subprocess.check_call( cmd )
+    db[collectionName].create_index( 'instanceId' )
 
 def launchInstances( authToken, nInstances, sshClientKeyName, launchedJsonFilepath,
         filtersJson=None, encryptFiles=True ):
@@ -629,9 +642,6 @@ def processNodeLogFiles( dataDirPath ):
         except Exception as exc:
             logger.warning( 'exception (%s) ingesting %s', type(exc), inFilePath, exc_info=False )
 
-
-
-
 def checkEdgeNodes( dataDirPath, db, args ):
     '''checks status of edge nodes, updates database'''
     if not db.list_collection_names():
@@ -750,19 +760,29 @@ def checkEdgeNodes( dataDirPath, db, args ):
     checkLogs( checkables, dataDirPath )
     processNodeLogFiles( dataDirPath )
 
-
     return
-    '''
-    resultsLogFilePath=dataDirPath+('/checkInstances_%s.jlog' % dateTimeTag)
-    workerCmd = 'stat --format=%%y ether/%s/geth.log' % args.configName
-    logger.info( 'calling tellInstances on %d instances', len(checkables))
-    stepStatuses = tellInstances.tellInstances( checkables, workerCmd,
-        resultsLogFilePath=resultsLogFilePath,
-        download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
-        timeLimit=checkerTimeLimit, upload=None, stopOnSigterm=True,
-        knownHostsOnly=True, stopOnSigterm=True
-        )
-    '''
+
+def collectSigners( db, configName ):
+    anchorInstances = list( db['anchorInstances'].find() ) # fully iterates the cursor, getting all records
+    coll = db['checkedInstances']
+    wereChecked = list( coll.find({'state': 'checked'} ) )
+    for inst in wereChecked:
+        inst['instanceId'] = inst['_id']
+    instances = anchorInstances + wereChecked
+
+    # get the currently authorized signers (and true proposees)
+    signerInfos = ncsgeth.collectSignerInstances( instances, configName )
+    logger.debug( 'signerInfos: %s', signerInfos )
+    coll = db['allSigners']
+    logger.info( 'saving signers')
+    for signer in signerInfos:
+        signerId = signer['accountAddr']
+        iid = signer['instanceId']
+        auth = signer['auth']
+        logger.info( 'signer acct %s: iid %s, auth: %s', signerId, iid, auth )
+        coll.update_one( {'_id': iid}, { "$set": 
+            { "instanceId": iid, "accountAddr": signerId, "auth": auth } }, upsert=True
+            )
 
 
 if __name__ == "__main__":
@@ -782,7 +802,8 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser( description=__doc__,
         fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( 'action', help='the action to perform', 
-        choices=['launch', 'import', 'check', 'terminateBad', 'terminateAll', 'reterminate']
+        choices=['launch', 'import', 'check', 'collectSigners', 'importAnchorNodes',
+            'terminateBad', 'terminateAll', 'reterminate']
         )
     ap.add_argument( '--authToken', help='the NCS authorization token to use (required for launch or terminate)' )
     ap.add_argument( '--count', type=int, help='the number of instances (for launch)' )
@@ -817,6 +838,11 @@ if __name__ == "__main__":
         launchEdgeNodes( dataDirPath, db, args )
     elif args.action == 'check':
         checkEdgeNodes( dataDirPath, db, args )
+    elif args.action == 'collectSigners':
+        collectSigners( db, args.configName )
+    elif args.action == 'importAnchorNodes':
+        anchorNodesFilePath = os.path.join( dataDirPath, 'anchorInstances.json' )
+        importAnchorNodes( anchorNodesFilePath, db, 'anchorInstances' )
     elif args.action == 'terminateBad':
         if not args.authToken:
             sys.exit( 'error: can not terminate because no authToken was passed')
