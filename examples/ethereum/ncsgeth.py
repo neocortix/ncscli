@@ -219,12 +219,12 @@ def collectPrimaryAccounts( instances, configName ):
         instanceAccountPairs.append( {'instanceId': iid, 'accountAddr': account })
     return instanceAccountPairs
 
-def collectSignerInstances( instances, configName, includProposees=True ):
+def collectSignerInstances( instances, configName, includeProposees=True ):
     '''collects info about authorized signers and, optionally, true proposees; returns list of dicts'''
     if not instances:
         return []
     instancesByIid = {inst['instanceId']: inst for inst in instances }
-    if not includProposees:
+    if not includeProposees:
         proposees = set()
     else:
         propsFound = collectProposals( instances, configName )
@@ -257,10 +257,10 @@ def collectSignerInstances( instances, configName, includProposees=True ):
         iid = inst.get('instanceId')
         if 'ssh' not in inst:
             logger.warning( 'no ssh info for instance %s', iid )
-            continue
+            #continue
         if 'host' not in inst['ssh']:
             logger.warning( 'no ssh host for instance %s', iid )
-            continue
+            #continue
         logger.debug( '%s: %s', signerId, inst['ssh']['host'] )
         signerInfos.append({
             'instanceId': iid, 'accountAddr': signerId, 'auth': signerId in authSigners
