@@ -29,7 +29,12 @@ class pythonFrameProcessor(batchRunner.frameProcessor):
  
 if __name__ == "__main__":
     # configure logger
-    logging.basicConfig()
+    logger = logging.getLogger(__name__)
+    logFmt = '%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s'
+    logDateFmt = '%Y/%m/%d %H:%M:%S'
+    formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
+    logging.basicConfig(format=logFmt, datefmt=logDateFmt)
+
     dateTimeTag = datetime.datetime.now().strftime( '%Y-%m-%d_%H%M%S' )
     outDataDirPath = 'data/python_' + dateTimeTag
 
@@ -39,7 +44,7 @@ if __name__ == "__main__":
         commonInFilePath = pythonFrameProcessor.workerScriptPath,
         authToken = os.getenv( 'NCS_AUTH_TOKEN' ) or 'YourAuthTokenHere',
         timeLimit = 1200,
-        instTimeLimit = 600,
+        instTimeLimit = 450,
         frameTimeLimit = 300,
         filter = '{"dpr": ">=24"}',
         outDataDir = outDataDirPath,
@@ -47,6 +52,6 @@ if __name__ == "__main__":
         autoscaleMin=0.8,
         autoscaleMax=1.5,
         startFrame = 1,
-        endFrame = 10
+        endFrame = 9
     )
     sys.exit( rc )
