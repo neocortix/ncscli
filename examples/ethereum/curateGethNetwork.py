@@ -760,6 +760,21 @@ def checkEdgeNodes( dataDirPath, db, args ):
     checkLogs( checkables, dataDirPath )
     processNodeLogFiles( dataDirPath )
 
+    # populate the primaryAccount field of any checked instances that lack it
+    checkables = [inst for inst in checkables if inst['instanceId'] not in errorsByIid]
+    for inst in checkables:
+        iid = inst['instanceId']
+        instCheck = checkedByIid.get( iid )
+        if not instCheck or 'primaryAccount' not in instCheck:
+            logger.info( 'getting primary account of inst %s', iid[0:16])
+            instanceAccountPairs = ncsgeth.collectPrimaryAccounts( [inst], args.configName )
+            if not instanceAccountPairs:
+                logger.warning( 'no account found for inst %s', iid )
+            else:
+                accountAddr = instanceAccountPairs[0].get('accountAddr')
+                if accountAddr:
+                    coll.update_one( {'_id': iid}, { "$set": { "primaryAccount": accountAddr } } )
+
     return
 
 def collectSigners( db, configName ):
@@ -862,10 +877,10 @@ if __name__ == "__main__":
 
         allSigners = list( db['allSigners'].find() )
         logger.info( 'len(allSigners): %d', len(allSigners) )
-        signerIids = set( [signer['instanceId'] for signer in allSigners] )
-        logger.info( 'signerIids: %s', signerIids )
+        signersByIid = {signer['instanceId']: signer for signer in allSigners }
+        logger.info( 'signer iids: %s', signersByIid.keys() )
 
-        if (victimIid in signerIids) == shouldAuth:
+        if (victimIid in signersByIid) == shouldAuth:
             logger.warning( 'instance %s auth status is already %s', victimIid, shouldAuth )
             #sys.exit()
 
@@ -878,18 +893,23 @@ if __name__ == "__main__":
 
         instances = anchorInstances + wereChecked
         instancesByIid = {inst['instanceId']: inst for inst in instances }
-        victimInst = instancesByIid[ victimIid ]
-        if not victimInst:
-            logger.warning( 'instance %s not found', victimIid )
-            sys.exit()
-        logger.debug ('victimInst: %s', victimInst )
 
-        instanceAccountPairs = ncsgeth.collectPrimaryAccounts( [victimInst], configName )
-        if not instanceAccountPairs:
-            logger.warning( 'no account found for inst %s', victimIid )
-        victimAccount = instanceAccountPairs[0]['accountAddr']
+        victimAccount = None
+        if victimIid in signersByIid:
+            # this instance is (or has been) a signer
+            victimAccount = signersByIid[ victimIid ].get( 'accountAddr' )
+        else:
+            victimInst = instancesByIid[ victimIid ]
+            if not victimInst:
+                logger.warning( 'instance %s not found', victimIid )
+                sys.exit()
+            logger.debug ('victimInst: %s', victimInst )
+            instanceAccountPairs = ncsgeth.collectPrimaryAccounts( [victimInst], configName )
+            if not instanceAccountPairs:
+                logger.warning( 'no account found for inst %s', victimIid )
+            victimAccount = instanceAccountPairs[0]['accountAddr']
 
-        authorizers = [inst for inst in instances if inst['instanceId'] in signerIids ]
+        authorizers = [inst for inst in instances if inst['instanceId'] in signersByIid ]
         logger.info( '%d authorizers', len(authorizers) )
         if not authorizers:
             logger.warning( 'no authorizers found')
