@@ -8,12 +8,16 @@ import sys
 import ncscli.batchRunner as batchRunner
 
 
+jmeterVersion = '5.4.1'  # 5.3 and 5.4.1 have been tested, others may work as well
+
 class JMeterFrameProcessor(batchRunner.frameProcessor):
     '''defines details for using JMeter for a simplistic load test'''
 
     def installerCmd( self ):
-        return 'curl -s -S -L https://mirrors.sonic.net/apache/jmeter/binaries/apache-jmeter-5.3.tgz > apache-jmeter-5.3.tgz && tar zxf apache-jmeter-5.3.tgz'
-        # alternativey, could use https://mirror.olnevhost.net/pub/apache/... or https://downloads.apache.org/...
+        cmd = 'curl -s -S -L https://mirrors.sonic.net/apache/jmeter/binaries/apache-jmeter-%s.tgz > apache-jmeter.tgz' % jmeterVersion
+        cmd += ' && tar zxf apache-jmeter.tgz'
+        return cmd
+        # alternatively, could use https://mirror.olnevhost.net/pub/apache/... or https://downloads.apache.org/...
 
     JMeterFilePath = 'TestPlan.jmx'
     #JMeterFilePath = 'TestPlan_RampLong.jmx'
@@ -24,8 +28,8 @@ class JMeterFrameProcessor(batchRunner.frameProcessor):
         return 'TestPlan_results_%03d.csv' % frameNum
 
     def frameCmd( self, frameNum ):
-        cmd = 'date && apache-jmeter-5.3/bin/jmeter -n -t %s -l TestPlan_results_%03d.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true' % (
-            self.JMeterFilePath, frameNum
+        cmd = 'date && apache-jmeter-%s/bin/jmeter -n -t %s -l TestPlan_results_%03d.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true' % (
+            jmeterVersion, self.JMeterFilePath, frameNum
         )
         return cmd
 
