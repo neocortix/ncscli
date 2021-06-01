@@ -352,7 +352,7 @@ def launchEdgeNodes( dataDirPath, db, args ):
         mQuery =  {'state': 'checked' }
         nExisting = db['checkedInstances'].count_documents( mQuery )
         logger.info( '%d workers checked', nExisting )
-        nToLaunch = int( (args.target - nExisting) * 1.5 )
+        nToLaunch = int( (args.target - nExisting) * 3 )
         nToLaunch = max( nToLaunch, 0 )
 
         nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
@@ -784,6 +784,23 @@ def collectSigners( db, configName ):
             { "instanceId": iid, "accountAddr": signerId, "auth": auth } }, upsert=True
             )
 
+def waitForAuth( victimAccount, shouldAuth, instances, configName, timeLimit ):
+    '''wait for the authorization of victimAccount to match shouldAuth; return success (true or false)'''
+    curSigners = ncsgeth.collectAuthSigners( instances, configName )
+    nowAuth = victimAccount in curSigners
+    logger.info( 'now authorized? %s', nowAuth )
+    deadline = time.time() + timeLimit
+    while nowAuth != shouldAuth:
+        if time.time() >= deadline:
+            logger.warning( 'took too long for auth/deauth to propagate')
+            break
+        curSigners = ncsgeth.collectAuthSigners( instances, configName )
+        nowAuth = victimAccount in curSigners
+        logger.info( 'now authorized? %s', nowAuth )
+        if nowAuth != shouldAuth:
+            time.sleep(1)
+    return nowAuth == shouldAuth
+
 
 if __name__ == "__main__":
     startTime = time.time()
@@ -802,7 +819,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser( description=__doc__,
         fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( 'action', help='the action to perform', 
-        choices=['launch', 'import', 'check', 'collectSigners', 'importAnchorNodes',
+        choices=['launch', 'authorizeSigner', 'deauthorizeSigner', 'check', 'collectSigners', 'importAnchorNodes',
             'terminateBad', 'terminateAll', 'reterminate']
         )
     ap.add_argument( '--authToken', help='the NCS authorization token to use (required for launch or terminate)' )
@@ -817,6 +834,7 @@ if __name__ == "__main__":
         default='{"dpr": ">=51", "ram:": ">=4000000000", "storage": ">=20000000000"}' )
     ap.add_argument( '--installerFileName', help='a script to run on the instances',
         default='netconfig/installAndStartGeth.sh' )
+    ap.add_argument( '--instanceId', help='id of instance (for authorize or deauthorize)' )
     ap.add_argument( '--uploads', help='glob for filenames to upload to workers', default='netconfig' )
     ap.add_argument( '--mongoHost', help='the host of mongodb server', default='localhost')
     ap.add_argument( '--mongoPort', help='the port of mongodb server', default=27017)
@@ -836,6 +854,63 @@ if __name__ == "__main__":
     db = mclient[dbName]
     if args.action == 'launch':
         launchEdgeNodes( dataDirPath, db, args )
+    elif args.action in ['authorizeSigner', 'deauthorizeSigner' ]:
+        victimIid = args.instanceId
+        configName = args.configName
+        shouldAuth = args.action == 'authorizeSigner'
+        logger.info( 'shouldAuth: %s', shouldAuth )
+
+        allSigners = list( db['allSigners'].find() )
+        logger.info( 'len(allSigners): %d', len(allSigners) )
+        signerIids = set( [signer['instanceId'] for signer in allSigners] )
+        logger.info( 'signerIids: %s', signerIids )
+
+        if (victimIid in signerIids) == shouldAuth:
+            logger.warning( 'instance %s auth status is already %s', victimIid, shouldAuth )
+            #sys.exit()
+
+        wereChecked = list( db['checkedInstances'].find( {'state': 'checked'}) ) # fully iterates the cursor, getting all records
+        logger.info( '%d instances were checked', len(wereChecked))
+        for inst in wereChecked:
+            inst['instanceId'] = inst['_id']
+        #checkedByIid = { inst['_id']: inst for inst in wereChecked }
+        anchorInstances = list( db['anchorInstances'].find() ) # fully iterates the cursor, getting all records
+
+        instances = anchorInstances + wereChecked
+        instancesByIid = {inst['instanceId']: inst for inst in instances }
+        victimInst = instancesByIid[ victimIid ]
+        if not victimInst:
+            logger.warning( 'instance %s not found', victimIid )
+            sys.exit()
+        logger.debug ('victimInst: %s', victimInst )
+
+        instanceAccountPairs = ncsgeth.collectPrimaryAccounts( [victimInst], configName )
+        if not instanceAccountPairs:
+            logger.warning( 'no account found for inst %s', victimIid )
+        victimAccount = instanceAccountPairs[0]['accountAddr']
+
+        authorizers = [inst for inst in instances if inst['instanceId'] in signerIids ]
+        logger.info( '%d authorizers', len(authorizers) )
+        if not authorizers:
+            logger.warning( 'no authorizers found')
+
+        authResults = ncsgeth.authorizeSigner( authorizers, configName, victimAccount, shouldAuth )
+        logger.info( 'authResults: %s', authResults )
+        anySucceeded = False
+        for result in authResults:
+            if 'returnCode' in result and result['returnCode'] == 0:
+                anySucceeded = True
+            else:
+                logger.warning( 'bad result from authorizeSigner: %s', result )
+        if anySucceeded:
+            itWorked = waitForAuth( victimAccount, shouldAuth, authorizers, configName, timeLimit=600 )
+            if itWorked:
+                db['allSigners'].update_one( {'_id': victimIid}, { "$set": 
+                    { "instanceId": victimIid, "accountAddr": victimAccount, "auth": shouldAuth }
+                     }, upsert=True
+                    )
+
+
     elif args.action == 'check':
         checkEdgeNodes( dataDirPath, db, args )
     elif args.action == 'collectSigners':
