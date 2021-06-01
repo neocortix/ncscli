@@ -2,7 +2,7 @@ import os
 import setuptools
 import shutil
 
-__version__ = '1.1.17'
+__version__ = '1.1.18'
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
