@@ -61,6 +61,8 @@ class g_:
     progressFilePath = None
     deadline = None
     interrupted = False
+    serverAliveInterval = 30
+    serverAliveCountMax = 6
     workingInstances = collections.deque()
     progressFileLock = threading.Lock()
 
@@ -389,8 +391,8 @@ def recruitInstance( launchedJsonFilePath, resultsLogFilePathIgnored ):
         logInstallerOperation( iid, ['connect', sshSpecs['host'], sshSpecs['port']] )
         with subprocess.Popen(['ssh',
                         '-p', str(sshSpecs['port']),
-                        '-o', 'ServerAliveInterval=360',
-                        '-o', 'ServerAliveCountMax=3',
+                        '-o', 'ServerAliveInterval=%d' % g_.serverAliveInterval,
+                        '-o', 'ServerAliveCountMax=%d' % g_.serverAliveCountMax,
                         sshSpecs['user'] + '@' + sshSpecs['host'], installerCmd],
                         encoding='utf8',
                         #stdout=subprocess.PIPE,  # subprocess.PIPE subprocess.DEVNULL
@@ -824,8 +826,8 @@ def renderFramesOnInstance( inst ):
             frameStartDateTime = datetime.datetime.now(datetime.timezone.utc)
             with subprocess.Popen(['ssh', '-n', '-T',
                                 '-p', str(sshSpecs['port']),
-                                '-o', 'ServerAliveInterval=360',
-                                '-o', 'ServerAliveCountMax=3',
+                                '-o', 'ServerAliveInterval=%d' % g_.serverAliveInterval,
+                                '-o', 'ServerAliveCountMax=%d' % g_.serverAliveCountMax,
                                 sshSpecs['user'] + '@' + sshSpecs['host'], cmd],
                                 encoding='utf8',
                                 stdout=subprocess.PIPE,  # subprocess.PIPE subprocess.DEVNULL
@@ -929,8 +931,8 @@ def stdCommandInstance( inst, cmd, timeLimit ):
     stdout=''
     with subprocess.Popen(['ssh',
                     '-p', str(sshSpecs['port']),
-                    '-o', 'ServerAliveInterval=360',
-                    '-o', 'ServerAliveCountMax=3',
+                    '-o', 'ServerAliveInterval=%d' % g_.serverAliveInterval,
+                    '-o', 'ServerAliveCountMax=%d' % g_.serverAliveCountMax,
                     sshSpecs['user'] + '@' + sshSpecs['host'], cmd],
                     encoding='utf8',
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE
@@ -968,8 +970,8 @@ def commandInstance( inst, cmd, timeLimit ):
     #logInstallerOperation( iid, ['connect', sshSpecs['host'], sshSpecs['port']] )
     with subprocess.Popen(['ssh',
                     '-p', str(sshSpecs['port']),
-                    '-o', 'ServerAliveInterval=360',
-                    '-o', 'ServerAliveCountMax=3',
+                    '-o', 'ServerAliveInterval=%d' % g_.serverAliveInterval,
+                    '-o', 'ServerAliveCountMax=%d' % g_.serverAliveCountMax,
                     sshSpecs['user'] + '@' + sshSpecs['host'], cmd],
                     encoding='utf8',
                     #stdout=subprocess.PIPE,  # subprocess.PIPE subprocess.DEVNULL
