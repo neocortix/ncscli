@@ -605,6 +605,11 @@ def processNodeLogFiles( dataDirPath ):
             fileModDateTime = universalizeDateTime( fileModDateTime )
             if fileModDateTime <= thresholdDateTime:
                 os.remove( inFilePath )
+                logDirPath = os.path.join( logsDirPath, logDir )
+                try:
+                    os.rmdir( logDirPath )
+                except Exception as exc:
+                    logger.warning( 'exception (%s) removing log dir %s', type(exc), logDirPath )
             #elif fileModDateTime <= newerThresholdDateTime:
             #    logger.warning( 'old fileModDateTime for %s (%s)', logDir, fileModDateTime )
     
@@ -816,6 +821,63 @@ def waitForAuth( victimAccount, shouldAuth, instances, configName, timeLimit ):
             time.sleep(1)
     return nowAuth == shouldAuth
 
+def authorizeSigner( db, configName, victimIid, shouldAuth ):
+    logger.info( 'shouldAuth: %s', shouldAuth )
+
+    allSigners = list( db['allSigners'].find() )
+    logger.info( 'len(allSigners): %d', len(allSigners) )
+    signersByIid = {signer['instanceId']: signer for signer in allSigners }
+    logger.info( 'signer iids: %s', signersByIid.keys() )
+
+    if (victimIid in signersByIid) == shouldAuth:
+        logger.warning( 'instance %s auth status is already %s', victimIid, shouldAuth )
+        #return
+
+    wereChecked = list( db['checkedInstances'].find( {'state': 'checked'}) ) # fully iterates the cursor, getting all records
+    logger.info( '%d instances were checked', len(wereChecked))
+    for inst in wereChecked:
+        inst['instanceId'] = inst['_id']
+    anchorInstances = list( db['anchorInstances'].find() ) # fully iterates the cursor, getting all records
+
+    instances = anchorInstances + wereChecked
+    instancesByIid = {inst['instanceId']: inst for inst in instances }
+
+    victimAccount = None
+    if victimIid in signersByIid:
+        # this instance is (or has been) a signer
+        victimAccount = signersByIid[ victimIid ].get( 'accountAddr' )
+    else:
+        victimInst = instancesByIid[ victimIid ]
+        if not victimInst:
+            logger.warning( 'instance %s not found', victimIid )
+            return
+        logger.debug ('victimInst: %s', victimInst )
+        instanceAccountPairs = ncsgeth.collectPrimaryAccounts( [victimInst], configName )
+        if not instanceAccountPairs:
+            logger.warning( 'no account found for inst %s', victimIid )
+        victimAccount = instanceAccountPairs[0]['accountAddr']
+
+    authorizers = [inst for inst in instances if inst['instanceId'] in signersByIid ]
+    logger.info( '%d authorizers', len(authorizers) )
+    if not authorizers:
+        logger.warning( 'no authorizers found')
+
+    authResults = ncsgeth.authorizeSigner( authorizers, configName, victimAccount, shouldAuth )
+    logger.info( 'authResults: %s', authResults )
+    anySucceeded = False
+    for result in authResults:
+        if 'returnCode' in result and result['returnCode'] == 0:
+            anySucceeded = True
+        else:
+            logger.warning( 'bad result from authorizeSigner: %s', result )
+    if anySucceeded:
+        itWorked = waitForAuth( victimAccount, shouldAuth, authorizers, configName, timeLimit=600 )
+        if itWorked:
+            db['allSigners'].update_one( {'_id': victimIid}, { "$set": 
+                { "instanceId": victimIid, "accountAddr": victimAccount, "auth": shouldAuth }
+                    }, upsert=True
+                )
+    return
 
 if __name__ == "__main__":
     startTime = time.time()
@@ -873,64 +935,7 @@ if __name__ == "__main__":
         victimIid = args.instanceId
         configName = args.configName
         shouldAuth = args.action == 'authorizeSigner'
-        logger.info( 'shouldAuth: %s', shouldAuth )
-
-        allSigners = list( db['allSigners'].find() )
-        logger.info( 'len(allSigners): %d', len(allSigners) )
-        signersByIid = {signer['instanceId']: signer for signer in allSigners }
-        logger.info( 'signer iids: %s', signersByIid.keys() )
-
-        if (victimIid in signersByIid) == shouldAuth:
-            logger.warning( 'instance %s auth status is already %s', victimIid, shouldAuth )
-            #sys.exit()
-
-        wereChecked = list( db['checkedInstances'].find( {'state': 'checked'}) ) # fully iterates the cursor, getting all records
-        logger.info( '%d instances were checked', len(wereChecked))
-        for inst in wereChecked:
-            inst['instanceId'] = inst['_id']
-        #checkedByIid = { inst['_id']: inst for inst in wereChecked }
-        anchorInstances = list( db['anchorInstances'].find() ) # fully iterates the cursor, getting all records
-
-        instances = anchorInstances + wereChecked
-        instancesByIid = {inst['instanceId']: inst for inst in instances }
-
-        victimAccount = None
-        if victimIid in signersByIid:
-            # this instance is (or has been) a signer
-            victimAccount = signersByIid[ victimIid ].get( 'accountAddr' )
-        else:
-            victimInst = instancesByIid[ victimIid ]
-            if not victimInst:
-                logger.warning( 'instance %s not found', victimIid )
-                sys.exit()
-            logger.debug ('victimInst: %s', victimInst )
-            instanceAccountPairs = ncsgeth.collectPrimaryAccounts( [victimInst], configName )
-            if not instanceAccountPairs:
-                logger.warning( 'no account found for inst %s', victimIid )
-            victimAccount = instanceAccountPairs[0]['accountAddr']
-
-        authorizers = [inst for inst in instances if inst['instanceId'] in signersByIid ]
-        logger.info( '%d authorizers', len(authorizers) )
-        if not authorizers:
-            logger.warning( 'no authorizers found')
-
-        authResults = ncsgeth.authorizeSigner( authorizers, configName, victimAccount, shouldAuth )
-        logger.info( 'authResults: %s', authResults )
-        anySucceeded = False
-        for result in authResults:
-            if 'returnCode' in result and result['returnCode'] == 0:
-                anySucceeded = True
-            else:
-                logger.warning( 'bad result from authorizeSigner: %s', result )
-        if anySucceeded:
-            itWorked = waitForAuth( victimAccount, shouldAuth, authorizers, configName, timeLimit=600 )
-            if itWorked:
-                db['allSigners'].update_one( {'_id': victimIid}, { "$set": 
-                    { "instanceId": victimIid, "accountAddr": victimAccount, "auth": shouldAuth }
-                     }, upsert=True
-                    )
-
-
+        authorizeSigner( db, configName, victimIid, shouldAuth )
     elif args.action == 'check':
         checkEdgeNodes( dataDirPath, db, args )
     elif args.action == 'collectSigners':
@@ -942,6 +947,12 @@ if __name__ == "__main__":
         if not args.authToken:
             sys.exit( 'error: can not terminate because no authToken was passed')
         terminatedDateTimeStr = datetime.datetime.now( datetime.timezone.utc ).isoformat()
+        # retrieve list of signers so we can deauthorize each before terminating
+        allSigners = list( db['allSigners'].find() )
+        logger.info( 'len(allSigners): %d', len(allSigners) )
+        signersByIid = {signer['instanceId']: signer for signer in allSigners }
+        logger.debug( 'signer iids: %s', signersByIid.keys() )
+
         coll = db['checkedInstances']
         wereChecked = list( coll.find() ) # fully iterates the cursor, getting all records
         toTerminate = []  # list of iids
@@ -951,6 +962,8 @@ if __name__ == "__main__":
             #logger.info( 'checked state %s', state )
             if state in ['failed', 'inaccessible', 'stopped' ]:
                 iid = checkedInst['_id']
+                if iid in signersByIid:
+                    authorizeSigner( db, args.configName, iid, False )
                 abbrevIid = iid[0:16]
                 logger.warning( 'would terminate %s', abbrevIid )
                 toTerminate.append( iid )
