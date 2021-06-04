@@ -398,6 +398,26 @@ def launchEdgeNodes( dataDirPath, db, args ):
         logger.warning( 'no instances recruited' )
     return
 
+def saveErrorsByIid( errorsByIid, coll ):
+    for iid, err in errorsByIid.items():
+        if 'discrep' in err:
+            discrep = err['discrep']
+            logger.info( 'updating clockOffset %.1f for inst %s', discrep, iid[0:8] )
+            coll.update_one( {'_id': iid}, { "$set": { "clockOffset": discrep } } )
+            coll.update_one( {'_id': iid}, { "$inc": { "nFailures": 1 } } )
+        elif 'status' in err:
+            status = err['status']
+            if isinstance( status, Exception ):
+                coll.update_one( {'_id': iid}, { "$inc": { "nExceptions": 1 } } )
+                excType = type(status).__name__  # the name of the particular exception class
+                coll.update_one( {'_id': iid}, { "$set": { "exceptionType": excType } } )
+            else:
+                coll.update_one( {'_id': iid}, { "$inc": { "nFailures": 1 } } )
+        else:
+            logger.warning( 'checkInstanceClocks instance %s gave status (%s) "%s"', iid[0:8], type(err), err )
+        # change (or omit) this if wanting to allow more than one failure before marking it failed
+        coll.update_one( {'_id': iid}, { "$set": { "state": "failed" } } )
+
 def checkGethProcesses( instances, dataDirPath ):
     logger.info( 'checking %d instance(s)', len(instances) )
 
@@ -721,41 +741,13 @@ def checkEdgeNodes( dataDirPath, db, args ):
             )
     checkables = [inst for inst in checkables if inst['instanceId'] in liveIidSet]
     logger.info( '%d instances checkable', len(checkables) )
-
     errorsByIid = checkInstanceClocks( liveInstances, dataDirPath )
-    for iid, err in errorsByIid.items():
-        if 'discrep' in err:
-            discrep = err['discrep']
-            logger.info( 'updating clockOffset %.1f for inst %s', discrep, iid[0:8] )
-            coll.update_one( {'_id': iid}, { "$set": { "clockOffset": discrep } } )
-            coll.update_one( {'_id': iid}, { "$inc": { "nFailures": 1 } } )
-        elif 'status' in err:
-            status = err['status']
-            if isinstance( status, Exception ):
-                coll.update_one( {'_id': iid}, { "$inc": { "nExceptions": 1 } } )
-            else:
-                coll.update_one( {'_id': iid}, { "$inc": { "nFailures": 1 } } )
-        else:
-            logger.warning( 'checkInstanceClocks instance %s gave status (%s) "%s"', iid[0:8], type(err), err )
-        # change (or omit) this if wanting to allow more than one failure before marking it failed
-        coll.update_one( {'_id': iid}, { "$set": { "state": "failed" } } )
+    saveErrorsByIid( errorsByIid, coll )
 
     checkables = [inst for inst in checkables if inst['instanceId'] not in errorsByIid]
     logger.info( '%d instances checkable', len(checkables) )
-
-
     errorsByIid = checkGethProcesses( checkables, dataDirPath )
-    for iid, err in errorsByIid.items():
-        if 'status' in err:
-            status = err['status']
-            if isinstance( status, Exception ):
-                coll.update_one( {'_id': iid}, { "$inc": { "nExceptions": 1 } } )
-            else:
-                coll.update_one( {'_id': iid}, { "$inc": { "nFailures": 1 } } )
-        else:
-            logger.warning( 'checkGethProcesses for inst %s gave status (%s) "%s"', iid[0:8], type(err), err )
-        # change (or omit) this if wanting to allow more than one failure before marking it failed
-        coll.update_one( {'_id': iid}, { "$set": { "state": "failed" } } )
+    saveErrorsByIid( errorsByIid, coll )
 
     checkables = [inst for inst in checkables if inst['instanceId'] not in errorsByIid]
     logger.info( '%d instances checkable', len(checkables) )
