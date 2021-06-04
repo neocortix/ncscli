@@ -398,25 +398,44 @@ def launchEdgeNodes( dataDirPath, db, args ):
         logger.warning( 'no instances recruited' )
     return
 
-def saveErrorsByIid( errorsByIid, coll ):
+def saveErrorsByIid( errorsByIid, db ):
+    checkedColl = db.checkedInstances
+    errorsColl = db.instanceErrors
+    checkedDateTime = datetime.datetime.now( datetime.timezone.utc )
+    checkedDateTimeStr = checkedDateTime.isoformat()
+
     for iid, err in errorsByIid.items():
+        record = { 'instanceId': iid, 'checkedDateTime': checkedDateTimeStr }
         if 'discrep' in err:
             discrep = err['discrep']
             logger.info( 'updating clockOffset %.1f for inst %s', discrep, iid[0:8] )
-            coll.update_one( {'_id': iid}, { "$set": { "clockOffset": discrep } } )
-            coll.update_one( {'_id': iid}, { "$inc": { "nFailures": 1 } } )
+            checkedColl.update_one( {'_id': iid}, { "$set": { "clockOffset": discrep } } )
+            checkedColl.update_one( {'_id': iid}, { "$inc": { "nFailures": 1 } } )
+            record.update( { 'status': 'badClock', 'returnCode': discrep } )
+            errorsColl.insert_one( record )
         elif 'status' in err:
             status = err['status']
             if isinstance( status, Exception ):
-                coll.update_one( {'_id': iid}, { "$inc": { "nExceptions": 1 } } )
+                checkedColl.update_one( {'_id': iid}, { "$inc": { "nExceptions": 1 } } )
                 excType = type(status).__name__  # the name of the particular exception class
-                coll.update_one( {'_id': iid}, { "$set": { "exceptionType": excType } } )
+                checkedColl.update_one( {'_id': iid}, { "$set": { "exceptionType": excType } } )
+                record.update({ 'status': 'exception', 'exceptionType': excType, 'msg': str(status.args) })
+                errorsColl.insert_one( record )
             else:
-                coll.update_one( {'_id': iid}, { "$inc": { "nFailures": 1 } } )
+                checkedColl.update_one( {'_id': iid}, { "$inc": { "nFailures": 1 } } )
+                record.update({ 'status': 'error', 'returnCode': status, 'msg': str(err) })
+                errorsColl.insert_one( record )
         else:
             logger.warning( 'checkInstanceClocks instance %s gave status (%s) "%s"', iid[0:8], type(err), err )
+            record.update({ 'status': 'misc', 'msg': str(err) })
+            errorsColl.insert_one( record )
         # change (or omit) this if wanting to allow more than one failure before marking it failed
-        coll.update_one( {'_id': iid}, { "$set": { "state": "failed" } } )
+        checkedInst = checkedColl.find_one( {'_id': iid }, {'ssh':0} )
+        if checkedInst['nExceptions'] > checkedInst['nFailures']:
+            state = 'excepted'
+        else:
+            state = 'failed'
+        checkedColl.update_one( {'_id': iid}, { "$set": { "state": state } } )
 
 def checkGethProcesses( instances, dataDirPath ):
     logger.info( 'checking %d instance(s)', len(instances) )
@@ -446,8 +465,8 @@ def checkInstanceClocks( liveInstances, dataDirPath ):
         )
     #logger.info( 'proc statuses: %s', stepStatuses )
     errorsByIid = {status['instanceId']: status for status in stepStatuses if status['status'] }
-    for iid, status in errorsByIid.items():
-        logger.warning( 'instance %s gave error "%s"', iid, status )
+    #for iid, status in errorsByIid.items():
+    #    logger.warning( 'instance %s gave error "%s"', iid, status )
 
     with open( jlogFilePath, 'rb' ) as inFile:
         for line in inFile:
@@ -468,7 +487,7 @@ def checkInstanceClocks( liveInstances, dataDirPath ):
                     logger.info( 'discrep: %.1f seconds on inst %s',
                         discrep, iid )
                     if discrep > 4 or discrep < -1:
-                        logger.warning( 'bad time discrep: %.1f', discrep )
+                        #logger.warning( 'bad time discrep: %.1f', discrep )
                         errorsByIid[ iid ] = {'discrep': discrep }
     if unfoundIids:
         logger.warning( 'unfoundIids: %s', unfoundIids )
@@ -679,7 +698,7 @@ def checkEdgeNodes( dataDirPath, db, args ):
 
     wereChecked = list( db['checkedInstances'].find() ) # fully iterates the cursor, getting all records
     checkedByIid = { inst['_id']: inst for inst in wereChecked }
-    # after checking, each checked instance will have "state" set to "checked", "failed", "inaccessible", or "terminated"
+    # after checking, each checked instance will have "state" set to "checked", "failed", "excepted", or "terminated"
     # "checkable" instances are ones that are started, not badly installed, and not badly checked
     checkables = []
     for iid, inst in instancesByIid.items():
@@ -708,10 +727,6 @@ def checkEdgeNodes( dataDirPath, db, args ):
         abbrevIid = iid[0:16]
         launchedDateTimeStr = inst.get( 'started-at' )
         instCheck = checkedByIid.get( iid )
-        if 'ram' in inst:
-            ramMb = inst['ram']['total'] / 1000000
-        else:
-            ramMb = 0
         if instCheck:
             nFailures = instCheck.get( 'nFailures', 0)
             reasonTerminated = instCheck.get( 'reasonTerminated', None)
@@ -723,7 +738,6 @@ def checkEdgeNodes( dataDirPath, db, args ):
                 'devId': inst.get('device-id'),
                 'launchedDateTime': launchedDateTimeStr,
                 'ssh': inst.get('ssh'),
-                'ramMb': ramMb,
                 'nFailures': 0,
                 'nExceptions': 0,
             } )
@@ -742,12 +756,12 @@ def checkEdgeNodes( dataDirPath, db, args ):
     checkables = [inst for inst in checkables if inst['instanceId'] in liveIidSet]
     logger.info( '%d instances checkable', len(checkables) )
     errorsByIid = checkInstanceClocks( liveInstances, dataDirPath )
-    saveErrorsByIid( errorsByIid, coll )
+    saveErrorsByIid( errorsByIid, db )
 
     checkables = [inst for inst in checkables if inst['instanceId'] not in errorsByIid]
     logger.info( '%d instances checkable', len(checkables) )
     errorsByIid = checkGethProcesses( checkables, dataDirPath )
-    saveErrorsByIid( errorsByIid, coll )
+    saveErrorsByIid( errorsByIid, db )
 
     checkables = [inst for inst in checkables if inst['instanceId'] not in errorsByIid]
     logger.info( '%d instances checkable', len(checkables) )
@@ -952,7 +966,7 @@ if __name__ == "__main__":
         for checkedInst in wereChecked:
             state = checkedInst.get( 'state')
             #logger.info( 'checked state %s', state )
-            if state in ['failed', 'inaccessible', 'stopped' ]:
+            if state in ['failed', 'excepted', 'stopped' ]:
                 iid = checkedInst['_id']
                 if iid in signersByIid:
                     authorizeSigner( db, args.configName, iid, False )
