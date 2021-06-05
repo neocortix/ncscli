@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-maintains and tracks instances in a folding@home farm on NCS
+maintains and tracks instances in a geth (go-ethereum) farm on NCS
 """
 
 # standard library modules
@@ -408,7 +408,7 @@ def saveErrorsByIid( errorsByIid, db ):
         record = { 'instanceId': iid, 'checkedDateTime': checkedDateTimeStr }
         if 'discrep' in err:
             discrep = err['discrep']
-            logger.info( 'updating clockOffset %.1f for inst %s', discrep, iid[0:8] )
+            logger.debug( 'updating clockOffset %.1f for inst %s', discrep, iid[0:8] )
             checkedColl.update_one( {'_id': iid}, { "$set": { "clockOffset": discrep } } )
             checkedColl.update_one( {'_id': iid}, { "$inc": { "nFailures": 1 } } )
             record.update( { 'status': 'badClock', 'returnCode': discrep } )
@@ -484,7 +484,7 @@ def checkInstanceClocks( liveInstances, dataDirPath ):
                     unfoundIids.discard( iid )
                     delta = masterDateTime - nodeDateTime
                     discrep =delta.total_seconds()
-                    logger.info( 'discrep: %.1f seconds on inst %s',
+                    logger.debug( 'discrep: %.1f seconds on inst %s',
                         discrep, iid )
                     if discrep > 4 or discrep < -1:
                         #logger.warning( 'bad time discrep: %.1f', discrep )
@@ -566,7 +566,7 @@ def checkLogs( liveInstances, dataDirPath ):
                     if dateStr:
                         dateStr = dateStr.replace( '|', ' ' )
                         latestSealDateTime = dateutil.parser.parse( dateStr )
-                        logger.info( 'latestSealDateTime: %s', latestSealDateTime.isoformat() )
+                        logger.info( 'latestSealDateTime: %s for %s', latestSealDateTime.isoformat(), iid[0:8] )
 
     logger.info( 'found errors for %d instance(s)', len(errorsByIid) )
     #print( 'errorsByIid', errorsByIid  )
@@ -673,7 +673,7 @@ def processNodeLogFiles( dataDirPath ):
                 #logger.info( 'already posted %s %s %s',
                 #    logDir[0:8], fmtDt( existingGenTime ), fmtDt( fileModDateTime )  )
                 continue
-        logger.info( 'ingesting log for %s', logDir[0:16] )
+        logger.debug( 'ingesting log for %s', logDir[0:16] )
         try:
             with open( inFilePath, 'r' ) as logFile:
                 # for safety, ingest to a temp collection and then rename (with replace) when done
@@ -777,7 +777,7 @@ def checkEdgeNodes( dataDirPath, db, args ):
         iid = inst['instanceId']
         instCheck = checkedByIid.get( iid )
         if not instCheck or 'primaryAccount' not in instCheck:
-            logger.info( 'getting primary account of inst %s', iid[0:16])
+            logger.debug( 'getting primary account of inst %s', iid[0:16])
             instanceAccountPairs = ncsgeth.collectPrimaryAccounts( [inst], args.configName )
             if not instanceAccountPairs:
                 logger.warning( 'no account found for inst %s', iid )
@@ -835,7 +835,8 @@ def authorizeSigner( db, configName, victimIid, shouldAuth ):
     signersByIid = {signer['instanceId']: signer for signer in allSigners }
     logger.info( 'signer iids: %s', signersByIid.keys() )
 
-    if (victimIid in signersByIid) == shouldAuth:
+    wasAuth = (victimIid in signersByIid) and signersByIid[victimIid].get('auth)')
+    if wasAuth == shouldAuth:
         logger.warning( 'instance %s auth status is already %s', victimIid, shouldAuth )
         #return
 
@@ -868,6 +869,15 @@ def authorizeSigner( db, configName, victimIid, shouldAuth ):
     if not authorizers:
         logger.warning( 'no authorizers found')
 
+    # starting all miners should not be necessary
+    #minerResults = ncsgeth.startMiners( authorizers, configName )
+    #logger.info( 'all minerResults: %s', minerResults )
+    # start miner on the one to be authorized
+    if victimIid and victimIid in instancesByIid:
+        inst = instancesByIid[ victimIid ]
+        minerResults = ncsgeth.startMiners( [inst], configName )
+        logger.info( 'minerResults: %s', minerResults )
+
     authResults = ncsgeth.authorizeSigner( authorizers, configName, victimAccount, shouldAuth )
     logger.info( 'authResults: %s', authResults )
     anySucceeded = False
@@ -884,6 +894,39 @@ def authorizeSigner( db, configName, victimIid, shouldAuth ):
                     }, upsert=True
                 )
     return
+
+def authorizeGood( db, configName, maxNewAuths, trustedThresh ):
+    # retrieve list of signers so we can know which are already authorized
+    allSigners = list( db['allSigners'].find() )
+    logger.info( 'len(allSigners): %d', len(allSigners) )
+    signersByIid = {signer['instanceId']: signer for signer in allSigners }
+    logger.debug( 'signer iids: %s', signersByIid.keys() )
+
+    wereChecked = list( db['checkedInstances'].find( {'state': 'checked'}) ) # fully iterates the cursor, getting all records
+    logger.info( '%d instances were checked', len(wereChecked))
+    nNewAuths = 0
+    for inst in wereChecked:
+        if nNewAuths >= maxNewAuths:
+            break
+        iid = inst['_id']
+        logger.info( 'considering instance %s', iid )
+        signerInfo = signersByIid.get(iid)
+        if signerInfo and signerInfo.get( 'auth' ):
+            logger.info( 'already authorized, account %s', signerInfo.get('accountAddr') )
+            continue
+        launchedDateTime = dateutil.parser.parse( inst['launchedDateTime'] )
+        checkedDateTime = dateutil.parser.parse( inst['checkedDateTime'] )
+        #logger.info( 'uptime: %s', checkedDateTime-launchedDateTime )
+        uptimeHrs = (checkedDateTime-launchedDateTime).total_seconds() / 3600
+        logger.info( 'uptimeHrs: %.1f', uptimeHrs )
+        if uptimeHrs < trustedThresh:
+            continue
+        logger.info( 'would authorize %s', iid )
+        authorizeSigner( db, configName, iid, True )
+        nNewAuths += 1
+        if nNewAuths < maxNewAuths:
+            time.sleep( 15 )
+
 
 if __name__ == "__main__":
     startTime = time.time()
@@ -902,7 +945,8 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser( description=__doc__,
         fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( 'action', help='the action to perform', 
-        choices=['launch', 'authorizeSigner', 'deauthorizeSigner', 'check', 'collectSigners', 'importAnchorNodes',
+        choices=['launch', 'authorizeGood', 'authorizeSigner', 'deauthorizeSigner',
+            'check', 'collectSigners', 'importAnchorNodes',
             'terminateBad', 'terminateAll', 'reterminate']
         )
     ap.add_argument( '--authToken', help='the NCS authorization token to use (required for launch or terminate)' )
@@ -912,12 +956,13 @@ if __name__ == "__main__":
     ap.add_argument( '--configName', help='the name of the network config', default='priv_5' )
     ap.add_argument( '--dataDir', help='data directory', default='./data/' )
     ap.add_argument( '--encryptFiles', type=boolArg, default=False, help='whether to encrypt files on launched instances' )
-    ap.add_argument( '--farm', required=True, help='the name of the virtual folding@home farm' )
+    ap.add_argument( '--farm', required=True, help='the name of the virtual geth farm' )
     ap.add_argument( '--filter', help='json to filter instances for launch',
         default='{"dpr": ">=51", "ram:": ">=4000000000", "storage": ">=20000000000"}' )
-    ap.add_argument( '--installerFileName', help='a script to run on the instances',
+    ap.add_argument( '--installerFileName', help='a script to run on new instances',
         default='netconfig/installAndStartGeth.sh' )
     ap.add_argument( '--instanceId', help='id of instance (for authorize or deauthorize)' )
+    ap.add_argument( '--maxNewAuths', type=int, default=0, help='maximum number of new authorized signers (for authorizeGood)' )
     ap.add_argument( '--uploads', help='glob for filenames to upload to workers', default='netconfig' )
     ap.add_argument( '--mongoHost', help='the host of mongodb server', default='localhost')
     ap.add_argument( '--mongoPort', help='the port of mongodb server', default=27017)
@@ -942,6 +987,12 @@ if __name__ == "__main__":
         configName = args.configName
         shouldAuth = args.action == 'authorizeSigner'
         authorizeSigner( db, configName, victimIid, shouldAuth )
+    elif args.action == 'authorizeGood':
+        # authorize good instances that have been up for long enough
+        maxNewAuths = args.maxNewAuths
+        if maxNewAuths <= 0:
+            sys.exit()
+        authorizeGood( db, args.configName, maxNewAuths, trustedThresh=12 )
     elif args.action == 'check':
         checkEdgeNodes( dataDirPath, db, args )
     elif args.action == 'collectSigners':
@@ -973,7 +1024,9 @@ if __name__ == "__main__":
                 abbrevIid = iid[0:16]
                 logger.warning( 'would terminate %s', abbrevIid )
                 toTerminate.append( iid )
-                toPurge.append({ 'instanceId': iid, 'ssh': checkedInst['ssh'] })
+                if 'instanceId' not in checkedInst:
+                    checkedInst['instanceId'] = iid
+                toPurge.append( checkedInst )
                 coll.update_one( {'_id': iid}, { "$set": { 'reasonTerminated': state } } )
         logger.info( 'terminating %d instances', len( toTerminate ))
         terminated=terminateNcsScInstances( args.authToken, toTerminate )
