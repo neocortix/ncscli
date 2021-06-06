@@ -78,8 +78,8 @@ def executeCmdOnInstance( cmd, inst, timeLimit=60 ):
 
             with subprocess.Popen(['ssh', # '-t',
                                 '-p', str(sshSpecs['port']),
-                                '-o', 'ServerAliveInterval=360',
-                                '-o', 'ServerAliveCountMax=3',
+                                '-o', 'ServerAliveInterval=30',
+                                '-o', 'ServerAliveCountMax=6',
                                 sshSpecs['user'] + '@' + sshSpecs['host'], cmd],
                                 encoding='utf8',
                                 stdout=subprocess.PIPE,  # subprocess.PIPE subprocess.DEVNULL
