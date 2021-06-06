@@ -24,8 +24,14 @@ class binaryFrameProcessor(batchRunner.frameProcessor):
         return cmd
  
 if __name__ == "__main__":
-    # configure logger
-    logging.basicConfig()
+    # configure logger formatting
+    #logging.basicConfig()
+    logger = logging.getLogger(__name__)
+    logFmt = '%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s'
+    logDateFmt = '%Y/%m/%d %H:%M:%S'
+    formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
+    logging.basicConfig(format=logFmt, datefmt=logDateFmt)
+
     dateTimeTag = datetime.datetime.now().strftime( '%Y-%m-%d_%H%M%S' )
     outDataDirPath = 'data/binary_' + dateTimeTag
 
@@ -34,12 +40,12 @@ if __name__ == "__main__":
         commonInFilePath = binaryFrameProcessor.workerBinFilePath,
         filter = '{"cpu-arch": "aarch64", "dpr": ">=24"}',
         authToken = os.getenv('NCS_AUTH_TOKEN') or 'YourAuthTokenHere',
-        timeLimit = 1200,
+        timeLimit = 480,
         instTimeLimit = 120,
         frameTimeLimit = 120,
         outDataDir = outDataDirPath,
         encryptFiles = False,
         startFrame = 1,
-        endFrame = 3
+        endFrame = 6
     )
     sys.exit( rc )
