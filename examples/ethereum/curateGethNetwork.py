@@ -398,14 +398,14 @@ def launchEdgeNodes( dataDirPath, db, args ):
         logger.warning( 'no instances recruited' )
     return
 
-def saveErrorsByIid( errorsByIid, db ):
+def saveErrorsByIid( errorsByIid, db, operation=None ):
     checkedColl = db.checkedInstances
     errorsColl = db.instanceErrors
     checkedDateTime = datetime.datetime.now( datetime.timezone.utc )
     checkedDateTimeStr = checkedDateTime.isoformat()
 
     for iid, err in errorsByIid.items():
-        record = { 'instanceId': iid, 'checkedDateTime': checkedDateTimeStr }
+        record = { 'instanceId': iid, 'checkedDateTime': checkedDateTimeStr, 'operation': operation }
         if 'discrep' in err:
             discrep = err['discrep']
             logger.debug( 'updating clockOffset %.1f for inst %s', discrep, iid[0:8] )
@@ -423,7 +423,7 @@ def saveErrorsByIid( errorsByIid, db ):
                 errorsColl.insert_one( record )
             else:
                 checkedColl.update_one( {'_id': iid}, { "$inc": { "nFailures": 1 } } )
-                record.update({ 'status': 'error', 'returnCode': status, 'msg': str(err) })
+                record.update({ 'status': 'error', 'returnCode': status })
                 errorsColl.insert_one( record )
         else:
             logger.warning( 'checkInstanceClocks instance %s gave status (%s) "%s"', iid[0:8], type(err), err )
@@ -608,7 +608,7 @@ def ingestGethLog( logFile, coll ):
         if levelPart in ['INFO', 'WARN', 'ERROR']:
             lineLevel = levelPart
 
-        lineDateTime = None
+        #lineDateTime = None
         dateStr = re.search( datePat, line ).group(1)
         if dateStr:
             dateStr = dateStr.replace( '|', ' ' )
@@ -655,6 +655,8 @@ def processNodeLogFiles( dataDirPath ):
     # ingest all new or updated node logs
     loggedCollNames = db.list_collection_names(
         filter={ 'name': {'$regex': r'^nodeLog_.*'} } )
+    iStartTime = time.time()
+    nIngested = 0
     for logDir in logDirs:
         # logDir is also the instanceId
         inFilePath = os.path.join( logsDirPath, logDir, 'geth.log' )
@@ -678,6 +680,7 @@ def processNodeLogFiles( dataDirPath ):
             with open( inFilePath, 'r' ) as logFile:
                 # for safety, ingest to a temp collection and then rename (with replace) when done
                 ingestGethLog( logFile, db['nodeLog_temp'] )
+                nIngested += 1
                 try:
                     db['nodeLog_temp'].rename( collName, dropTarget=True )
                 except Exception as exc:
@@ -685,6 +688,7 @@ def processNodeLogFiles( dataDirPath ):
                 #logger.debug( 'ingested %s', collName )
         except Exception as exc:
             logger.warning( 'exception (%s) ingesting %s', type(exc), inFilePath, exc_info=False )
+    logger.info( 'ingesting %d logs took %.1f seconds', nIngested, time.time()-iStartTime)
 
 def checkEdgeNodes( dataDirPath, db, args ):
     '''checks status of edge nodes, updates database'''
@@ -733,7 +737,7 @@ def checkEdgeNodes( dataDirPath, db, args ):
         else:
             nFailures = 0
             reasonTerminated = None
-            coll.insert_one( {'_id': iid,
+            coll.insert_one( {'_id': iid, 'instanceId': iid,
                 'state': 'started',
                 'devId': inst.get('device-id'),
                 'launchedDateTime': launchedDateTimeStr,
@@ -748,7 +752,7 @@ def checkEdgeNodes( dataDirPath, db, args ):
             nFailures += 1
             reasonTerminated = 'foundDead'
         coll.update_one( {'_id': iid},
-            { "$set": { "state": state, 'nFailures': nFailures,
+            { "$set": { 'instanceId': iid, 'state': state, 'nFailures': nFailures,
                 'reasonTerminated': reasonTerminated,
                 'checkedDateTime': checkedDateTimeStr } },
             upsert=True
@@ -756,12 +760,12 @@ def checkEdgeNodes( dataDirPath, db, args ):
     checkables = [inst for inst in checkables if inst['instanceId'] in liveIidSet]
     logger.info( '%d instances checkable', len(checkables) )
     errorsByIid = checkInstanceClocks( liveInstances, dataDirPath )
-    saveErrorsByIid( errorsByIid, db )
+    saveErrorsByIid( errorsByIid, db, operation='checkInstanceClocks' )
 
     checkables = [inst for inst in checkables if inst['instanceId'] not in errorsByIid]
     logger.info( '%d instances checkable', len(checkables) )
     errorsByIid = checkGethProcesses( checkables, dataDirPath )
-    saveErrorsByIid( errorsByIid, db )
+    saveErrorsByIid( errorsByIid, db, operation='checkGethProcesses' )
 
     checkables = [inst for inst in checkables if inst['instanceId'] not in errorsByIid]
     logger.info( '%d instances checkable', len(checkables) )
