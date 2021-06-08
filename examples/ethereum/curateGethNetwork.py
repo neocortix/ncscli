@@ -51,7 +51,7 @@ class g_:
 
 def sigtermHandler( sig, frame ):
     g_.signaled = True
-    logger.warning( 'SIGTERM received; will try to shut down gracefully' )
+    logger.warning( 'SIGTERM received; graceful exit may take a few minutes' )
     #raise SigTerm()
 
 def sigtermSignaled():
@@ -300,10 +300,12 @@ def loadSshPubKey():
     return contents
 
 def lastGenDateTime( coll ):
+    '''return modification dateTime of a mongo collection, as a (hopefully) tz-aware datetime'''
     found = coll.find().sort([( '$natural', -1 )]).limit(1)
     if found:
         return found[0]['_id'].generation_time
     return None
+
 
 def getLiveInstances( startedIids, authToken ):
     '''query cloudserver to see which instances are still live'''
@@ -566,7 +568,7 @@ def checkLogs( liveInstances, dataDirPath ):
                     if dateStr:
                         dateStr = dateStr.replace( '|', ' ' )
                         latestSealDateTime = dateutil.parser.parse( dateStr )
-                        logger.info( 'latestSealDateTime: %s for %s', latestSealDateTime.isoformat(), iid[0:8] )
+                        logger.debug( 'latestSealDateTime: %s for %s', latestSealDateTime.isoformat(), iid[0:8] )
 
     logger.info( 'found errors for %d instance(s)', len(errorsByIid) )
     #print( 'errorsByIid', errorsByIid  )
@@ -579,19 +581,12 @@ def checkLogs( liveInstances, dataDirPath ):
                 )
         for iid in errorsByIid:
             lines = errorsByIid[iid]
-            logger.info( 'saving %d errors for %s', len(lines), iid[0:8])
+            logger.debug( 'saving %d errors for %s', len(lines), iid[0:8])
             for line in lines:
                 print( iid, line,
                     sep=',', file=csvOutFile
                 )
     return errorsByIid
-
-def lastGenDateTime( coll ):
-    '''return modification dateTime of a mongo collection, as a (hopefully) tz-aware datetime'''
-    found = coll.find().sort([( '$natural', -1 )]).limit(1)
-    if found:
-        return found[0]['_id'].generation_time
-    return None
 
 def ingestGethLog( logFile, coll ):
     '''ingest records from a geth node log into a mongo collection'''
@@ -609,7 +604,8 @@ def ingestGethLog( logFile, coll ):
             lineLevel = levelPart
 
         #lineDateTime = None
-        dateStr = re.search( datePat, line ).group(1)
+        dateMatch = re.search( datePat, line )
+        dateStr = dateMatch.group(1) if dateMatch else None
         if dateStr:
             dateStr = dateStr.replace( '|', ' ' )
             lineDateTime = dateutil.parser.parse( dateStr )
@@ -628,7 +624,7 @@ def processNodeLogFiles( dataDirPath ):
     '''ingest all new or updated node logs; delete very old log files'''
     logsDirPath = os.path.join( dataDirPath, 'nodeLogs' )
     logDirs = os.listdir( logsDirPath )
-    logger.info( '%d logDirs found', len(logDirs ) )
+    logger.debug( '%d logDirs found', len(logDirs ) )
     # but first, delete very old log files
     lookbackDays = 7
     thresholdDateTime = datetime.datetime.now( datetime.timezone.utc ) \
@@ -687,7 +683,7 @@ def processNodeLogFiles( dataDirPath ):
                     logger.warning( 'exception (%s) renaming temp collection %s', type(exc), exc, exc_info=False )
                 #logger.debug( 'ingested %s', collName )
         except Exception as exc:
-            logger.warning( 'exception (%s) ingesting %s', type(exc), inFilePath, exc_info=False )
+            logger.warning( 'exception (%s) ingesting %s', type(exc), inFilePath, exc_info=not False )
     logger.info( 'ingesting %d logs took %.1f seconds', nIngested, time.time()-iStartTime)
 
 def checkEdgeNodes( dataDirPath, db, args ):
@@ -770,26 +766,33 @@ def checkEdgeNodes( dataDirPath, db, args ):
     checkables = [inst for inst in checkables if inst['instanceId'] not in errorsByIid]
     logger.info( '%d instances checkable', len(checkables) )
 
-    nodeDataDirPath = 'ether/%s' % args.configName
-    errorsByIid = retrieveLogs( checkables, dataDirPath, nodeDataDirPath )
-    checkLogs( checkables, dataDirPath )
-    processNodeLogFiles( dataDirPath )
-
     # populate the primaryAccount field of any checked instances that lack it
-    checkables = [inst for inst in checkables if inst['instanceId'] not in errorsByIid]
+    errorsByIid = {}
     for inst in checkables:
         iid = inst['instanceId']
         instCheck = checkedByIid.get( iid )
         if not instCheck or 'primaryAccount' not in instCheck:
-            logger.debug( 'getting primary account of inst %s', iid[0:16])
+            logger.info( 'getting primary account of inst %s', iid[0:16])
             instanceAccountPairs = ncsgeth.collectPrimaryAccounts( [inst], args.configName )
             if not instanceAccountPairs:
-                logger.warning( 'no account found for inst %s', iid )
+                # this shouldn't happen, because you should at least get a status return
+                logger.error( 'no account info returned for inst %s', iid )
+            elif instanceAccountPairs[0].get('status'):
+                # an error (or exception) getting the account
+                errorsByIid[ iid ] = { 'instanceIid': iid, 
+                    'status': instanceAccountPairs[0].get('status') 
+                    }
             else:
                 accountAddr = instanceAccountPairs[0].get('accountAddr')
                 if accountAddr:
                     coll.update_one( {'_id': iid}, { "$set": { "primaryAccount": accountAddr } } )
+    logger.info( '(collectPrimaryAccounts) errorsByIid %s', errorsByIid )
+    saveErrorsByIid( errorsByIid, db, operation='collectPrimaryAccounts' )
 
+    nodeDataDirPath = 'ether/%s' % args.configName
+    errorsByIid = retrieveLogs( checkables, dataDirPath, nodeDataDirPath )
+    checkLogs( checkables, dataDirPath )
+    processNodeLogFiles( dataDirPath )
     return
 
 def collectSigners( db, configName ):
@@ -864,7 +867,7 @@ def authorizeSigner( db, configName, victimIid, shouldAuth ):
             return
         logger.debug ('victimInst: %s', victimInst )
         instanceAccountPairs = ncsgeth.collectPrimaryAccounts( [victimInst], configName )
-        if not instanceAccountPairs:
+        if not instanceAccountPairs or not instanceAccountPairs[0].get( 'accountAddr' ):
             logger.warning( 'no account found for inst %s', victimIid )
         victimAccount = instanceAccountPairs[0]['accountAddr']
 
@@ -950,7 +953,7 @@ if __name__ == "__main__":
         fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( 'action', help='the action to perform', 
         choices=['launch', 'authorizeGood', 'authorizeSigner', 'deauthorizeSigner',
-            'check', 'collectSigners', 'importAnchorNodes',
+            'check', 'collectSigners', 'importAnchorNodes', 'maintain',
             'terminateBad', 'terminateAll', 'reterminate']
         )
     ap.add_argument( '--authToken', help='the NCS authorization token to use (required for launch or terminate)' )
@@ -980,10 +983,11 @@ if __name__ == "__main__":
 
     dataDirPath = os.path.join( args.dataDir, args.farm )
     os.makedirs( dataDirPath, exist_ok=True )
-    
+
     mclient = pymongo.MongoClient(args.mongoHost, args.mongoPort)
     dbName = 'geth_' + args.farm
     db = mclient[dbName]
+
     if args.action == 'launch':
         launchEdgeNodes( dataDirPath, db, args )
     elif args.action in ['authorizeSigner', 'deauthorizeSigner' ]:
@@ -996,7 +1000,7 @@ if __name__ == "__main__":
         maxNewAuths = args.maxNewAuths
         if maxNewAuths <= 0:
             sys.exit()
-        authorizeGood( db, args.configName, maxNewAuths, trustedThresh=12 )
+        authorizeGood( db, args.configName, maxNewAuths, trustedThresh=48 )
     elif args.action == 'check':
         checkEdgeNodes( dataDirPath, db, args )
     elif args.action == 'collectSigners':
@@ -1004,6 +1008,37 @@ if __name__ == "__main__":
     elif args.action == 'importAnchorNodes':
         anchorNodesFilePath = os.path.join( dataDirPath, 'anchorInstances.json' )
         importAnchorNodes( anchorNodesFilePath, db, 'anchorInstances' )
+    elif args.action == 'maintain':
+        myPid = os.getpid()
+        logger.info( 'process id %d', myPid )
+        signal.signal( signal.SIGTERM, sigtermHandler )
+        actionFirst = args.action == sys.argv[1]
+        if not actionFirst:
+            logger.error( '"%s" was not specified as the first argument', args.action )
+            sys.exit(1)
+        if mclient:
+            mclient.close()
+        logger.info( 'argv: %s', sys.argv )
+        cmd = sys.argv.copy()
+        while sigtermNotSignaled():
+            cmd[1] = 'check'
+            logger.info( 'cmd: %s', cmd )
+            subprocess.check_call( cmd )
+            if sigtermNotSignaled():
+                cmd[1] = 'authorizeGood'
+                logger.info( 'cmd: %s', cmd )
+                subprocess.check_call( cmd )
+            if sigtermNotSignaled():
+                cmd[1] = 'terminateBad'
+                logger.info( 'cmd: %s', cmd )
+                subprocess.check_call( cmd )
+            if sigtermNotSignaled():
+                cmd[1] = 'launch'
+                logger.info( 'cmd: %s', cmd )
+                subprocess.check_call( cmd )
+            if sigtermNotSignaled():
+                time.sleep( 30 )
+
     elif args.action == 'terminateBad':
         if not args.authToken:
             sys.exit( 'error: can not terminate because no authToken was passed')
