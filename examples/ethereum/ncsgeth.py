@@ -206,17 +206,23 @@ def collectPrimaryAccounts( instances, configName ):
         iid = inst['instanceId']
         abbrevIid = iid[0:16]
         if result['returnCode'] != 0:
-            #logger.warning( 'got non-zero returnCode %s', result )
+            logger.warning( 'got non-zero returnCode %s', result )
+            instanceAccountPairs.append( {'instanceId': iid, 'accountAddr': None,
+                'status': result['returnCode']
+                })
             continue
         stdout = result['stdout']
         accts = json.loads( stdout )
         if len( accts ) != 1:
             logger.warning( 'instance %s has %d accounts', abbrevIid, len( accts ) )
         if not accts:
+            instanceAccountPairs.append( {'instanceId': iid, 'accountAddr': None,
+                'status': 99
+                })
             continue
         account = accts[0]
         logger.debug( '%s account: %s', abbrevIid, account )
-        instanceAccountPairs.append( {'instanceId': iid, 'accountAddr': account })
+        instanceAccountPairs.append( {'instanceId': iid, 'accountAddr': account, 'status': 0 })
     return instanceAccountPairs
 
 def collectSignerInstances( instances, configName, includeProposees=True ):
