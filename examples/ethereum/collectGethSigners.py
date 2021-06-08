@@ -90,7 +90,9 @@ if __name__ == "__main__":
 
         # get primary accounts from each instance
         instanceAccountPairs = ncsgeth.collectPrimaryAccounts( instances, args.configName )
-        instancesByAccount = {pair['accountAddr']: instancesByIid[pair['instanceId']] for pair in instanceAccountPairs }
+        instancesByAccount = {pair['accountAddr']: instancesByIid[pair['instanceId']]
+            for pair in instanceAccountPairs if pair.get( 'accountAddr' )
+            }
         logger.info( '%d instanceAccountPairs: %s', len(instanceAccountPairs), instanceAccountPairs)
 
         if allSigners:

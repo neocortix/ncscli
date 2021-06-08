@@ -421,7 +421,7 @@ if __name__ == "__main__":
             wasSigner = iid in savedSigners
             if not wasSigner:
                 results = ncsgeth.collectPrimaryAccounts( [inst], configName )
-                if results[0]:
+                if results[0] and results[0].get( 'accountAddr' ):
                     logger.info( '%d authorizers', len(authorizers) )
                     if not authorizers:
                         break

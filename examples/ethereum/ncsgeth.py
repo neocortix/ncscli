@@ -252,7 +252,9 @@ def collectSignerInstances( instances, configName, includeProposees=True ):
     instanceAccountPairs = collectPrimaryAccounts( instances, configName )
     if not instanceAccountPairs:
         return []
-    instancesByAccount = {pair['accountAddr']: instancesByIid[pair['instanceId']] for pair in instanceAccountPairs }
+    instancesByAccount = {pair['accountAddr']: instancesByIid[pair['instanceId']]
+        for pair in instanceAccountPairs if pair.get( 'accountAddr' )
+        }
 
     signerInfos = []
     for signerId in allSigners:

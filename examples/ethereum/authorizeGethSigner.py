@@ -200,7 +200,9 @@ if __name__ == "__main__":
 
         # get primary account from each instance
         instanceAccountPairs = ncsgeth.collectPrimaryAccounts( instances, configName )
-        instancesByAccount = {pair['accountAddr']: instancesByIid[pair['instanceId']] for pair in instanceAccountPairs }
+        instancesByAccount = {pair['accountAddr']: instancesByIid[pair['instanceId']]
+            for pair in instanceAccountPairs if pair.get( 'accountAddr' )
+            }
         accountsByIid = {pair['instanceId']: pair['accountAddr'] for pair in instanceAccountPairs }
         logger.info( '%d instanceAccountPairs: %s', len(instanceAccountPairs), instanceAccountPairs)
         #logger.info( 'instancesByAccount: %s', instancesByAccount )
