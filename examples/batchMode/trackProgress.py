@@ -160,7 +160,7 @@ if __name__ == "__main__":
                 if sleepy:
                     time.sleep( .033 )
                 phaseChange = False
-                if ' ERROR ' in line:
+                if ' ERROR ' in line or 'SyntaxError:' in line:
                     print( line.strip(), file=sys.stderr )
                 if 'runBatch args.outDataDir' in line:
                     outDataDir = line.split('args.outDataDir: ')[1].strip()
