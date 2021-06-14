@@ -80,6 +80,15 @@ def universalizeDateTime( dt ):
         return dt.astimezone(datetime.timezone.utc)
     return dt.replace( tzinfo=datetime.timezone.utc )
 
+def interpretDateTimeField( field ):
+    '''return utc datetime for a given datetime or a string parseable as a date/time'''
+    if isinstance( field, datetime.datetime ):
+        return universalizeDateTime( field )
+    elif isinstance( field, str ):
+        return universalizeDateTime( dateutil.parser.parse( field ) )
+    else:
+        raise TypeError( 'datetime or parseable string required' )
+
 
 def demuxResults( inFilePath ):
     '''deinterleave jlog items into separate lists for each instance'''
@@ -541,35 +550,37 @@ def checkLogs( liveInstances, dataDirPath ):
             sealed = False
             latestSealLine = None
             with open( logFilePath ) as logFile:
-                for line in logFile:
-                    line = line.rstrip()
-                    if not line:
-                        continue
-                    if 'ERROR' in line:
-                        if 'Ethereum peer removal failed' in line:
-                            logger.debug( 'ignoring "peer removal failed" for %s', iidAbbrev )
+                try:
+                    for line in logFile:
+                        line = line.rstrip()
+                        if not line:
                             continue
-                        logger.info( '%s: %s', iidAbbrev, line )
-                        theseErrors = errorsByIid.get( iid, [] )
-                        theseErrors.append( line )
-                        errorsByIid[iid] = theseErrors
-                    elif 'Started P2P networking' in line:
-                        connected = True
-                    elif 'Successfully sealed' in line:
-                        sealed = True
-                        latestSealLine = line
-                if not connected:
-                    logger.warning( 'instance %s did not initialize fully', iidAbbrev )
-                if sealed:
-                    #logger.info( 'instance %s has successfully sealed', iidAbbrev )
-                    logger.debug( '%s latestSealLine: %s', iidAbbrev, latestSealLine )
-                    pat = r'\[(.*\|.*)\]'
-                    dateStr = re.search( pat, latestSealLine ).group(1)
-                    if dateStr:
-                        dateStr = dateStr.replace( '|', ' ' )
-                        latestSealDateTime = dateutil.parser.parse( dateStr )
-                        logger.debug( 'latestSealDateTime: %s for %s', latestSealDateTime.isoformat(), iid[0:8] )
-
+                        if 'ERROR' in line:
+                            if 'Ethereum peer removal failed' in line:
+                                logger.debug( 'ignoring "peer removal failed" for %s', iidAbbrev )
+                                continue
+                            #logger.info( '%s: %s', iidAbbrev, line )
+                            theseErrors = errorsByIid.get( iid, [] )
+                            theseErrors.append( line )
+                            errorsByIid[iid] = theseErrors
+                        elif 'Started P2P networking' in line:
+                            connected = True
+                        elif 'Successfully sealed' in line:
+                            sealed = True
+                            latestSealLine = line
+                    if not connected:
+                        logger.warning( 'instance %s did not initialize fully', iidAbbrev )
+                    if sealed:
+                        #logger.info( 'instance %s has successfully sealed', iidAbbrev )
+                        logger.debug( '%s latestSealLine: %s', iidAbbrev, latestSealLine )
+                        pat = r'\[(.*\|.*)\]'
+                        dateStr = re.search( pat, latestSealLine ).group(1)
+                        if dateStr:
+                            dateStr = dateStr.replace( '|', ' ' )
+                            latestSealDateTime = dateutil.parser.parse( dateStr )
+                            logger.debug( 'latestSealDateTime: %s for %s', latestSealDateTime.isoformat(), iid[0:8] )
+                except Exception as exc:
+                    logger.warning( 'caught exception (%s) %s', type(exc), exc )
     logger.info( 'found errors for %d instance(s)', len(errorsByIid) )
     #print( 'errorsByIid', errorsByIid  )
     summaryCsvFilePath = os.path.join( dataDirPath, 'errorSummary.csv' )
@@ -587,6 +598,77 @@ def checkLogs( liveInstances, dataDirPath ):
                     sep=',', file=csvOutFile
                 )
     return errorsByIid
+
+def collectGethLogEntries( db, inFilePath, collName ):
+    '''ingest records from a geth node log into a new or existing mongo collection'''
+    collection = db[ collName ]
+    nPreexisting = collection.count_documents( {} )
+    logger.debug( '%d preexisting records in %s', nPreexisting, collName )
+
+    lastExistingDateTime = None
+    lastExisting = {}
+    latestMsgs = []
+    if nPreexisting > 0:
+        # get the record with the latset dateTime
+        cursor = collection.find().sort('dateTime', -1).limit(1)
+        lastExisting = cursor[0]
+        lastExistingDateTime = interpretDateTimeField( lastExisting['dateTime'] )
+    if not lastExistingDateTime:
+        lastExistingDateTime = datetime.datetime.fromtimestamp( 0, datetime.timezone.utc )
+    logger.debug( 'lastExistingDateTime: %s', lastExistingDateTime )
+    logger.debug( 'lastExisting: %s', lastExisting )
+
+    if lastExisting:
+        found = collection.find({ 'dateTime': lastExisting['dateTime'] })
+        allLatest = list( found )
+        latestMsgs = [rec['msg'] for rec in allLatest]
+        if len( allLatest ) > 1:
+            logger.info( '%d records match latest dateTime in %s', len(allLatest), collName )
+            logger.debug( 'latestMsgs: %s', latestMsgs )
+    datePat = r'\[(.*\|.*)\]'
+    lineDateTime = datetime.datetime.fromtimestamp( 0, datetime.timezone.utc )
+    lineLevel = None
+    recs = []
+
+    with open( inFilePath, 'r' ) as logFile:
+        try:
+            for line in logFile:
+                line = line.rstrip()
+                if not line:
+                    continue
+                levelPart = line.split()[0]
+                if levelPart in ['INFO', 'WARN', 'ERROR']:
+                    lineLevel = levelPart
+        
+                #lineDateTime = None
+                dateMatch = re.search( datePat, line )
+                dateStr = dateMatch.group(1) if dateMatch else None
+                if dateStr:
+                    dateStr = dateStr.replace( '|', ' ' )
+                    lineDateTime = universalizeDateTime( dateutil.parser.parse( dateStr ) )
+                if lineDateTime < lastExistingDateTime:
+                    #logger.info( 'skipping old' )
+                    continue
+                msg = line
+                if lineDateTime == lastExistingDateTime and msg in latestMsgs:
+                    logger.debug( 'skipping dup' )
+                    continue
+                #logger.info( 'appending: %s', msg[26:56])
+                recs.append({
+                    'dateTime': lineDateTime.isoformat(),
+                    'level': lineLevel,
+                    'msg': msg,
+                    })
+                #logger.info( 'rec: %s', recs[-1] )
+        except Exception as exc:
+            logger.warning( 'exception (%s) %s', type(exc), exc )
+        if len(recs):
+            #startTime = time.time()
+            collection.insert_many( recs, ordered=True )
+            #logger.info( 'inserted %d records in %.1f seconds', len(recs), time.time()-startTime )
+            if not nPreexisting:
+                collection.create_index( 'dateTime' )
+                collection.create_index( 'level' )
 
 def ingestGethLog( logFile, coll ):
     '''ingest records from a geth node log into a mongo collection'''
@@ -673,6 +755,9 @@ def processNodeLogFiles( dataDirPath ):
                 continue
         logger.debug( 'ingesting log for %s', logDir[0:16] )
         try:
+            collectGethLogEntries( db, inFilePath, collName )
+            nIngested += 1
+            '''
             with open( inFilePath, 'r' ) as logFile:
                 # for safety, ingest to a temp collection and then rename (with replace) when done
                 ingestGethLog( logFile, db['nodeLog_temp'] )
@@ -682,6 +767,7 @@ def processNodeLogFiles( dataDirPath ):
                 except Exception as exc:
                     logger.warning( 'exception (%s) renaming temp collection %s', type(exc), exc, exc_info=False )
                 #logger.debug( 'ingested %s', collName )
+            '''
         except Exception as exc:
             logger.warning( 'exception (%s) ingesting %s', type(exc), inFilePath, exc_info=not False )
     logger.info( 'ingesting %d logs took %.1f seconds', nIngested, time.time()-iStartTime)
@@ -791,7 +877,7 @@ def checkEdgeNodes( dataDirPath, db, args ):
 
     nodeDataDirPath = 'ether/%s' % args.configName
     errorsByIid = retrieveLogs( checkables, dataDirPath, nodeDataDirPath )
-    checkLogs( checkables, dataDirPath )
+    #checkLogs( checkables, dataDirPath )
     processNodeLogFiles( dataDirPath )
     return
 
@@ -840,7 +926,7 @@ def authorizeSigner( db, configName, victimIid, shouldAuth ):
     allSigners = list( db['allSigners'].find() )
     logger.info( 'len(allSigners): %d', len(allSigners) )
     signersByIid = {signer['instanceId']: signer for signer in allSigners }
-    logger.info( 'signer iids: %s', signersByIid.keys() )
+    logger.debug( 'signer iids: %s', signersByIid.keys() )
 
     wasAuth = (victimIid in signersByIid) and signersByIid[victimIid].get('auth)')
     if wasAuth == shouldAuth:
@@ -868,7 +954,8 @@ def authorizeSigner( db, configName, victimIid, shouldAuth ):
         logger.debug ('victimInst: %s', victimInst )
         instanceAccountPairs = ncsgeth.collectPrimaryAccounts( [victimInst], configName )
         if not instanceAccountPairs or not instanceAccountPairs[0].get( 'accountAddr' ):
-            logger.warning( 'no account found for inst %s', victimIid )
+            logger.error( 'NOT authorizing, no account found for inst %s', victimIid )
+            return
         victimAccount = instanceAccountPairs[0]['accountAddr']
 
     authorizers = [inst for inst in instances if inst['instanceId'] in signersByIid ]
@@ -886,7 +973,7 @@ def authorizeSigner( db, configName, victimIid, shouldAuth ):
         logger.info( 'minerResults: %s', minerResults )
 
     authResults = ncsgeth.authorizeSigner( authorizers, configName, victimAccount, shouldAuth )
-    logger.info( 'authResults: %s', authResults )
+    logger.debug( 'authResults: %s', authResults )
     anySucceeded = False
     for result in authResults:
         if 'returnCode' in result and result['returnCode'] == 0:
@@ -916,10 +1003,10 @@ def authorizeGood( db, configName, maxNewAuths, trustedThresh ):
         if nNewAuths >= maxNewAuths:
             break
         iid = inst['_id']
-        logger.info( 'considering instance %s', iid )
+        logger.debug( 'considering instance %s', iid )
         signerInfo = signersByIid.get(iid)
         if signerInfo and signerInfo.get( 'auth' ):
-            logger.info( 'already authorized, account %s', signerInfo.get('accountAddr') )
+            logger.debug( 'already authorized, account %s', signerInfo.get('accountAddr') )
             continue
         launchedDateTime = dateutil.parser.parse( inst['launchedDateTime'] )
         checkedDateTime = dateutil.parser.parse( inst['checkedDateTime'] )
@@ -1000,7 +1087,7 @@ if __name__ == "__main__":
         maxNewAuths = args.maxNewAuths
         if maxNewAuths <= 0:
             sys.exit()
-        authorizeGood( db, args.configName, maxNewAuths, trustedThresh=48 )
+        authorizeGood( db, args.configName, maxNewAuths, trustedThresh=24 )
     elif args.action == 'check':
         checkEdgeNodes( dataDirPath, db, args )
     elif args.action == 'collectSigners':
@@ -1059,6 +1146,7 @@ if __name__ == "__main__":
             if state in ['failed', 'excepted', 'stopped' ]:
                 iid = checkedInst['_id']
                 if iid in signersByIid:
+                    logger.info( 'terminateBad deauthorizing %s', iid )
                     authorizeSigner( db, args.configName, iid, False )
                 abbrevIid = iid[0:16]
                 logger.warning( 'would terminate %s', abbrevIid )
