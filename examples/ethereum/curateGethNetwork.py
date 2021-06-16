@@ -512,7 +512,7 @@ def retrieveLogs( goodInstances, dataDirPath, farmDirPath ):
     '''retrieve logs from nodes, storing them in dataDirPath/nodeLogs subdirectories'''
     logger.info( 'retrieving logs for %d instance(s)', len(goodInstances) )
 
-    nodeLogFilePath = farmDirPath + '/geth.log'
+    nodeLogFilePath = farmDirPath + '/geth.*log'
 
     # download the log file from each instance
     stepStatuses = tellInstances.tellInstances( goodInstances,
@@ -702,6 +702,63 @@ def ingestGethLog( logFile, coll ):
         coll.create_index( 'dateTime' )
         coll.create_index( 'level' )
 
+def collectGethJLogEntries( db, inFilePath, collName ):
+    collection = db[ collName ]
+    nPreexisting = collection.count_documents( {} )
+    logger.info( '%d preexisting records in %s', nPreexisting, collName )
+
+    lastExistingDateStr = None
+    lastExisting = {}
+    latestMsgs = []
+    if nPreexisting > 0:
+        # get the record with the latset dateTime
+        cursor = collection.find().sort('dateTime', -1).limit(1)
+        lastExisting = cursor[0]
+        lastExistingDateStr = lastExisting['dateTime']
+    if not lastExistingDateStr:
+        lastExistingDateStr = datetime.datetime.fromtimestamp( 0, datetime.timezone.utc ).isoformat()
+    logger.debug( 'lastExistingDateStr: %s', lastExistingDateStr )
+    logger.debug( 'lastExisting: %s', lastExisting )
+
+    if lastExisting:
+        found = collection.find({ 'dateTime': lastExisting['dateTime'] })
+        allLatest = list( found )
+        latestMsgs = [rec['msg'] for rec in allLatest]
+        if len( allLatest ) > 1:
+            logger.info( '%d records match latest dateTime', len(allLatest) )
+            logger.info( 'latestMsgs: %s', latestMsgs )
+    recs = []
+
+    with open( inFilePath, 'r' ) as logFile:
+        for line in logFile:
+            line = line.rstrip()
+            if not line:
+                continue
+            try:
+                rec = json.loads( line )
+                rec['level'] = rec.pop( 'lvl' ).upper()
+                rec['dateTime'] = rec.pop( 't' ).upper()
+                
+                lineDateStr = rec['dateTime']
+                if lineDateStr < lastExistingDateStr:
+                    #logger.info( 'skipping old' )
+                    continue
+                msg = rec['msg']
+                if lineDateStr == lastExistingDateStr and msg in latestMsgs:
+                    logger.info( 'skipping dup' )
+                    continue
+                
+                recs.append( rec )
+            except Exception as exc:
+                logger.warning( 'could not parse json (%s) %s', type(exc), exc )
+                continue
+        if len(recs):
+            logger.info( 'inserting %d records', len(recs) )
+            collection.insert_many( recs, ordered=True )
+            if not nPreexisting:
+                collection.create_index( 'dateTime' )
+                collection.create_index( 'level' )
+
 def processNodeLogFiles( dataDirPath ):
     '''ingest all new or updated node logs; delete very old log files'''
     logsDirPath = os.path.join( dataDirPath, 'nodeLogs' )
@@ -716,7 +773,9 @@ def processNodeLogFiles( dataDirPath ):
     #    - datetime.timedelta( hours=lookBackHours )
 
     for logDir in logDirs:
-        inFilePath = os.path.join( logsDirPath, logDir, 'geth.log' )
+        inFilePath = os.path.join( logsDirPath, logDir, 'geth.jlog' )
+        if not os.path.isfile( inFilePath ):
+            inFilePath = os.path.join( logsDirPath, logDir, 'geth.log' )
         if os.path.isfile( inFilePath ):
             fileModDateTime = datetime.datetime.fromtimestamp( os.path.getmtime( inFilePath ) )
             fileModDateTime = universalizeDateTime( fileModDateTime )
@@ -737,7 +796,10 @@ def processNodeLogFiles( dataDirPath ):
     nIngested = 0
     for logDir in logDirs:
         # logDir is also the instanceId
-        inFilePath = os.path.join( logsDirPath, logDir, 'geth.log' )
+        # read geth.jlog, if present, otherwise geth.log
+        inFilePath = os.path.join( logsDirPath, logDir, 'geth.jlog' )
+        if not os.path.isfile( inFilePath ):
+            inFilePath = os.path.join( logsDirPath, logDir, 'geth.log' )
         if not os.path.isfile( inFilePath ):
             logger.info( 'no file "%s"', inFilePath )
             continue
@@ -746,7 +808,7 @@ def processNodeLogFiles( dataDirPath ):
             continue
         collName = 'nodeLog_' + logDir
         if collName in loggedCollNames:
-            existingGenTime = lastGenDateTime( db[collName] ) - datetime.timedelta(hours=1)
+            existingGenTime = lastGenDateTime( db[collName] ) - datetime.timedelta(minutes=5)
             fileModDateTime = datetime.datetime.fromtimestamp( os.path.getmtime( inFilePath ) )
             fileModDateTime = universalizeDateTime( fileModDateTime )
             if existingGenTime >= fileModDateTime:
@@ -755,19 +817,11 @@ def processNodeLogFiles( dataDirPath ):
                 continue
         logger.debug( 'ingesting log for %s', logDir[0:16] )
         try:
-            collectGethLogEntries( db, inFilePath, collName )
+            if inFilePath.endswith( '.jlog' ):
+                collectGethJLogEntries( db, inFilePath, collName )
+            else:
+                collectGethLogEntries( db, inFilePath, collName )
             nIngested += 1
-            '''
-            with open( inFilePath, 'r' ) as logFile:
-                # for safety, ingest to a temp collection and then rename (with replace) when done
-                ingestGethLog( logFile, db['nodeLog_temp'] )
-                nIngested += 1
-                try:
-                    db['nodeLog_temp'].rename( collName, dropTarget=True )
-                except Exception as exc:
-                    logger.warning( 'exception (%s) renaming temp collection %s', type(exc), exc, exc_info=False )
-                #logger.debug( 'ingested %s', collName )
-            '''
         except Exception as exc:
             logger.warning( 'exception (%s) ingesting %s', type(exc), inFilePath, exc_info=not False )
     logger.info( 'ingesting %d logs took %.1f seconds', nIngested, time.time()-iStartTime)
@@ -1087,7 +1141,7 @@ if __name__ == "__main__":
         maxNewAuths = args.maxNewAuths
         if maxNewAuths <= 0:
             sys.exit()
-        authorizeGood( db, args.configName, maxNewAuths, trustedThresh=24 )
+        authorizeGood( db, args.configName, maxNewAuths, trustedThresh=18 )
     elif args.action == 'check':
         checkEdgeNodes( dataDirPath, db, args )
     elif args.action == 'collectSigners':
@@ -1120,9 +1174,10 @@ if __name__ == "__main__":
                 logger.info( 'cmd: %s', cmd )
                 subprocess.check_call( cmd )
             if sigtermNotSignaled():
-                cmd[1] = 'launch'
-                logger.info( 'cmd: %s', cmd )
-                subprocess.check_call( cmd )
+                if args.target > 0:
+                    cmd[1] = 'launch'
+                    logger.info( 'cmd: %s', cmd )
+                    subprocess.check_call( cmd )
             if sigtermNotSignaled():
                 time.sleep( 30 )
 
