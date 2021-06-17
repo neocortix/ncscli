@@ -8,17 +8,19 @@ import sys
 import ncscli.batchRunner as batchRunner
 
 
-jmeterVersion = '5.4.1'  # 5.3 and 5.4.1 have been tested, others may work as well
-
 class JMeterFrameProcessor(batchRunner.frameProcessor):
     '''defines details for using JMeter for a simplistic load test'''
 
     def installerCmd( self ):
+        return '/opt/apache-jmeter/bin/jmeter.sh --version'
+        # could install an alternative version of jmeter, if the preinstalled version is not wanted
+        '''
+        jmeterVersion = '5.4.1'  # 5.3 and 5.4.1 have been tested, others may work as well
         cmd = 'curl -s -S -L https://mirrors.sonic.net/apache/jmeter/binaries/apache-jmeter-%s.tgz > apache-jmeter.tgz' % jmeterVersion
         cmd += ' && tar zxf apache-jmeter.tgz'
         return cmd
         # alternatively, could use https://mirror.olnevhost.net/pub/apache/... or https://downloads.apache.org/...
-
+        '''
     JMeterFilePath = 'TestPlan.jmx'
     #JMeterFilePath = 'TestPlan_RampLong.jmx'
     #JMeterFilePath = 'TestPlan_RampLong_MoreSlow.jmx'
@@ -28,8 +30,8 @@ class JMeterFrameProcessor(batchRunner.frameProcessor):
         return 'TestPlan_results_%03d.csv' % frameNum
 
     def frameCmd( self, frameNum ):
-        cmd = 'date && apache-jmeter-%s/bin/jmeter -n -t %s -l TestPlan_results_%03d.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true' % (
-            jmeterVersion, self.JMeterFilePath, frameNum
+        cmd = '/opt/apache-jmeter/bin/jmeter.sh -n -t %s -l TestPlan_results_%03d.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true' % (
+            self.JMeterFilePath, frameNum
         )
         return cmd
 
@@ -53,8 +55,8 @@ try:
         authToken = os.getenv( 'NCS_AUTH_TOKEN' ) or 'YourAuthTokenHere',
         encryptFiles=False,
         timeLimit = 80*60,
-        instTimeLimit = 12*60,
-        frameTimeLimit = 11*60,
+        instTimeLimit = 6*60,
+        frameTimeLimit = 13*60,
         filter = '{"dpr": ">=48","ram:":">=2800000000","app-version": ">=2.1.11"}',
         outDataDir = outDataDir,
         startFrame = 1,
