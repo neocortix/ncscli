@@ -852,7 +852,8 @@ def renderFramesOnInstance( inst ):
                             saveProgress()
                         if ((deadline - time.time() < timeLimit/2)) and frameProgress < .5:
                             #logger.warning( 'frame %d on %s seems slow', frameNum, abbrevIid )
-                            logFrameState( frameNum, 'seemsSlow', iid, frameProgress )
+                            #logFrameState( frameNum, 'seemsSlow', iid, frameProgress )
+                            pass
                     else:
                         if proc.returncode == 0:
                             logger.info( 'frame %d on %s succeeded', frameNum, abbrevIid )
