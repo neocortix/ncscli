@@ -17,6 +17,15 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
+def boolArg( v ):
+    '''use with ArgumentParser add_argument for (case-insensitive) boolean arg'''
+    if v.lower() == 'true':
+        return True
+    elif v.lower() == 'false':
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 def extractFrameInfo( inFilePath ):
     '''extract frame numbers and instance ids from a batchRunner jlog file''' 
     instanceList = []
@@ -54,6 +63,7 @@ if __name__ == "__main__":
     formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
     logging.basicConfig(format=logFmt, datefmt=logDateFmt)
     logging.captureWarnings(True)
+    #logger.setLevel(logging.DEBUG)  # for more verbosity
 
     ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( '--dataDirPath', required=True, help='the path to to directory for input and output data' )
@@ -61,6 +71,7 @@ if __name__ == "__main__":
     ap.add_argument( '--mergedCsv', default='workers_merged.csv', help='file name for merged results csv file' )
     ap.add_argument( '--tsField', default='timeStamp', help='the name of the time stamp field in incoming csv files' )
     ap.add_argument( '--timeDiv', type=float, default=1000, help='timeStamp divisor (1000 for incoming ms; 1 for incoming seconds)' )
+    ap.add_argument( '--augment', type=boolArg, help='pass True if you want additional columns' )
     args = ap.parse_args()
 
     logger.info( 'merging data in directory %s', os.path.realpath(args.dataDirPath)  )
@@ -84,11 +95,11 @@ if __name__ == "__main__":
     instancesByIid = { inst['instanceId']: inst for inst in launchedInstances }
 
     completedFrames = extractFrameInfo(jlogFilePath)
-    logger.info( 'found %d frames', len(completedFrames) )
+    logger.debug( 'found %d frames', len(completedFrames) )
     iidByFrame = { frame['frameNum']: frame['instanceId'] for frame in completedFrames }
     logger.debug( 'iidByFrame: %s', iidByFrame )
 
-    extraFields = ['relTime', 'instanceId']
+    extraFields = ['relTime', 'instanceId'] if args.augment else []
     outFilePath = outputDir + '/' + mergedCsvFileName
     totRowsRead = 0
     with open( outFilePath, 'w', newline='') as outfile:
@@ -102,13 +113,13 @@ if __name__ == "__main__":
             if not rows:
                 logger.info( 'no rows in %s', inFilePath )
                 continue
-            logger.info( 'read %d rows from %s', len(rows), inFilePath )
+            logger.debug( 'read %d rows from %s', len(rows), inFilePath )
             totRowsRead += len(rows)
             timeStamps = [float(row[args.tsField]) for row in rows]
             minTimeStamp = min(timeStamps)
             if not fieldNames:
                 fieldNames = list( rows[0].keys() ) + extraFields
-                logger.info( 'columns:  %s', fieldNames )
+                logger.debug( 'columns:  %s', fieldNames )
             if not writer:
                 if not fieldNames:
                     logger.warning( 'no fieldNames')
@@ -117,8 +128,9 @@ if __name__ == "__main__":
                 writer.writeheader()
             for row in rows:
                 outRow = row
-                relTime = (float(row['timeStamp'])-minTimeStamp) / tsDivisor
-                outRow['relTime'] = round( relTime, 4 )
-                outRow['instanceId'] = iid
+                if args.augment:
+                    relTime = (float(row[args.tsField])-minTimeStamp) / tsDivisor
+                    outRow['relTime'] = round( relTime, 4 )
+                    outRow['instanceId'] = iid
                 writer.writerow( outRow )
-    logger.info( 'totRowsRead: %d', totRowsRead )
+    logger.debug( 'totRowsRead: %d', totRowsRead )
