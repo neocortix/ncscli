@@ -279,8 +279,20 @@ if __name__ == "__main__":
             labels.append(fields[j][2])
     reducedLabels = list(np.unique(labels))
     print("\nreducedLabels = %s \n" % reducedLabels)
+    numberedReducedLabels = []
+    for i in range(0,len(reducedLabels)):
+        # look for two numbers followed by "_"
+        conditionFound = False
+        for j in range(0,len(reducedLabels[i])-2):
+            if reducedLabels[i][j:j+2].isnumeric() and reducedLabels[i][j+2]=="_":
+                conditionFound = True
+        # if reducedLabels[i][2]=="_" and reducedLabels[i][0:2].isnumeric():
+        if conditionFound:
+            numberedReducedLabels.append(reducedLabels[i])
+    print("numberedReducedLabels = %s \n" % numberedReducedLabels)
 
     # read the result .csv files
+    # first try the JPetStore way, looking for fields[j][6] != "text"
     responseData = []
     for i in range(0,numResultFiles):
         inFilePath = outputDir + "/" + resultFileNames[i]
@@ -300,29 +312,108 @@ if __name__ == "__main__":
         startTimes = []
         elapsedTimes = []
         labels = []
+        startTimesNumberedReduced = []
+        elapsedTimesNumberedReduced = []
+        labelsNumberedReduced = []
         startTimesAllCodes = []
+        labelsAllCodes = []
         codes = []
+        threads = []
+        receivedBytes = []
+        sentBytes = []
+        receivedBytesNumberedReduced = []
+        sentBytesNumberedReduced = []
         for j in range(0,len(fields)):
             if len(fields[j]) <= 3:
                 logger.info( 'fields[j]: %s from %s', fields[j], resultFileNames[i] )
-            if (len(fields[j]) > 3) and (fields[j][2] in reducedLabels) and fields[j][3] == "200":
+            if (len(fields[j]) > 3) and (fields[j][2] in reducedLabels) and fields[j][3] == "200" and fields[j][6] != "text":
             # if (fields[j][2] == "HTTP Request" or fields[j][2] == "GetWorkload" or fields[j][2] == "GetStarttime" or fields[j][2] == "GetDistribution")  and fields[j][3] == "200":
                 startTimes.append(int(fields[j][0])/1000.0)
                 elapsedTimes.append(int(fields[j][1])/1000.0)         
                 labels.append(fields[j][2])         
+                threads.append(int(fields[j][12]))
+                receivedBytes.append(int(fields[j][9]))
+                sentBytes.append(int(fields[j][10]))
+                if fields[j][2] in numberedReducedLabels:
+                    startTimesNumberedReduced.append(int(fields[j][0])/1000.0)
+                    elapsedTimesNumberedReduced.append(int(fields[j][1])/1000.0)
+                    labelsNumberedReduced.append(fields[j][2])         
+                    receivedBytesNumberedReduced.append(int(fields[j][9]))
+                    sentBytesNumberedReduced.append(int(fields[j][10]))
             if (len(fields[j]) > 3) and (fields[j][2] in reducedLabels):
                 startTimesAllCodes.append(int(fields[j][0])/1000.0)
                 truncatedResponseCode = fields[j][3]
                 if not truncatedResponseCode.isdigit():
                     truncatedResponseCode = 599
                 codes.append(int(truncatedResponseCode))
+                labelsAllCodes.append(fields[j][2])
         if startTimes:
             minStartTimeForDevice = min(startTimes)
             jIndex = -1
             for j in range (0,len(mappedFrameNumLocation)):
                 if frameNum == mappedFrameNumLocation[j][0]:
                     jIndex = j
-            responseData.append([frameNum,minStartTimeForDevice,startTimes,elapsedTimes,mappedFrameNumLocation[jIndex],labels,startTimesAllCodes,codes])
+            responseData.append([frameNum,minStartTimeForDevice,startTimes,elapsedTimes,mappedFrameNumLocation[jIndex],labels,startTimesAllCodes,codes,startTimesNumberedReduced,elapsedTimesNumberedReduced,labelsNumberedReduced,labelsAllCodes,threads,receivedBytes,sentBytes,receivedBytesNumberedReduced,sentBytesNumberedReduced])
+
+    if not responseData:
+
+        # now try the simple way (original runBatchJMeter demos), 
+        #    looking for fields[j][6] == "text"
+        responseData = []
+        for i in range(0,numResultFiles):
+            inFilePath = outputDir + "/" + resultFileNames[i]
+            fields = getFieldsFromFileNameCSV3(inFilePath) 
+            if not fields:
+                logger.info( 'no fields in %s', inFilePath )
+                continue
+            frameNum = int(resultFileNames[i].lstrip("TestPlan_results_").rstrip(".csv"))
+            startTimes = []
+            elapsedTimes = []
+            labels = []
+            startTimesNumberedReduced = []
+            elapsedTimesNumberedReduced = []
+            labelsNumberedReduced = []
+            startTimesAllCodes = []
+            labelsAllCodes = []
+            codes = []
+            threads = []
+            receivedBytes = []
+            sentBytes = []
+            receivedBytesNumberedReduced = []
+            sentBytesNumberedReduced = []
+            for j in range(0,len(fields)):
+                if len(fields[j]) <= 3:
+                    logger.info( 'fields[j]: %s from %s', fields[j], resultFileNames[i] )
+                if (len(fields[j]) > 3) and (fields[j][2] in reducedLabels) and fields[j][3] == "200" and fields[j][6] == "text":
+                # if (fields[j][2] == "HTTP Request" or fields[j][2] == "GetWorkload" or fields[j][2] == "GetStarttime" or fields[j][2] == "GetDistribution")  and fields[j][3] == "200":
+                    startTimes.append(int(fields[j][0])/1000.0)
+                    elapsedTimes.append(int(fields[j][1])/1000.0)         
+                    labels.append(fields[j][2])         
+                    threads.append(int(fields[j][12]))
+                    receivedBytes.append(int(fields[j][9]))
+                    sentBytes.append(int(fields[j][10]))
+                    if fields[j][2] in numberedReducedLabels:
+                        startTimesNumberedReduced.append(int(fields[j][0])/1000.0)
+                        elapsedTimesNumberedReduced.append(int(fields[j][1])/1000.0)
+                        labelsNumberedReduced.append(fields[j][2])         
+                        receivedBytesNumberedReduced.append(int(fields[j][9]))
+                        sentBytesNumberedReduced.append(int(fields[j][10]))
+                if (len(fields[j]) > 3) and (fields[j][2] in reducedLabels):
+                    startTimesAllCodes.append(int(fields[j][0])/1000.0)
+                    truncatedResponseCode = fields[j][3]
+                    if not truncatedResponseCode.isdigit():
+                        truncatedResponseCode = 599
+                    codes.append(int(truncatedResponseCode))
+                    labelsAllCodes.append(fields[j][2])
+            if startTimes:
+                minStartTimeForDevice = min(startTimes)
+                jIndex = -1
+                for j in range (0,len(mappedFrameNumLocation)):
+                    if frameNum == mappedFrameNumLocation[j][0]:
+                        jIndex = j
+                responseData.append([frameNum,minStartTimeForDevice,startTimes,elapsedTimes,mappedFrameNumLocation[jIndex],labels,startTimesAllCodes,codes,startTimesNumberedReduced,elapsedTimesNumberedReduced,labelsNumberedReduced,labelsAllCodes,threads,receivedBytes,sentBytes,receivedBytesNumberedReduced,sentBytesNumberedReduced])
+
+
     if not responseData:
         sys.exit( 'no plottable data was found' )
 
@@ -332,6 +423,7 @@ if __name__ == "__main__":
     for i in range(0,len(responseData)):
         relativeStartTimes = []
         relativeStartTimesAllCodes = []
+        relativeStartTimesNumberedReduced = []
         for ii in range(0,len(responseData[i][2])):
             # difference = responseData[i][2][ii]-globalMinStartTime
             # if i==2 and ii<3700 and difference > 500:
@@ -340,8 +432,10 @@ if __name__ == "__main__":
             relativeStartTimes.append(responseData[i][2][ii]-responseData[i][1])
         for ii in range(0,len(responseData[i][6])):
             relativeStartTimesAllCodes.append(responseData[i][6][ii]-responseData[i][1])
+        for ii in range(0,len(responseData[i][8])):
+            relativeStartTimesNumberedReduced.append(responseData[i][8][ii]-responseData[i][1])
         maxStartTime = max(relativeStartTimes)
-        relativeResponseData.append([responseData[i][0],relativeStartTimes,responseData[i][3],responseData[i][4],maxStartTime,responseData[i][5],relativeStartTimesAllCodes,responseData[i][7]])
+        relativeResponseData.append([responseData[i][0],relativeStartTimes,responseData[i][3],responseData[i][4],maxStartTime,responseData[i][5],relativeStartTimesAllCodes,responseData[i][7],relativeStartTimesNumberedReduced,responseData[i][9],responseData[i][10],responseData[i][11],responseData[i][12],responseData[i][13],responseData[i][14],responseData[i][15],responseData[i][16]])
 
     # compute median maxStartTime
     medianMaxStartTime = np.median(getColumn(relativeResponseData,4))
@@ -360,6 +454,73 @@ if __name__ == "__main__":
                 culledRelativeResponseData.append(relativeResponseData[i])
         else:
             culledRelativeResponseData.append(relativeResponseData[i])
+
+    # compute maximum number of threads
+    maxThreads = 0
+    for i in range(0,len(culledRelativeResponseData)):
+        maxThreads += max(culledRelativeResponseData[i][12])
+    print("maxThreads = %d" % maxThreads)
+
+    # compute differential record of threadCounts for each instance
+    # then interleave the threadCount records to make the plot
+    differentialThreads = [[] for i in range(0,len(culledRelativeResponseData))]
+    for i in range(0,len(culledRelativeResponseData)):
+        lastThreadCount = 0
+        for j in range(0,len(culledRelativeResponseData[i][12])):
+            if culledRelativeResponseData[i][12][j] != lastThreadCount:
+                diff = culledRelativeResponseData[i][12][j] - lastThreadCount
+                differentialThreads[i].append([culledRelativeResponseData[i][1][j], diff])
+                lastThreadCount = culledRelativeResponseData[i][12][j] 
+
+    differentialThreadsFlattened = flattenList(differentialThreads)
+    differentialThreadsSorted = sorted(differentialThreadsFlattened,key=lambda tup: tup[0])
+    differentialThreadsIntegrated = []
+    lastVal = 0
+    for i in range(0,len(differentialThreadsSorted)):
+        newVal = lastVal + differentialThreadsSorted[i][1]
+        differentialThreadsIntegrated.append([differentialThreadsSorted[i][0],newVal])
+        lastVal = newVal
+    differentialThreadsForPlotting = [[0,0]]
+    lastVal = 0
+    for i in range(0,len(differentialThreadsIntegrated)):
+        differentialThreadsForPlotting.append([differentialThreadsIntegrated[i][0],lastVal])
+        differentialThreadsForPlotting.append([differentialThreadsIntegrated[i][0],differentialThreadsIntegrated[i][1]])
+        lastVal = differentialThreadsIntegrated[i][1]
+        lastTimeVal = differentialThreadsIntegrated[i][0]
+    differentialThreadsForPlotting.append([lastTimeVal,lastVal])
+    differentialThreadsForPlotting.append([lastTimeVal,0])
+
+    # print("differentialThreadsSorted = %s" % differentialThreadsSorted)
+    # print("differentialThreadsIntegrated = %s" % differentialThreadsIntegrated)
+    # print("differentialThreadsForPlotting = %s" % differentialThreadsForPlotting)
+
+    # compute total receivedBytes and total sentBytes
+    totalReceivedBytes = 0
+    totalSentBytes = 0
+    for i in range(0,len(culledRelativeResponseData)):
+        totalReceivedBytes += sum(culledRelativeResponseData[i][13])
+        totalSentBytes += sum(culledRelativeResponseData[i][14])
+    print("totalReceivedBytes = %d" % totalReceivedBytes)
+    print("totalSentBytes = %d" % totalSentBytes)
+
+    # split out receivedBytes and sentBytes by Label
+    numberBadCodes = 0
+    receivedBytesByLabel = [[0,numberedReducedLabels[i]] for i in range(0,len(numberedReducedLabels))]
+    sentBytesByLabel = [[0,numberedReducedLabels[i]] for i in range(0,len(numberedReducedLabels))]
+    for i in range(0,len(culledRelativeResponseData)):
+        for j in range(0,len(culledRelativeResponseData[i][15])):
+            label = culledRelativeResponseData[i][10][j]
+            if label in numberedReducedLabels:
+                index = numberedReducedLabels.index(label)
+                receivedBytesByLabel[index][0] += culledRelativeResponseData[i][15][j]
+                sentBytesByLabel[index][0] += culledRelativeResponseData[i][16][j]
+
+    # for i in range(0,len(numberedReducedLabels)): 
+        # print("%-50s   rx = %.2f   tx=%.2f" % (numberedReducedLabels[i],receivedBytesByLabel[i][0],sentBytesByLabel[i][0]))
+
+
+    # for i in range(0,3):
+        # print(culledRelativeResponseData[i])
 
     print("Number of devices = %d" % len(relativeResponseData))
     print("Culled Number of devices = %d" %len(culledRelativeResponseData))
@@ -380,10 +541,13 @@ if __name__ == "__main__":
     startRelTimesAndCodesUnitedStatesMuxed = []
     startRelTimesAndCodesRussiaMuxed = []
     startRelTimesAndCodesOtherMuxed = []
+    startRelTimesAndCodesAllMuxed = []
 
+    # for i in range(0,1):
     for i in range(0,len(culledRelativeResponseData)):
         # print(culledRelativeResponseData[i][3][4])
         startRelTimesAndMSPRsAllMuxed.append([culledRelativeResponseData[i][1],culledRelativeResponseData[i][2],culledRelativeResponseData[i][5] ])
+        startRelTimesAndCodesAllMuxed.append([culledRelativeResponseData[i][6],culledRelativeResponseData[i][7],culledRelativeResponseData[i][11]])
         if culledRelativeResponseData[i][3][4]=="United States" :
             startRelTimesAndMSPRsUnitedStatesMuxed.append([culledRelativeResponseData[i][1],culledRelativeResponseData[i][2],culledRelativeResponseData[i][5] ])
             startRelTimesAndCodesUnitedStatesMuxed.append([culledRelativeResponseData[i][6],culledRelativeResponseData[i][7]])
@@ -401,6 +565,22 @@ if __name__ == "__main__":
     startRelTimesAndCodesUnitedStates = [flattenList(getColumn(startRelTimesAndCodesUnitedStatesMuxed,0)),flattenList(getColumn(startRelTimesAndCodesUnitedStatesMuxed,1))]
     startRelTimesAndCodesRussia = [flattenList(getColumn(startRelTimesAndCodesRussiaMuxed,0)),flattenList(getColumn(startRelTimesAndCodesRussiaMuxed,1))]
     startRelTimesAndCodesOther = [flattenList(getColumn(startRelTimesAndCodesOtherMuxed,0)),flattenList(getColumn(startRelTimesAndCodesOtherMuxed,1))]
+    startRelTimesAndCodesAll = [flattenList(getColumn(startRelTimesAndCodesAllMuxed,0)),flattenList(getColumn(startRelTimesAndCodesAllMuxed,1)),flattenList(getColumn(startRelTimesAndCodesAllMuxed,2))]
+
+    # identify labels on all the error codes (non-200)
+    numberBadCodes = 0
+    badCodesByLabel = [[[],numberedReducedLabels[i]] for i in range(0,len(numberedReducedLabels))]
+    for i in range(0,len(startRelTimesAndCodesAll[0])):
+        if startRelTimesAndCodesAll[1][i] != 200:
+            code = startRelTimesAndCodesAll[1][i]
+            label = startRelTimesAndCodesAll[2][i]
+            if label in numberedReducedLabels:
+                # print("code = %d    label = %s"%(code, label))
+                numberBadCodes += 1
+                index = numberedReducedLabels.index(label)
+                badCodesByLabel[index][0].append(code)
+    # print("numberBadCodes = %d"%(numberBadCodes))
+    # print("badCodesByLabel = %s"%(badCodesByLabel))
 
     # print(len(startRelTimesAndMSPRsUnitedStates[0]))
     # print(len(startRelTimesAndMSPRsRussia[0]))
@@ -440,8 +620,61 @@ if __name__ == "__main__":
         for i in range(0,len(reducedLabels)):
             print("len(startRelTimesAndMSPRsUnitedStatesByLabel[%d][0]) = %d" % (i,len(startRelTimesAndMSPRsUnitedStatesByLabel[i][0])))
 
+    # now we want to aggregate all of the numbered Label responses
+    startRelTimesAndMSPRsByNumberedLabel = [[[],[],numberedReducedLabels[i]] for i in range(0,len(numberedReducedLabels))] 
+
+    for i in range(0,len(culledRelativeResponseData)):
+        for j in range(0,len(culledRelativeResponseData[i][10])):
+            label = culledRelativeResponseData[i][10][j]
+            index = numberedReducedLabels.index(label)
+            startRelTimesAndMSPRsByNumberedLabel[index][0].append(
+                culledRelativeResponseData[i][8][j])
+            startRelTimesAndMSPRsByNumberedLabel[index][1].append(
+                culledRelativeResponseData[i][9][j])
+                    
+    # for i in range(0,2): 
+        # print(startRelTimesAndMSPRsByNumberedLabel[i])                
+
+    # now put those into time bins and compute mean values
+    startRelTimesAndMSPRsByNumberedLabelBinned = [[[],[],numberedReducedLabels[i]] for i in range(0,len(numberedReducedLabels))] 
+    
+    binSizeSeconds = 10
+    for i in range(0,len(numberedReducedLabels)):
+        if len(startRelTimesAndMSPRsByNumberedLabel[i][0])>0:
+            maxTimeVal = max(startRelTimesAndMSPRsByNumberedLabel[i][0])
+        else:
+            maxTimeVal = 0
+        numBins = int(np.floor(maxTimeVal / binSizeSeconds ) + 1)
+        startTimesBinned = [i*binSizeSeconds for i in range(0,numBins)]
+        responseTimesBinned = [[] for i in range(0,numBins)]
+        meanResponseTimesBinned = np.zeros(numBins)
+        for j in range(0, len(startRelTimesAndMSPRsByNumberedLabel[i][0])):
+            bin = int(np.floor(startRelTimesAndMSPRsByNumberedLabel[i][0][j]/binSizeSeconds))
+            responseTimesBinned[bin].append(startRelTimesAndMSPRsByNumberedLabel[i][1][j])
+
+        for j in range(0,numBins):
+            if len(responseTimesBinned[j])>0:
+                meanResponseTimesBinned[j] = np.mean(responseTimesBinned[j])    
+            else:
+                meanResponseTimesBinned[j] = -1
+
+        startTimesBinnedCleaned = []
+        meanResponseTimesBinnedCleaned = []
+        for j in range(0,numBins):
+            if meanResponseTimesBinned[j]>=0:
+                startTimesBinnedCleaned.append(startTimesBinned[j])
+                meanResponseTimesBinnedCleaned.append(meanResponseTimesBinned[j])
+
+        startRelTimesAndMSPRsByNumberedLabelBinned[i][0] = startTimesBinnedCleaned
+        startRelTimesAndMSPRsByNumberedLabelBinned[i][1] = meanResponseTimesBinnedCleaned
+        # print("maxTimeVal = %.2f, numBins = %d, startTimesBinned = %s, meanResponseTimesBinned = %s" % (maxTimeVal,numBins,startTimesBinned,meanResponseTimesBinned))
+
+        # print("responseTimesBinned[last] = %s\nmeanResponseTimesBinned[last] = %s" % (responseTimesBinned[len(responseTimesBinned)-1], meanResponseTimesBinnedCleaned[len(meanResponseTimesBinnedCleaned)-1]))
+
+
+
     print("Determining Delivered Load")
-    timeBinSeconds = 5
+    timeBinSeconds = 10
     culledRequestTimes = []
     for i in range(0,len(culledRelativeResponseData)):
         # print("min, max = %f  %f" % (min(culledRelativeResponseData[i][1]),max(culledRelativeResponseData[i][1])))
@@ -623,15 +856,68 @@ if __name__ == "__main__":
     # plt.clf()
     # plt.close()  
 
+    if len(numberedReducedLabels)>0:
+        # Numbered Label plots, only for JPetStore example
+
+        plotMarkerSize = 6
+        fig = plt.figure(29, figsize=figSize1)
+        #ax = plt.gca()
+        #box = ax.get_position()
+        #ax.set_position([box.x0, box.y0, box.width * 0.8, box.height])
+
+        for i in range(0,len(numberedReducedLabels)):
+            plt.plot(startRelTimesAndMSPRsByNumberedLabel[i][0],startRelTimesAndMSPRsByNumberedLabel[i][1], linestyle='', marker='o',markersize=plotMarkerSize,label=numberedReducedLabels[i])
+        
+        plt.legend(loc="center left",ncol=1,bbox_to_anchor=(1, 0.5)) 
+        plt.ylim([0,clipTimeInSeconds])
+        plt.title("Response Times (s)\n", fontsize=42*fontFactor)
+        plt.xlabel("Relative Time during Test (s)", fontsize=32*fontFactor)  
+        plt.ylabel("Response Times (s)", fontsize=32*fontFactor)  
+        plt.savefig( outputDir+'/responseTimesByLabel.png', bbox_inches='tight' )
+
+
+        plotMarkerSize = 12
+        plotLineWidth = 6
+        fig = plt.figure(39, figsize=figSize1)
+        #ax = plt.gca()
+        #box = ax.get_position()
+        #ax.set_position([box.x0, box.y0, box.width * 0.8, box.height])
+
+        for i in range(0,len(numberedReducedLabels)):
+            plt.plot(startRelTimesAndMSPRsByNumberedLabelBinned[i][0],startRelTimesAndMSPRsByNumberedLabelBinned[i][1], linestyle='-', linewidth=plotLineWidth, marker='o',markersize=plotMarkerSize,label=numberedReducedLabels[i])
+        
+        plt.legend(loc="center left",ncol=1,bbox_to_anchor=(1, 0.5)) 
+        plt.ylim([0,clipTimeInSeconds])
+        plt.title("Mean Response Times (s)\n", fontsize=42*fontFactor)
+        plt.xlabel("Relative Time during Test (s)", fontsize=32*fontFactor)  
+        plt.ylabel("Mean Response Times (s)", fontsize=32*fontFactor)  
+        plt.savefig( outputDir+'/responseTimesByLabelMean.png', bbox_inches='tight' )
+
+
     plt.figure(2, figsize=figSize1)
     plt.plot( deliveredLoadTimes, deliveredLoad, linewidth=5, color=(0.0, 0.6, 1.0) )
+    plt.fill_between( deliveredLoadTimes, deliveredLoad, alpha=0.3, color=(0.0, 0.6, 1.0) )
     # makeTimelyXTicks()
     # plt.xlim([0,270])
-    plt.title("Delivered Load During Test\n", fontsize=42*fontFactor)
+    plt.ylim(bottom=0)  
+    plt.title("Hits/Second During Test\n", fontsize=42*fontFactor)
     plt.xlabel("Time during Test (s)", fontsize=32*fontFactor)  
-    plt.ylabel("Requests per second", fontsize=32*fontFactor)  
+    plt.ylabel("Hits per second", fontsize=32*fontFactor)  
     plt.savefig( outputDir+'/deliveredLoad.png', bbox_inches='tight' )
     #plt.show()
+
+    plt.figure(297, figsize=figSize1)
+    plt.plot(getColumn(differentialThreadsForPlotting,0), getColumn(differentialThreadsForPlotting,1), linewidth=5, color=(0.0, 0.6, 1.0) )
+    plt.fill_between(getColumn(differentialThreadsForPlotting,0), getColumn(differentialThreadsForPlotting,1), color=(0.0, 0.6, 1.0), alpha=0.3 )
+    # makeTimelyXTicks()
+    # plt.xlim([0,270])
+    plt.ylim(bottom=0)  
+    plt.title("Active Threads During Test\n", fontsize=42*fontFactor)
+    plt.xlabel("Time during Test (s)", fontsize=32*fontFactor)  
+    plt.ylabel("Active Threads", fontsize=32*fontFactor)  
+    plt.savefig( outputDir+'/ActiveThreads.png', bbox_inches='tight' )
+    #plt.show()
+
 
 
     if (rampStepDurationSeconds>0 and SLODurationSeconds>0 and SLOResponseTimeMaxSeconds>0):
@@ -959,23 +1245,34 @@ if __name__ == "__main__":
 
         # first subplot:  delivered Load
         axes[0,0].plot( deliveredLoadTimes, deliveredLoad, linewidth=2, color=(0.0, 0.6, 1.0) )
-        axes[0,0].set_title("Delivered Load During Test")
+        axes[0,0].fill_between( deliveredLoadTimes, deliveredLoad, alpha=0.3, color=(0.0, 0.6, 1.0) )
+        axes[0,0].set_title("Hits/Second During Test")
         axes[0,0].set_xlabel("Time during Test (s)")  
-        axes[0,0].set_ylabel("Requests per second")  
+        axes[0,0].set_ylabel("Hits per second")  
+        axes[0,0].set_ylim(bottom=0)  
 
-        
-        # second subplot:  generate response time distribution graph
-        listUSA = [1000*startRelTimesAndMSPRsUnitedStates[1][j] for j in range(0,len(startRelTimesAndMSPRsUnitedStates[1]))]
-        listRussia = [1000*startRelTimesAndMSPRsRussia[1][j] for j in range(0,len(startRelTimesAndMSPRsRussia[1]))]
-        listOther = [1000*startRelTimesAndMSPRsOther[1][j] for j in range(0,len(startRelTimesAndMSPRsOther[1]))]
-        axes[0,1].hist(listUSA, color=(0.0, 0.6, 1.0), alpha=0.6, bins=400, label="USA", histtype='step', fill=True, linewidth=2)
-        axes[0,1].hist(listRussia, color=(1.0, 0.0, 0.0), alpha=0.6, bins=400, label="Russia",  histtype='step', fill=True, linewidth=2)
-        axes[0,1].hist(listOther, color=(0.0, 0.9, 0.0), alpha=0.6, bins=400, label="Other",  histtype='step', fill=True, linewidth=2)
-        axes[0,1].legend(fontsize='medium',loc="upper right")
-        axes[0,1].set(xlim=(0,4000))
-        axes[0,1].set_title('Response Time Distribution')
-        axes[0,1].set_xlabel('Response Time (ms)')
-        axes[0,1].set_ylabel('Frequency')
+
+        # second subplot:  generate Active Threads graph
+        axes[0,1].plot(getColumn(differentialThreadsForPlotting,0), getColumn(differentialThreadsForPlotting,1), linewidth=2, color=(0.0, 0.6, 1.0) )
+        axes[0,1].fill_between(getColumn(differentialThreadsForPlotting,0), getColumn(differentialThreadsForPlotting,1), color=(0.0, 0.6, 1.0), alpha=0.3 )
+        axes[0,1].set_ylim(bottom=0)  
+        axes[0,1].set_title("Active Threads During Test")
+        axes[0,1].set_xlabel("Time during Test (s)")  
+        axes[0,1].set_ylabel("Active Threads")  
+
+        if False:
+            # used to be histogram in this place
+            listUSA = [1000*startRelTimesAndMSPRsUnitedStates[1][j] for j in range(0,len(startRelTimesAndMSPRsUnitedStates[1]))]
+            listRussia = [1000*startRelTimesAndMSPRsRussia[1][j] for j in range(0,len(startRelTimesAndMSPRsRussia[1]))]
+            listOther = [1000*startRelTimesAndMSPRsOther[1][j] for j in range(0,len(startRelTimesAndMSPRsOther[1]))]
+            axes[0,1].hist(listUSA, color=(0.0, 0.6, 1.0), alpha=0.6, bins=400, label="USA", histtype='step', fill=True, linewidth=2)
+            axes[0,1].hist(listRussia, color=(1.0, 0.0, 0.0), alpha=0.6, bins=400, label="Russia",  histtype='step', fill=True, linewidth=2)
+            axes[0,1].hist(listOther, color=(0.0, 0.9, 0.0), alpha=0.6, bins=400, label="Other",  histtype='step', fill=True, linewidth=2)
+            axes[0,1].legend(fontsize='medium',loc="upper right")
+            axes[0,1].set(xlim=(0,4000))
+            axes[0,1].set_title('Response Time Distribution')
+            axes[0,1].set_xlabel('Response Time (ms)')
+            axes[0,1].set_ylabel('Frequency')
         
         # third subplot:  main scatterplot
         startRelTimesAndMSPRsUnitedStatesMS = [1000*startRelTimesAndMSPRsUnitedStates[1][i] for i in range(0,len(startRelTimesAndMSPRsUnitedStates[1]))]
@@ -1100,8 +1397,9 @@ if __name__ == "__main__":
 
     print("<TABLE style=\"border:2px solid #444444;background-color:White;font-family:'Arial';color:Black;font-size:16pt;font-weight:bold\">",file=outputFile)
     print("<TR><TD>Test Date:</TD><TD>%s</TD></TR>" % primaryDateString1,file=outputFile)
+    print("<TR><TD>Number of Virtual Users:</TD><TD>%i</TD></TR>" % maxThreads,file=outputFile)
     print("<TR><TD>Number of Instances:</TD><TD>%i</TD></TR>" % len(culledRelativeResponseData),file=outputFile)
-    print("<TR><TD>Maximum Delivered Load:</TD><TD>%.2f Requests/Second</TD></TR>" % max(deliveredLoad),file=outputFile)
+    print("<TR><TD>Maximum Hits/Second:</TD><TD>%.2f</TD></TR>" % max(deliveredLoad),file=outputFile)
     print("<TR><TD>Test Result:</TD><TD>%s</TD></TR>" % SLOstatus,file=outputFile)
     print("</TABLE>",file=outputFile)
     print("<BR><BR>",file=outputFile)
@@ -1110,7 +1408,7 @@ if __name__ == "__main__":
     print("<BR><BR><BR><BR>",file=outputFile)
 
     print("</center>",file=outputFile)
-    print("</TR></TD></TABLE>",file=outputFile)
+    print("</TD></TR></TABLE>",file=outputFile)
     print("<BR><BR>",file=outputFile)
 
     print("<TABLE style=\"border:3px solid #888888;background-color:White;width:1016px \"><TR><TD>",file=outputFile)
@@ -1125,11 +1423,185 @@ if __name__ == "__main__":
     print("<BR><BR><BR>",file=outputFile)
 
     print("</center>",file=outputFile)
-    print("</TR></TD></TABLE>",file=outputFile)
+    print("</TD></TR></TABLE>",file=outputFile)
 
-    print("</center>",file=outputFile)
-
+    if len(numberedReducedLabels)>0:
+        # create another page for ResponseTimesByLabel plots
+        print("<BR><BR>",file=outputFile)
     
+        print("<TABLE style=\"border:3px solid #888888;background-color:White;width:1016px \"><TR><TD>",file=outputFile)
+    
+        print("<center>",file=outputFile)
+    
+        print("<BR><BR><BR>",file=outputFile)
+
+        print("<img src=\"./responseTimesByLabel.png\" width=600>",file=outputFile)
+        print("<BR><BR><BR>",file=outputFile)
+
+        print("<img src=\"./responseTimesByLabelMean.png\" width=600>",file=outputFile)
+        print("<BR><BR><BR>",file=outputFile)
+
+        print("</center>",file=outputFile)
+        print("</TD></TR></TABLE>",file=outputFile)
+
+        # create another page for Response Time Table, Split By Transaction
+        print("<BR><BR>",file=outputFile)
+    
+        print("<TABLE style=\"border:3px solid #888888;background-color:White;width:1016px \"><TR><TD>",file=outputFile)
+    
+        print("<center>",file=outputFile)
+    
+        print("<BR><BR><BR>",file=outputFile)
+
+        # Here is the Response Time Table, Split By Transaction
+        # print("<TABLE style=\"border:2px solid #444444;background-color:White;font-family:'Arial';color:Black;font-size:16pt;font-weight:bold\">",file=outputFile)
+        print("<TABLE style=\"border:1px solid #888888;background-color:White;font-family:'Arial';color:Black;font-size:9pt;width:900px \">",file=outputFile)
+        print("<TR>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">Requests</TH>",file=outputFile)
+        print("<TH colspan=\"3\" style=\"background-color:#8bc0e6\">Executions</TH>",file=outputFile)
+        print("<TH colspan=\"7\" style=\"background-color:#8bc0e6\">Response Times (ms)</TH>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">Throughput</TH>",file=outputFile)
+        print("<TH colspan=\"2\" style=\"background-color:#8bc0e6\">Network (KB/sec)</TH>",file=outputFile)
+        print("</TR>",file=outputFile)
+        print("<TR>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">Label</TH>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\"># Samples</TH>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">FAIL</TH>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">Error %</TH>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">Average</TH>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">Min</TH>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">Max</TH>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">Median</TH>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">90th pct</TH>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">95th pct</TH>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">99th pct</TH>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">Transactions/s</TH>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">Received</TH>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">Sent</TH>",file=outputFile)
+        print("</TR>",file=outputFile)
+
+        totalNumSamples = numberBadCodes # total = bad + good
+        for i in range(0,len(badCodesByLabel)):
+            totalNumSamples += len(startRelTimesAndMSPRsByNumberedLabel[i][0])
+        totalBadCodePercentage = numberBadCodes/totalNumSamples*100.0
+        # numSamples = len(startRelTimesAndMSPRsAll[0])
+        # print("totalNumSamples = %d    numSamples = %d"%(totalNumSamples,numSamples))
+        averageMs = 1000.0*np.mean(startRelTimesAndMSPRsAll[1])
+        minMs = 1000.0*np.min(startRelTimesAndMSPRsAll[1])
+        maxMs = 1000.0*np.max(startRelTimesAndMSPRsAll[1])
+        medianMs = 1000.0*np.median(startRelTimesAndMSPRsAll[1])
+        percentile90ms = 1000.0*np.percentile(startRelTimesAndMSPRsAll[1],90)
+        percentile95ms = 1000.0*np.percentile(startRelTimesAndMSPRsAll[1],95)
+        percentile99ms = 1000.0*np.percentile(startRelTimesAndMSPRsAll[1],99)
+        testStartTime = np.min(startRelTimesAndMSPRsAll[0])
+        testEndTime = np.max(startRelTimesAndMSPRsAll[0])
+        testDuration = testEndTime - testStartTime
+        transactionsPerSecond = totalNumSamples/testDuration
+        # print("testDuration = %f seconds"%testDuration)
+        # print("totalNumSamples = %d"%(totalNumSamples))
+        # print("transactionsPerSecond = %f"%(transactionsPerSecond))
+        totalReceivedKBytesPerSecond = totalReceivedBytes/testDuration/1000.0
+        totalSentKBytesPerSecond = totalSentBytes/testDuration/1000.0
+        # print("totalReceivedKBytesPerSecond = %f"%(totalReceivedKBytesPerSecond))
+        # print("totalSentKBytesPerSecond = %f"%(totalSentKBytesPerSecond))
+
+
+        print("<TR>",file=outputFile)
+        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">Total</TD>",file=outputFile)
+        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%d</TD>"%totalNumSamples,file=outputFile)
+        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%d</TD>"%numberBadCodes,file=outputFile)
+        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f%%</TD>"%totalBadCodePercentage,file=outputFile)
+        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%averageMs,file=outputFile)
+        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%minMs,file=outputFile)
+        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%maxMs,file=outputFile)
+        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%medianMs,file=outputFile)
+        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%percentile90ms,file=outputFile)
+        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%percentile95ms,file=outputFile)
+        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%percentile99ms,file=outputFile)
+        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%transactionsPerSecond,file=outputFile)
+        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%totalReceivedKBytesPerSecond,file=outputFile)
+        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%totalSentKBytesPerSecond,file=outputFile)
+        print("</TR>",file=outputFile)
+
+        
+        for i in range(0,len(numberedReducedLabels)):
+            if i%2==0:
+                bgColorString = "#e9f2fa"
+            else:
+                bgColorString = "#ffffff"
+
+            label = numberedReducedLabels[i]
+            index = getColumn(startRelTimesAndMSPRsByNumberedLabel,2).index(label)
+            numSamples = len(startRelTimesAndMSPRsByNumberedLabel[index][0])
+            if numSamples>0:
+                averageMs = 1000.0*np.mean(startRelTimesAndMSPRsByNumberedLabel[index][1])
+                minMs = 1000.0*np.min(startRelTimesAndMSPRsByNumberedLabel[index][1])
+                maxMs = 1000.0*np.max(startRelTimesAndMSPRsByNumberedLabel[index][1])
+                medianMs = 1000.0*np.median(startRelTimesAndMSPRsByNumberedLabel[index][1])
+                percentile90ms = 1000.0*np.percentile(startRelTimesAndMSPRsByNumberedLabel[index][1],90)
+                percentile95ms = 1000.0*np.percentile(startRelTimesAndMSPRsByNumberedLabel[index][1],95)
+                percentile99ms = 1000.0*np.percentile(startRelTimesAndMSPRsByNumberedLabel[index][1],99)
+            else:
+                averageMs = 0
+                minMs = 0
+                maxMs = 0
+                medianMs = 0
+                percentile90ms = 0
+                percentile95ms = 0
+                percentile99ms = 0
+
+            index = getColumn(badCodesByLabel,1).index(label)
+            badCodeCount = len(badCodesByLabel[index][0])
+            totalNumSamples = numSamples + badCodeCount
+
+            if numSamples>0:
+                testStartTime = np.min(startRelTimesAndMSPRsByNumberedLabel[index][0])
+                testEndTime = np.max(startRelTimesAndMSPRsByNumberedLabel[index][0])
+                testDuration = testEndTime - testStartTime
+                transactionsPerSecond = totalNumSamples/testDuration
+                receivedKBytesPerSecond = receivedBytesByLabel[i][0]/testDuration/1000.0
+                sentKBytesPerSecond = sentBytesByLabel[i][0]/testDuration/1000.0
+            else:
+                testStartTime = 0
+                testEndTime = 0
+                testDuration = 0
+                transactionsPerSecond = 0
+                receivedKBytesPerSecond = 0
+                sentKBytesPerSecond = 0
+
+            if totalNumSamples>0:
+                badCodePercentage = badCodeCount/totalNumSamples*100.0
+            else:
+                badCodePercentage = 0
+
+            # print("testDuration = %f seconds"%testDuration)
+            # print("numSamples = %d"%(numSamples))
+            # print("transactionsPerSecond = %f"%(transactionsPerSecond))
+
+            print("<TR>",file=outputFile)
+            print("<TD style=\"background-color:%s\">%s</TD>"%(bgColorString,label),file=outputFile)
+            print("<TD style=\"background-color:%s\">%d</TD>"%(bgColorString,totalNumSamples),file=outputFile)
+            print("<TD style=\"background-color:%s\">%d</TD>"%(bgColorString,badCodeCount),file=outputFile)
+            print("<TD style=\"background-color:%s\">%.2f%%</TD>"%(bgColorString,badCodePercentage),file=outputFile)
+            print("<TD style=\"background-color:%s\">%.2f</TD>"%(bgColorString,averageMs),file=outputFile)
+            print("<TD style=\"background-color:%s\">%.2f</TD>"%(bgColorString,minMs),file=outputFile)
+            print("<TD style=\"background-color:%s\">%.2f</TD>"%(bgColorString,maxMs),file=outputFile)
+            print("<TD style=\"background-color:%s\">%.2f</TD>"%(bgColorString,medianMs),file=outputFile)
+            print("<TD style=\"background-color:%s\">%.2f</TD>"%(bgColorString,percentile90ms),file=outputFile)
+            print("<TD style=\"background-color:%s\">%.2f</TD>"%(bgColorString,percentile95ms),file=outputFile)
+            print("<TD style=\"background-color:%s\">%.2f</TD>"%(bgColorString,percentile99ms),file=outputFile)
+            print("<TD style=\"background-color:%s\">%.2f</TD>"%(bgColorString,transactionsPerSecond),file=outputFile)
+            print("<TD style=\"background-color:%s\">%.2f</TD>"%(bgColorString,receivedKBytesPerSecond),file=outputFile)
+            print("<TD style=\"background-color:%s\">%.2f</TD>"%(bgColorString,sentKBytesPerSecond),file=outputFile)
+            print("</TR>",file=outputFile)
+
+        print("</TABLE>",file=outputFile)
+        print("<BR><BR><BR>",file=outputFile)
+
+        print("</center>",file=outputFile)
+        print("</TD></TR></TABLE>",file=outputFile)
+        print("<BR><BR><BR>",file=outputFile)
+    print("</center>",file=outputFile)
     print("</Body>",file=outputFile)
     print("</HTML>",file=outputFile)
     outputFile.close()  
