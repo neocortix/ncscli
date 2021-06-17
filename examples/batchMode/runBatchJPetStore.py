@@ -9,6 +9,7 @@ import ncscli.batchRunner as batchRunner
 
 
 jmeterVersion = '5.4.1'  # 5.3 and 5.4.1 have been tested, others may work as well
+usePreinstalled = True
 
 class JMeterFrameProcessor(batchRunner.frameProcessor):
     '''defines details for using JMeter for a simplistic load test'''
@@ -18,15 +19,18 @@ class JMeterFrameProcessor(batchRunner.frameProcessor):
     JMeterFilePath = workerDirPath+'/JPetstore_Octoperf_Apache_JMeter5.4.1.jmx'
 
     def installerCmd( self ):
-        cmd = 'curl -s -S -L https://mirrors.sonic.net/apache/jmeter/binaries/apache-jmeter-%s.tgz > apache-jmeter.tgz' % jmeterVersion
+        if usePreinstalled:
+            cmd = 'cp -p %s/*.jar /opt/apache-jmeter/lib/ext' % self.workerDirPath
+            cmd += '&& /opt/apache-jmeter/bin/jmeter.sh --version'
+        else:
+            # could install an alternative version of jmeter, if the preinstalled version is not wanted
+            cmd = 'curl -s -S -L https://mirrors.sonic.net/apache/jmeter/binaries/apache-jmeter-%s.tgz > apache-jmeter.tgz' % jmeterVersion
+            cmd += ' && tar zxf apache-jmeter.tgz'
+            cmd += ' && mv apache-jmeter-%s apache-jmeter' % jmeterVersion
+            cmd += ' && cp -p %s/*.jar apache-jmeter/lib/ext' % self.workerDirPath
         # alternatively, could use https://mirror.olnevhost.net/pub/apache/... or https://downloads.apache.org/...
-        cmd += ' && tar zxf apache-jmeter.tgz'
-        cmd += ' && mv apache-jmeter-%s apache-jmeter' % jmeterVersion
-        cmd += ' && cp -p %s/*.jar apache-jmeter/lib/ext' % self.workerDirPath
-        #cmd += ' && ls -al'  # for debugging
-        #cmd += ' && ls -al %s' % workerDirPath  # for debugging
-        #cmd += ' && ls -al apache-jmeter/lib/ext'  # for debugging
         return cmd
+        
 
 
     def frameOutFileName( self, frameNum ):
@@ -34,9 +38,14 @@ class JMeterFrameProcessor(batchRunner.frameProcessor):
         #return 'TestPlan_results_%03d.csv' % frameNum
 
     def frameCmd( self, frameNum ):
-        cmd = 'mkdir jmeterOut && apache-jmeter/bin/jmeter -n -t %s -l jmeterOut/TestPlan_results.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true' % (
-            self.JMeterFilePath
-        )
+        if usePreinstalled:
+            cmd = 'mkdir jmeterOut && /opt/apache-jmeter/bin/jmeter -n -t %s -l jmeterOut/TestPlan_results.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true' % (
+                self.JMeterFilePath
+            )
+        else:
+            cmd = 'mkdir jmeterOut && apache-jmeter/bin/jmeter -n -t %s -l jmeterOut/TestPlan_results.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true' % (
+                self.JMeterFilePath
+            )
         cmd += ' && mv jmeterOut %s' % (self.frameOutFileName( frameNum ))
         return cmd
 
@@ -62,7 +71,7 @@ try:
         timeLimit = 60*60,
         instTimeLimit = 12*60,
         frameTimeLimit = 12*60,
-        filter = '{"dpr": ">=48","ram:":">=2800000000","app-version": ">=2.1.11"}',
+        filter = '{ "regions": ["usa", "india"], "dpr": ">=48", "ram:": ">=2800000000", "app-version": ">=2.1.11" }',
         outDataDir = outDataDir,
         startFrame = 1,
         endFrame = 6,
