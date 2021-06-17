@@ -257,6 +257,12 @@ if __name__ == "__main__":
     for i in range(0,len(fileNames)):
         if "TestPlan_results_" in fileNames[i] and ".csv" in fileNames[i]:
             resultFileNames.append(fileNames[i])
+        else:
+            subDir = os.path.join( outputDir, fileNames[i] )
+            inFilePath = os.path.join( subDir, 'TestPlan_results.csv' )
+            if os.path.isdir( subDir ) and os.path.isfile( inFilePath ):
+                partialPath = fileNames[i] + '/TestPlan_results.csv'
+                resultFileNames.append( partialPath )
     numResultFiles = len(resultFileNames)    
     # print(resultFileNames)
     # print(numResultFiles)
@@ -282,7 +288,15 @@ if __name__ == "__main__":
         if not fields:
             logger.info( 'no fields in %s', inFilePath )
             continue
-        frameNum = int(resultFileNames[i].lstrip("TestPlan_results_").rstrip(".csv"))
+        if 'TestPlan_results_' in resultFileNames[i]:
+            frameNum = int(resultFileNames[i].lstrip("TestPlan_results_").rstrip(".csv"))
+        elif resultFileNames[i].startswith('jmeterOut_'):
+            numPart = resultFileNames[i].split('/')[0].split('_')[1]
+            frameNum = int( numPart )
+        else:
+            # should not happen, but may help debugging
+            print( 'file name not recognized', resultFileNames[i] )
+            continue
         startTimes = []
         elapsedTimes = []
         labels = []
