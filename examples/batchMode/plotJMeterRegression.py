@@ -149,11 +149,36 @@ def genXmlReport( wasGood ):
  
 
 if __name__ == "__main__":
+    # configure logger formatting
+    logFmt = '%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s'
+    logDateFmt = '%Y/%m/%d %H:%M:%S'
+    formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
+    logging.basicConfig(format=logFmt, datefmt=logDateFmt)
+
+    # treat numpy deprecations as errors
+    warnings.filterwarnings('error', category=np.VisibleDeprecationWarning)
+
+    ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
+    ap.add_argument( '--dataDirPath', help='the path to directory for input and output data',
+        default ='./data/' )
+    ap.add_argument( '--dataDirKey', help='a substring for selecting subdirectories from data dir',
+        default = 'jmeter_' )
+    ap.add_argument( '--logY', type=boolArg, help='whether to use log scale on Y axis', default=False)
+    ap.add_argument( '--rampStepDuration', type=float, default=60, help='duration, in seconds, of ramp step' )
+    ap.add_argument( '--SLODuration', type=float, default=240, help='SLO duration, in seconds' )
+    ap.add_argument( '--SLOResponseTimeMax', type=float, default=1.5, help='SLO RT threshold, in seconds' )
+
+    args = ap.parse_args()
 
     # parse data directory, determine number of data directories
-    dataDir = "./data/"
+    dataDir = args.dataDirPath
+    dataDirKey = args.dataDirKey
     dataDirNames = os.listdir(dataDir)
-    qualifiedDataDirNames = np.sort([dataDirNames[i] for i in range(0,len(dataDirNames)) if dataDirNames[i][0:7]=="jmeter_" ])
+    #qualifiedDataDirNames = np.sort([dataDirNames[i] for i in range(0,len(dataDirNames)) if "_20" in dataDirNames[i] ])  # catches names like "jmeter_2021-04-10_050846" and "petstore_2021-06-03_003033", will work until the year 2100
+    qualifiedDataDirNames = [dirName for dirName in dataDirNames if dataDirKey in dirName]
+    qualifiedDataDirNames = sorted( qualifiedDataDirNames )
+    print( len(qualifiedDataDirNames), 'seleted data dirs:', qualifiedDataDirNames)
+
     print("")
     print("found %i data directories\n" %len(qualifiedDataDirNames))
     # print("%s" %qualifiedDataDirNames)
@@ -169,25 +194,6 @@ if __name__ == "__main__":
             trainingLabels.append("PASS")
     # print("%s" % trainingLabels)
 
-    # configure logger formatting
-    logFmt = '%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s'
-    logDateFmt = '%Y/%m/%d %H:%M:%S'
-    formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
-    logging.basicConfig(format=logFmt, datefmt=logDateFmt)
-
-    # treat numpy deprecations as errors
-    warnings.filterwarnings('error', category=np.VisibleDeprecationWarning)
-
-    ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
-    ap.add_argument( '--dataDirPath', help='the path to to directory for input and output data' )
-    ap.add_argument( '--logY', type=boolArg, help='whether to use log scale on Y axis', default=False)
-    ap.add_argument( '--rampStepDuration', type=float, default=60, help='duration, in seconds, of ramp step' )
-    ap.add_argument( '--SLODuration', type=float, default=240, help='SLO duration, in seconds' )
-    ap.add_argument( '--SLOResponseTimeMax', type=float, default=1.5, help='SLO RT threshold, in seconds' )
-
-    args = ap.parse_args()
-
-    # logger.info( 'plotting data in directory %s', os.path.realpath(dataDir)  )
 
     # new arguments for SLOcomparison plot
     rampStepDurationSeconds = args.rampStepDuration
@@ -211,8 +217,7 @@ if __name__ == "__main__":
         # print("jlogFilePath = %s" % jlogFilePath)
 
         if not os.path.isfile( launchedJsonFilePath ):
-            logger.error( 'file not found: %s', launchedJsonFilePath )
-            #sys.exit( 1 )
+            logger.warning( 'file not found: %s', launchedJsonFilePath )
             continue
 
         launchedInstances = []
@@ -281,6 +286,12 @@ if __name__ == "__main__":
         for i in range(0,len(fileNames)):
             if "TestPlan_results_" in fileNames[i] and ".csv" in fileNames[i]:
                 resultFileNames.append(fileNames[i])
+            else:
+                subDir = os.path.join( outputDir, fileNames[i] )
+                inFilePath = os.path.join( subDir, 'TestPlan_results.csv' )
+                if os.path.isdir( subDir ) and os.path.isfile( inFilePath ):
+                    partialPath = fileNames[i] + '/TestPlan_results.csv'
+                    resultFileNames.append( partialPath )
         numResultFiles = len(resultFileNames)    
         # print(resultFileNames)
         print("    Number of Result Files   = %i" % numResultFiles)
@@ -307,7 +318,15 @@ if __name__ == "__main__":
             if not fields:
                 # logger.info( 'no fields in %s', inFilePath )
                 continue
-            frameNum = int(resultFileNames[i].lstrip("TestPlan_results_").rstrip(".csv"))
+            if 'TestPlan_results_' in resultFileNames[i]:
+                frameNum = int(resultFileNames[i].lstrip("TestPlan_results_").rstrip(".csv"))
+            elif resultFileNames[i].startswith('jmeterOut_'):
+                numPart = resultFileNames[i].split('/')[0].split('_')[1]
+                frameNum = int( numPart )
+            else:
+                # should not happen, but may help debugging
+                print( 'file name not recognized', resultFileNames[i] )
+                continue
             startTimes = []
             elapsedTimes = []
             labels = []
@@ -712,7 +731,14 @@ if __name__ == "__main__":
 
     plt.ylim([0,clipTimeInSeconds])
     ax1.set_xticks([getColumn(regressionData,0)[i]+getColumn(regressionData,1)[i]/2 for i in range(0,len(regressionData))])
-    ax1.set_xticklabels([qualifiedDataDirNames[i][7:17] for i in range(0,len(qualifiedDataDirNames))], rotation=-90)
+
+    dateStrings = []
+    for i in range(0,len(qualifiedDataDirNames)):
+        # extract the date part of the name, like "2021-06-11"
+        newString = qualifiedDataDirNames[i].split("_")[1][0:10]
+        dateStrings.append(newString)
+
+    ax1.set_xticklabels(dateStrings, rotation=-90)
     plt.title("Daily Regression Test Results and SLO Comparisons\n", fontsize=36*fontFactor)
     plt.xlabel('Date of Test')
     plt.ylabel('Response Time (s)')
