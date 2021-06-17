@@ -808,7 +808,7 @@ def processNodeLogFiles( dataDirPath ):
             continue
         collName = 'nodeLog_' + logDir
         if collName in loggedCollNames:
-            existingGenTime = lastGenDateTime( db[collName] ) - datetime.timedelta(minutes=5)
+            existingGenTime = lastGenDateTime( db[collName] ) - datetime.timedelta(minutes=1)
             fileModDateTime = datetime.datetime.fromtimestamp( os.path.getmtime( inFilePath ) )
             fileModDateTime = universalizeDateTime( fileModDateTime )
             if existingGenTime >= fileModDateTime:
@@ -1226,6 +1226,23 @@ if __name__ == "__main__":
         # will terminate all instances and update checkedInstances accordingly
         startedInstances = getStartedInstances( db )  # expensive, could just query for iids
         startedIids = [inst['instanceId'] for inst in startedInstances]
+
+        logger.info( 'checking for instances to deauthorize')
+        # retrieve list of signers so we can deauthorize each before terminating
+        allSigners = list( db['allSigners'].find() )
+        logger.info( 'len(allSigners): %d', len(allSigners) )
+        signersByIid = {signer['instanceId']: signer for signer in allSigners }
+        logger.debug( 'signer iids: %s', signersByIid.keys() )
+
+        nToDeauth = 0
+        for iid in startedIids:
+            if iid in signersByIid and signersByIid[iid].get('auth'):
+                nToDeauth += 1
+                logger.info( 'terminateAll deauthorizing %s', iid )
+                authorizeSigner( db, args.configName, iid, False )
+                time.sleep( 30 )
+        logger.info( 'deauthorized %d nodes', nToDeauth )
+
         terminatedDateTimeStr = datetime.datetime.now( datetime.timezone.utc ).isoformat()
         toTerminate = startedIids
         logger.info( 'terminating %d instances', len( toTerminate ))
