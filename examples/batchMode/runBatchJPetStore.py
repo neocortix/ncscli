@@ -16,12 +16,20 @@ class JMeterFrameProcessor(batchRunner.frameProcessor):
 
     workerDirPath = 'jmeterWorker'
     #JMeterFilePath = workerDirPath+'/TestPlan.jmx'
-    JMeterFilePath = workerDirPath+'/JPetstore_Octoperf_Apache_JMeter5.4.1.jmx'
+    JMeterFilePath = workerDirPath+'/JPetstore_JMeter5.4.1.jmx'
 
     def installerCmd( self ):
         if usePreinstalled:
             cmd = 'cp -p %s/*.jar /opt/apache-jmeter/lib/ext' % self.workerDirPath
             cmd += '&& /opt/apache-jmeter/bin/jmeter.sh --version'
+
+            # tougher pretest
+            pretestFilePath = self.workerDirPath+'/pretest.jmx'
+            if os.path.isfile( pretestFilePath ):
+                cmd += ' && /opt/apache-jmeter/bin/jmeter -n -t %s -l jmeterOut/pretest_results.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true' % (
+                    pretestFilePath
+                )
+
         else:
             # could install an alternative version of jmeter, if the preinstalled version is not wanted
             cmd = 'curl -s -S -L https://mirrors.sonic.net/apache/jmeter/binaries/apache-jmeter-%s.tgz > apache-jmeter.tgz' % jmeterVersion
@@ -39,11 +47,11 @@ class JMeterFrameProcessor(batchRunner.frameProcessor):
 
     def frameCmd( self, frameNum ):
         if usePreinstalled:
-            cmd = 'mkdir jmeterOut && /opt/apache-jmeter/bin/jmeter -n -t %s -l jmeterOut/TestPlan_results.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true' % (
+            cmd = 'mkdir -p jmeterOut && /opt/apache-jmeter/bin/jmeter -n -t %s -l jmeterOut/TestPlan_results.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true' % (
                 self.JMeterFilePath
             )
         else:
-            cmd = 'mkdir jmeterOut && apache-jmeter/bin/jmeter -n -t %s -l jmeterOut/TestPlan_results.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true' % (
+            cmd = 'mkdir -p jmeterOut && apache-jmeter/bin/jmeter -n -t %s -l jmeterOut/TestPlan_results.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true' % (
                 self.JMeterFilePath
             )
         cmd += ' && mv jmeterOut %s' % (self.frameOutFileName( frameNum ))
@@ -70,12 +78,13 @@ try:
         encryptFiles=False,
         timeLimit = 60*60,
         instTimeLimit = 12*60,
-        frameTimeLimit = 12*60,
-        filter = '{ "regions": ["usa", "india"], "dpr": ">=48", "ram:": ">=2800000000", "app-version": ">=2.1.11" }',
+        frameTimeLimit = 14*60,
+        filter = '{ "regions": ["usa"], "dar": "==100", "dpr": ">=48", "ram:": ">=2800000000", "app-version": ">=2.1.11" }',
+        #filter = '{ "regions": ["usa", "india"], "dpr": ">=48", "ram:": ">=2800000000", "app-version": ">=2.1.11" }',
         outDataDir = outDataDir,
         startFrame = 1,
         endFrame = 6,
-        nWorkers = 9,
+        nWorkers = 12,
         limitOneFramePerWorker = True,
         autoscaleMax = 2
     )
@@ -93,27 +102,30 @@ try:
         if rc2:
             logger.warning( 'plotJMeterOutput exited with returnCode %d', rc2 )
  
-        jtlName = 'VRT50'
-        rc2 = subprocess.call( [sys.executable, 'mergeBatchOutput.py',
-            '--dataDirPath', outDataDir,
-            '--csvPat', 'jmeterOut_%%03d/%s.jtl' % jtlName,
-            '--mergedCsv', jtlName + '_merged.jtl'
-            ], stdout=subprocess.DEVNULL
-            )
-        if rc2:
-            logger.warning( 'mergeBatchOutput.py exited with returnCode %d', rc2 )
-        else:
-            jmeterBinFilePath = 'apache-jmeter-%s/bin/jmeter.sh' % jmeterVersion
-            if not os.path.isfile( jmeterBinFilePath ):
-                logger.info( 'no jmeter installed for producing reports (%s)', jmeterBinFilePath )
-            else:
-                rcx = subprocess.call( [jmeterBinFilePath,
-                    '-g', os.path.join( outDataDir, jtlName + '_merged.jtl' ),
-                    '-o', os.path.join( outDataDir, 'htmlReport' )
-                    ], stderr=subprocess.DEVNULL
+        jtlFileName = 'VRT.jtl'  # make this match output file name from the .jmx (or empty if none)
+        if jtlFileName:
+            nameParts = os.path.splitext(jtlFileName)
+            mergedJtlFileName = nameParts[0]+'_merged_' + dateTimeTag + nameParts[1]
+            rc2 = subprocess.call( [sys.executable, 'mergeBatchOutput.py',
+                '--dataDirPath', outDataDir,
+                '--csvPat', 'jmeterOut_%%03d/%s' % jtlFileName,
+                '--mergedCsv', mergedJtlFileName
+                ], stdout=subprocess.DEVNULL
                 )
-                if rcx:
-                    logger.warning( 'jmeter reporting exited with returnCode %d', rcx )
+            if rc2:
+                logger.warning( 'mergeBatchOutput.py exited with returnCode %d', rc2 )
+            else:
+                jmeterBinFilePath = 'apache-jmeter-%s/bin/jmeter.sh' % jmeterVersion
+                if not os.path.isfile( jmeterBinFilePath ):
+                    logger.info( 'no jmeter installed for producing reports (%s)', jmeterBinFilePath )
+                else:
+                    rcx = subprocess.call( [jmeterBinFilePath,
+                        '-g', os.path.join( outDataDir, mergedJtlFileName ),
+                        '-o', os.path.join( outDataDir, 'htmlReport' )
+                        ], stderr=subprocess.DEVNULL
+                    )
+                    if rcx:
+                        logger.warning( 'jmeter reporting exited with returnCode %d', rcx )
     sys.exit( rc )
 except KeyboardInterrupt:
     logger.warning( 'an interuption occurred')
