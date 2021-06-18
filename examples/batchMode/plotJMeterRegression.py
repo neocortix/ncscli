@@ -36,15 +36,18 @@ def demuxResults( inFilePath ):
     instanceList = []
     with open( inFilePath, 'rb' ) as inFile:
         for line in inFile:
-            decoded = json.loads( line )
-            # print( 'decoded', decoded ) # just for debugging, would be verbose
-            # iid = decoded.get( 'instanceId', '<unknown>')
-            if 'args' in decoded:
-                # print( decoded['args'] )
-                if 'state' in decoded['args']:
-                    if decoded['args']['state'] == 'retrieved':
-                        # print("%s  %s" % (decoded['args']['frameNum'],decoded['instanceId']))
-                        instanceList.append([decoded['args']['frameNum'],decoded['instanceId']])
+            try:
+                decoded = json.loads( line )
+                # print( 'decoded', decoded ) # just for debugging, would be verbose
+                # iid = decoded.get( 'instanceId', '<unknown>')
+                if 'args' in decoded:
+                    # print( decoded['args'] )
+                    if 'state' in decoded['args']:
+                        if decoded['args']['state'] == 'retrieved':
+                            # print("%s  %s" % (decoded['args']['frameNum'],decoded['instanceId']))
+                            instanceList.append([decoded['args']['frameNum'],decoded['instanceId']])
+            except Exception as exc:
+                logger.warning( 'exception decoding results (%s) %s', type(exc), exc )
     return instanceList
 
 def getColumn(inputList,column):
@@ -162,7 +165,7 @@ if __name__ == "__main__":
     ap.add_argument( '--dataDirPath', help='the path to directory for input and output data',
         default ='./data/' )
     ap.add_argument( '--dataDirKey', help='a substring for selecting subdirectories from data dir',
-        default = 'jmeter_' )
+        default = '_20' )
     ap.add_argument( '--logY', type=boolArg, help='whether to use log scale on Y axis', default=False)
     ap.add_argument( '--rampStepDuration', type=float, default=60, help='duration, in seconds, of ramp step' )
     ap.add_argument( '--SLODuration', type=float, default=240, help='SLO duration, in seconds' )
