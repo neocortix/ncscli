@@ -8,8 +8,8 @@ if test -f "$jmeterBinFilePath"; then
     exit 0
 fi
 
-jdkVersion="$(javac -version 2>&1)"
-if [ $? -eq 0 ]; then
+if hash javac 2>/dev/null; then
+    jdkVersion="$(javac -version 2>&1)"
     echo jdk $jdkVersion is installed
 else
     echo NO jdk is installed
