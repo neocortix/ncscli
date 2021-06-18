@@ -804,7 +804,7 @@ if __name__ == "__main__":
     plt.xlim([-180,180])
     plt.ylim([-60,90])
     #plt.show()
-    plt.savefig( outputDir+'/worldMap.png', bbox_inches='tight')
+    plt.savefig( outputDir+'/01_WorldMap.png', bbox_inches='tight')
 
     plotMarkerSize = 3
     plt.figure(10, figsize=figSize1)
@@ -823,7 +823,7 @@ if __name__ == "__main__":
     plt.title("Response Times (s)\n", fontsize=42*fontFactor)
     plt.xlabel("Time during Test (s)", fontsize=32*fontFactor)  
     plt.ylabel("Response Times (s)", fontsize=32*fontFactor)  
-    plt.savefig( outputDir+'/responseTimesByRegion.png', bbox_inches='tight' )
+    plt.savefig( outputDir+'/05_ResponseTimesByRegion.png', bbox_inches='tight' )
     #plt.show()    
     # plt.clf()
     # plt.close()  
@@ -851,7 +851,7 @@ if __name__ == "__main__":
     plt.title("Response Times (s)\n", fontsize=42*fontFactor)
     plt.xlabel("Time during Test (s)", fontsize=32*fontFactor)  
     plt.ylabel("Response Times (s)", fontsize=32*fontFactor)  
-    plt.savefig( outputDir+'/responseTimesByRegion2.png', bbox_inches='tight' )
+    plt.savefig( outputDir+'/06_ResponseTimesByRegion2.png', bbox_inches='tight' )
     #plt.show()    
     # plt.clf()
     # plt.close()  
@@ -873,7 +873,7 @@ if __name__ == "__main__":
         plt.title("Response Times (s)\n", fontsize=42*fontFactor)
         plt.xlabel("Relative Time during Test (s)", fontsize=32*fontFactor)  
         plt.ylabel("Response Times (s)", fontsize=32*fontFactor)  
-        plt.savefig( outputDir+'/responseTimesByLabel.png', bbox_inches='tight' )
+        plt.savefig( outputDir+'/03_ResponseTimesByLabel.png', bbox_inches='tight' )
 
 
         plotMarkerSize = 12
@@ -891,7 +891,7 @@ if __name__ == "__main__":
         plt.title("Mean Response Times (s)\n", fontsize=42*fontFactor)
         plt.xlabel("Relative Time during Test (s)", fontsize=32*fontFactor)  
         plt.ylabel("Mean Response Times (s)", fontsize=32*fontFactor)  
-        plt.savefig( outputDir+'/responseTimesByLabelMean.png', bbox_inches='tight' )
+        plt.savefig( outputDir+'/04_ResponseTimesByLabelMean.png', bbox_inches='tight' )
 
 
     plt.figure(2, figsize=figSize1)
@@ -903,7 +903,7 @@ if __name__ == "__main__":
     plt.title("Hits/Second During Test\n", fontsize=42*fontFactor)
     plt.xlabel("Time during Test (s)", fontsize=32*fontFactor)  
     plt.ylabel("Hits per second", fontsize=32*fontFactor)  
-    plt.savefig( outputDir+'/deliveredLoad.png', bbox_inches='tight' )
+    plt.savefig( outputDir+'/02_HitsPerSecond.png', bbox_inches='tight' )
     #plt.show()
 
     plt.figure(297, figsize=figSize1)
@@ -915,7 +915,7 @@ if __name__ == "__main__":
     plt.title("Active Threads During Test\n", fontsize=42*fontFactor)
     plt.xlabel("Time during Test (s)", fontsize=32*fontFactor)  
     plt.ylabel("Active Threads", fontsize=32*fontFactor)  
-    plt.savefig( outputDir+'/ActiveThreads.png', bbox_inches='tight' )
+    plt.savefig( outputDir+'/07_ActiveThreads.png', bbox_inches='tight' )
     #plt.show()
 
 
@@ -1002,7 +1002,7 @@ if __name__ == "__main__":
         plt.title("Response Times (s) - Mean, 5th, 95th Percentile, and SLO\n", fontsize=42*fontFactor)  
         plt.xlabel("Time during Test (s)", fontsize=32*fontFactor)  
         plt.ylabel("Response Times (s)", fontsize=32*fontFactor)  
-        plt.savefig( outputDir+'/SLOcomparison.png', bbox_inches='tight' )
+        plt.savefig( outputDir+'/11_SLOcomparison.png', bbox_inches='tight' )
         #plt.show()    
         # plt.clf()
         # plt.close()  
@@ -1017,7 +1017,7 @@ if __name__ == "__main__":
 
     try:
         #default histogram settings
-        print("Plotting histogram2.png\n")
+        print("Plotting 10_histogram2.png\n")
         plt.figure(figsize=(12,8))
         kwargs = dict(histtype='step', stacked=False, alpha=0.4, fill=True, bins=250)
         plt.xlim(0,4000)
@@ -1031,7 +1031,7 @@ if __name__ == "__main__":
             dataList = [1000*culledRelativeResponseData[i][2][j] for j in range(0,len(culledRelativeResponseData[i][2]))]
             plt.hist(dataList,**kwargs)
 
-        plt.savefig(outputDir + '/histogram2.png')
+        plt.savefig(outputDir + '/10_Histogram2.png')
     except Exception as e:
         raise e
 
@@ -1041,7 +1041,7 @@ if __name__ == "__main__":
     # From Harinder Seera's plotJMeterMulti.py:
 
     try:
-        print("Plotting graphs2.png\n")
+        print("Plotting 08_Graphs2.png\n")
         mpl.rcParams.update({'font.size': 10})
         plotMarkerSize = 1
                 
@@ -1215,7 +1215,7 @@ if __name__ == "__main__":
 
 
         fig.tight_layout(pad=2)  
-        plt.savefig(outputDir + '/graphs2.png',facecolor=fig.get_facecolor(), edgecolor='none')
+        plt.savefig(outputDir + '/08_Graphs2.png',facecolor=fig.get_facecolor(), edgecolor='none')
         plt.cla()
         plt.clf()
         plt.close()
@@ -1226,7 +1226,7 @@ if __name__ == "__main__":
     # New Multi-panel Plot
 
     try:
-        print("Plotting graphs3.png\n")
+        print("Plotting 09_Graphs3.png\n")
         mpl.rcParams.update({'font.size': 10})
         plotMarkerSize = 1
                 
@@ -1361,7 +1361,7 @@ if __name__ == "__main__":
 
 
         fig.tight_layout(pad=2)  
-        plt.savefig(outputDir + '/graphs3.png',facecolor=fig.get_facecolor(), edgecolor='none')
+        plt.savefig(outputDir + '/09_Graphs3.png',facecolor=fig.get_facecolor(), edgecolor='none')
         plt.cla()
         plt.clf()
         plt.close()
@@ -1404,7 +1404,7 @@ if __name__ == "__main__":
     print("</TABLE>",file=outputFile)
     print("<BR><BR>",file=outputFile)
 
-    print("<img src=\"./graphs3.png\" width=900>",file=outputFile)
+    print("<img src=\"./09_Graphs3.png\" width=900>",file=outputFile)
     print("<BR><BR><BR><BR>",file=outputFile)
 
     print("</center>",file=outputFile)
@@ -1416,10 +1416,10 @@ if __name__ == "__main__":
     print("<center>",file=outputFile)
 
     print("<BR><BR><BR>",file=outputFile)
-    print("<img src=\"./graphs2.png\" width=900>",file=outputFile)
+    print("<img src=\"./08_Graphs2.png\" width=900>",file=outputFile)
     print("<BR><BR><BR>",file=outputFile)
 
-    print("<img src=\"./worldMap.png\" width=600>",file=outputFile)
+    print("<img src=\"./01_WorldMap.png\" width=600>",file=outputFile)
     print("<BR><BR><BR>",file=outputFile)
 
     print("</center>",file=outputFile)
@@ -1435,10 +1435,10 @@ if __name__ == "__main__":
     
         print("<BR><BR><BR>",file=outputFile)
 
-        print("<img src=\"./responseTimesByLabel.png\" width=600>",file=outputFile)
+        print("<img src=\"./03_ResponseTimesByLabel.png\" width=600>",file=outputFile)
         print("<BR><BR><BR>",file=outputFile)
 
-        print("<img src=\"./responseTimesByLabelMean.png\" width=600>",file=outputFile)
+        print("<img src=\"./04_ResponseTimesByLabelMean.png\" width=600>",file=outputFile)
         print("<BR><BR><BR>",file=outputFile)
 
         print("</center>",file=outputFile)
