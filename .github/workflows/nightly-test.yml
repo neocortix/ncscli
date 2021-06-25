@@ -32,6 +32,7 @@ jobs:
         go-version: '^1.16.3'
     - name: Install dependencies
       run: |
+        sudo apt-get update
         sudo apt-get install crossbuild-essential-arm64
         python -m pip install --upgrade pip
         pip install flake8 pytest
