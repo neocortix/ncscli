@@ -1,16 +1,20 @@
 import logging
-#import os
+import os
 import random
 #import sys
 import time
 # third-party imports
 import flask
 from flask import Flask
+import werkzeug.utils  # comes with flask
 
 app = Flask(__name__)
 logger = app.logger
 logger.setLevel(logging.INFO)
 jsonify = flask.json.jsonify  # handy alias
+
+app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['MAX_CONTENT_LENGTH'] = 10 * 1000 * 1000
 
 @app.route('/')
 @app.route('/baroque')  # new line for https
@@ -65,6 +69,62 @@ def root():
     elapsed = time.time() - startTime
     return 'Elapsed Time:  '+str( '%.3f' % elapsed )+' seconds\n'
 
+ALLOWED_EXTENSIONS = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'csv', 'jmx'}
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+@app.route('/baroque/uploader', methods=['GET', 'POST'])
+def upload_file():
+    # aliases for flask things
+    request = flask.request
+    redirect = flask.redirect
+    secure_filename = werkzeug.utils.secure_filename
+    url_for = flask.url_for
+    # actual example code
+    if request.method == 'POST':
+        # check if the post request has the file part
+        if 'file' not in request.files:
+            return jsonify( 'no file was passed in the request' ), 400
+        file = request.files['file']
+        # If the user does not select a file, the browser submits an
+        # empty file without a filename.
+        if not file.filename:
+            return jsonify( 'no file name was passed in the request' ), 400
+        if not allowed_file(file.filename):
+            msg = 'That file type is not supported. Supported extensions are %s' % sorted(ALLOWED_EXTENSIONS)
+            return jsonify( msg ), 415
+        if file and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            fakeIt = True
+            if fakeIt:
+                fileLength = len( file.read() )
+                msg = 'would upload file %s, length: %d bytes' % (filename, fileLength )
+                logger.info( msg )
+                return jsonify( msg ), 200
+            else:
+                file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+                return redirect(url_for('download_file', name=filename))
+        logger.warning( 'unhandled situation' )
+        return jsonify( 'could not handle that request'), 400
+    return '''
+    <!doctype html>
+    <title>Upload new File</title>
+    <h1>Upload new File</h1>
+    <form method=post enctype=multipart/form-data>
+      <input type=file name=file>
+      <input type=submit value=Upload>
+    </form>
+    '''
+
+@app.route('/baroque/uploads/<name>')
+def download_file(name):
+    return flask.send_from_directory(app.config["UPLOAD_FOLDER"], name)
+
+app.add_url_rule(
+    "/baroque/uploads/<name>", endpoint="download_file", build_only=True
+    )
+
+'''
 @app.route('/baroque/upload', methods=['POST'])
 def uploader():
     logger.info( 'handling a request %s ', flask.request )
@@ -76,3 +136,4 @@ def uploader():
         if len( flask.request.files ):
             logger.info( 'files length: %d', len( flask.request.files ) )
     return jsonify("upload not fully supported"), 200
+'''
