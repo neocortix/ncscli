@@ -1,12 +1,15 @@
+import logging
 #import os
 import random
 #import sys
 import time
-
-
+# third-party imports
 import flask
 from flask import Flask
+
 app = Flask(__name__)
+logger = app.logger
+logger.setLevel(logging.INFO)
 jsonify = flask.json.jsonify  # handy alias
 
 @app.route('/')
@@ -61,3 +64,15 @@ def root():
 
     elapsed = time.time() - startTime
     return 'Elapsed Time:  '+str( '%.3f' % elapsed )+' seconds\n'
+
+@app.route('/baroque/upload', methods=['POST'])
+def uploader():
+    logger.info( 'handling a request %s ', flask.request )
+    if flask.request.method == 'POST':
+        if flask.request.form:
+            logger.info( 'form data: %s', flask.request.form )
+        if len( flask.request.data ):
+            logger.info( 'data length: %d', len( flask.request.data ) )
+        if len( flask.request.files ):
+            logger.info( 'files length: %d', len( flask.request.files ) )
+    return jsonify("upload not fully supported"), 200
