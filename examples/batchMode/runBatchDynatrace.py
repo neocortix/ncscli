@@ -55,7 +55,7 @@ try:
         timeLimit = 80*60,
         instTimeLimit = 12*60,
         frameTimeLimit = 30*60,
-        filter = '{"dpr": ">=48","ram:":">=2800000000","app-version": ">=2.1.11"}',
+        filter = '{"dpr": ">=48", "ram":">=2800000000", "app-version": ">=2.1.11"}',
         outDataDir = outDataDir,
         startFrame = 1,
         endFrame = 6,

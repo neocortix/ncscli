@@ -51,7 +51,7 @@ if __name__ == "__main__":
         autoscaleInit = 2,
         autoscaleMin = 1.5,
         autoscaleMax = 3,
-        filter = '{"dpr": ">=48","ram:":">=2800000000","app-version": ">=2.1.11"}',
+        filter = '{"dpr": ">=48", "ram":">=2800000000", "app-version": ">=2.1.11"}',
         outDataDir = outDataDirPath,
         encryptFiles = False,
         startFrame = 0,

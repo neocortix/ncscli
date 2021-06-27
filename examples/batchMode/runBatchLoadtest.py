@@ -49,7 +49,7 @@ try:
         encryptFiles=False,
         timeLimit = 14*60,
         frameTimeLimit = 240,
-        filter = '{"dpr": ">=48","ram:":">=2800000000","app-version": ">=2.1.11"}',
+        filter = '{"dpr": ">=48", "ram":">=2800000000", "app-version": ">=2.1.11"}',
         outDataDir = outDataDir,
         startFrame = 1,
         endFrame = 5,
