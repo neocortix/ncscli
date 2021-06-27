@@ -69,7 +69,7 @@ def root():
     elapsed = time.time() - startTime
     return 'Elapsed Time:  '+str( '%.3f' % elapsed )+' seconds\n'
 
-ALLOWED_EXTENSIONS = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'csv', 'jmx'}
+ALLOWED_EXTENSIONS = {'ico', 'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'csv', 'jmx'}
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
@@ -123,17 +123,3 @@ def download_file(name):
 app.add_url_rule(
     "/baroque/uploads/<name>", endpoint="download_file", build_only=True
     )
-
-'''
-@app.route('/baroque/upload', methods=['POST'])
-def uploader():
-    logger.info( 'handling a request %s ', flask.request )
-    if flask.request.method == 'POST':
-        if flask.request.form:
-            logger.info( 'form data: %s', flask.request.form )
-        if len( flask.request.data ):
-            logger.info( 'data length: %d', len( flask.request.data ) )
-        if len( flask.request.files ):
-            logger.info( 'files length: %d', len( flask.request.files ) )
-    return jsonify("upload not fully supported"), 200
-'''
