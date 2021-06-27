@@ -59,6 +59,13 @@ def test_path():
     rc = subprocess.call( 'hash ncs.py', shell=True )
     assert rc==0, 'ncs.py was not found in the PATH'
 
+def test_installLocalJMeter():
+    rc = subprocess.call( 'hash javac', shell=True )
+    if rc != 0:
+        pytest.xfail( 'JDK not found (for local JMeter)' )
+    rc = subprocess.call( './installJMeter5.4.1.sh', shell=True )
+    assert rc==0, 'could not install local JMeter'
+
 def test_runBatchBinary():
     # check if the built ARM executable already exists
     if not os.path.isfile('helloFrame_aarch64'):
