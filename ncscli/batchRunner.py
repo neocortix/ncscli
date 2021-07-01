@@ -628,6 +628,65 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
             ncs.deleteSshClientKey( args.authToken, sshClientKeyName )
         raise
 
+def rsyncFromRemote1( srcFileName, destFilePath, inst, timeLimit ):
+    sshSpecs = inst['ssh']
+    host = sshSpecs['host']
+    port = sshSpecs['port']
+    user = sshSpecs['user']
+
+    destFilePathFull = os.path.realpath(os.path.abspath( destFilePath ))
+    cmd = [ 'rsync', '-a', '-e', 'ssh -p ' + str(port), user+'@'+host+':~/'+srcFileName,
+        destFilePathFull+'/'
+    ]
+    logger.info( 'retrieving from %s', inst['instanceId'] )
+    logger.debug( 'rsyncing %s', cmd )  # would spill the full path
+    returnCode = None
+    stderr=''
+    with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE )as proc:
+        try:
+            (stdout, stderr) = proc.communicate( timeout=timeLimit )
+            stdout = stdout.decode('utf8')
+            #logger.info( 'rsync stdout: %s', stdout )
+            stderr = stderr.decode('utf8')
+            returnCode = proc.returncode
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            returnCode = 124
+            proc.communicate()  # ignoring any additional outputs
+        except Exception as exc:
+            logger.warning( 'rsync threw exception (%s) %s', type(exc), exc )
+            returnCode = -1
+    if returnCode:
+        logger.warning( 'rsync returnCode %d', returnCode )
+        logger.info( 'rsync stderr %s', stderr )
+    if (returnCode == 1) and ('closed by remote host' in stderr):
+        returnCode = 255
+    return returnCode, stderr
+
+def rsyncFromRemote( srcFileName, destFilePath, inst, timeLimit ):
+    deadline = time.time() + timeLimit
+    returnCode = None
+    stderr = None
+    while time.time() < deadline:
+        try:
+            returnCode, stderr = rsyncFromRemote1( srcFileName, destFilePath, inst, timeLimit )
+            # we are done if good result or timeout was returned
+            if returnCode in [0, 124]:
+                return returnCode, stderr
+            # we are done if the desired file or directory was not found
+            if returnCode == 23 and 'No such file' in stderr:
+                return returnCode, stderr
+        except Exception as exc:
+            logger.warning( 'unexpected exception (%s) %s', type(exc), exc )
+            returnCode = 99
+            stderr = str( exc )
+        timeLimit = deadline - time.time()
+        # we are done if not enough time remains
+        if timeLimit < 15:  # assume rsync always takes at least a few seconds
+            break
+        logger.info( 'will retry on instance %s', inst['instanceId'] )
+        time.sleep( 10 )
+    return returnCode or 124, stderr or "rsyncFromRemote timed out"
 
 def rsyncToRemote( srcFilePath, destFileName, inst, timeLimit ):
     sshSpecs = inst['ssh']
@@ -667,7 +726,7 @@ def rsyncToRemote( srcFilePath, destFileName, inst, timeLimit ):
         logger.warning( 'rsync returnCode %d', returnCode )
     return returnCode, stderr
 
-def scpFromRemote( srcFileName, destFilePath, inst, timeLimit=120 ):
+def scpFromRemote1( srcFileName, destFilePath, inst, timeLimit ):
     sshSpecs = inst['ssh']
     host = sshSpecs['host']
     port = sshSpecs['port']
@@ -696,9 +755,33 @@ def scpFromRemote( srcFileName, destFilePath, inst, timeLimit=120 ):
             returnCode = -1
     if returnCode:
         logger.warning( 'SCP returnCode %d', returnCode )
+        logger.info( 'SCP stderr %s', stderr )
     if (returnCode == 1) and ('closed by remote host' in stderr):
         returnCode = 255
     return returnCode, stderr
+
+def scpFromRemote( srcFileName, destFilePath, inst, timeLimit ):
+    deadline = time.time() + timeLimit
+    returnCode = None
+    stderr = None
+    while time.time() < deadline:
+        try:
+            returnCode, stderr = scpFromRemote1( srcFileName, destFilePath, inst, timeLimit )
+            # we are done if good result or timeout was returned
+            if returnCode in [0, 124]:
+                return returnCode, stderr
+        except Exception as exc:
+            logger.warning( 'unexpected exception (%s) %s', type(exc), exc )
+            returnCode = 99
+            stderr = str( exc )
+        timeLimit = deadline - time.time()
+        # we are done if not enough time remains
+        if timeLimit < 15:  # assume scp always takes at least few seconds
+            break
+        logger.info( 'will retry on instance %s', inst['instanceId'] )
+        time.sleep( 10 )
+    return returnCode or 124, stderr or "scpFromRemote timed out"
+
 
 def saveProgress():
     # lock it to avoid race conditions
@@ -724,7 +807,6 @@ def renderFramesOnInstance( inst ):
         logger.warning( 'exiting because g_.interrupted')
         return 0
     timeLimit = min( args.frameTimeLimit, args.timeLimit )
-    rsyncTimeLimit = min( 18000, timeLimit )  # was 240; have used 1800 for big files
     iid = inst['instanceId']
     abbrevIid = iid[0:16]
     g_.workingInstances.append( iid )
@@ -734,6 +816,7 @@ def renderFramesOnInstance( inst ):
 
     '''
     # rsync the common input file, if any
+    rsyncTimeLimit = min( 18000, timeLimit )  # was 240; have used 1800 for big files
     if args.commonInFilePath:
         logFrameState( -1, 'rsyncing', iid, 0 )
         destFileName = os.path.basename( args.commonInFilePath )
@@ -893,8 +976,9 @@ def renderFramesOnInstance( inst ):
         #    logger.warning( 'remote returnCode %d for %s', returnCode, abbrevIid )
         if curFrameRendered and outFileName:
             logFrameState( frameNum, 'retrieving', iid )
-            (returnCode, stderr) = scpFromRemote( 
-                outFileName, g_.dataDirPath, inst
+            scpTimeLimit = min( timeLimit, 600 )  # sorry, doesn't account for time already spent
+            (returnCode, stderr) = rsyncFromRemote( 
+                outFileName, g_.dataDirPath, inst, timeLimit=scpTimeLimit
                 #outFileName, os.path.join( g_.dataDirPath, outFileName ), inst
                 )
             if returnCode == 0:
@@ -910,6 +994,7 @@ def renderFramesOnInstance( inst ):
                 g_.framesToDo.append( frameNum )
                 logStderr( stderr.rstrip(), iid )
                 logFrameState( frameNum, 'retrieveFailed', iid, returnCode )
+                logger.warning( 'retrieveFailed with rc %d for frame %d on %s', returnCode, frameNum, iid )
                 frameDetails[ 'progress' ] = 0
             saveProgress()
         if returnCode:
