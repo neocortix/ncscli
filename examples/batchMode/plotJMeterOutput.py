@@ -162,7 +162,7 @@ if __name__ == "__main__":
     ap.add_argument( '--logY', type=boolArg, help='whether to use log scale on Y axis', default=False)
     ap.add_argument( '--rampStepDuration', type=float, default=60, help='duration, in seconds, of ramp step' )
     ap.add_argument( '--SLODuration', type=float, default=240, help='SLO duration, in seconds' )
-    ap.add_argument( '--SLOResponseTimeMax', type=float, default=1.5, help='SLO RT threshold, in seconds' )
+    ap.add_argument( '--SLOResponseTimeMax', type=float, default=2.0, help='SLO RT threshold, in seconds' )
 
     args = ap.parse_args()
 
