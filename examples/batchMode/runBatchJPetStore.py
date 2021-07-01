@@ -17,11 +17,13 @@ class JMeterFrameProcessor(batchRunner.frameProcessor):
     workerDirPath = 'jmeterWorker'
     #JMeterFilePath = workerDirPath+'/TestPlan.jmx'
     JMeterFilePath = workerDirPath+'/JPetstore_JMeter5.4.1.jmx'
+    JVM_ARGS ='-Xms30m -Xmx212m -XX:MaxMetaspaceSize=64m -Dnashorn.args=--no-deprecation-warning'
 
     def installerCmd( self ):
         if usePreinstalled:
-            cmd = 'cp -p %s/*.jar /opt/apache-jmeter/lib/ext' % self.workerDirPath
-            cmd += '&& /opt/apache-jmeter/bin/jmeter.sh --version'
+            cmd = 'free --mega -t 1>&2'  # to show amount of free ram
+            cmd += ' && cp -p %s/*.jar /opt/apache-jmeter/lib/ext' % self.workerDirPath  # for plugins
+            cmd += ' && JVM_ARGS="%s" /opt/apache-jmeter/bin/jmeter.sh --version' % self.JVM_ARGS
 
             # tougher pretest
             pretestFilePath = self.workerDirPath+'/pretest.jmx'
@@ -42,17 +44,17 @@ class JMeterFrameProcessor(batchRunner.frameProcessor):
 
 
     def frameOutFileName( self, frameNum ):
-        return 'jmeterOut_%03d/' % frameNum
+        return 'jmeterOut_%03d' % frameNum
         #return 'TestPlan_results_%03d.csv' % frameNum
 
     def frameCmd( self, frameNum ):
         if usePreinstalled:
-            cmd = 'mkdir -p jmeterOut && /opt/apache-jmeter/bin/jmeter -n -t %s -l jmeterOut/TestPlan_results.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true' % (
-                self.JMeterFilePath
+            cmd = 'mkdir -p jmeterOut && JVM_ARGS="%s" /opt/apache-jmeter/bin/jmeter.sh -n -t %s -l jmeterOut/TestPlan_results.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true' % (
+                self.JVM_ARGS, self.JMeterFilePath
             )
         else:
-            cmd = 'mkdir -p jmeterOut && apache-jmeter/bin/jmeter -n -t %s -l jmeterOut/TestPlan_results.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true' % (
-                self.JMeterFilePath
+            cmd = 'mkdir -p jmeterOut && JVM_ARGS="%s" apache-jmeter/bin/jmeter.sh -n -t %s -l jmeterOut/TestPlan_results.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true' % (
+                self.JVM_ARGS, self.JMeterFilePath
             )
         cmd += ' && mv jmeterOut %s' % (self.frameOutFileName( frameNum ))
         return cmd
@@ -79,8 +81,8 @@ try:
         timeLimit = 60*60,
         instTimeLimit = 12*60,
         frameTimeLimit = 14*60,
-        filter = '{ "regions": ["usa", "india"], "dar": "==100", "dpr": ">=48", "ram:": ">=2800000000", "app-version": ">=2.1.11" }',
-        #filter = '{ "regions": ["usa", "india"], "dar": "==100", "dpr": ">=48", "ram:": ">=2800000000", "app-version": ">=2.1.11" }',
+        filter = '{ "regions": ["usa", "india"], "dar": "==100", "dpr": ">=48", "ram": ">=3800000000", "storage": ">=2000000000" }',
+        #filter = '{ "regions": ["usa", "india"], "dar": "==100", "dpr": ">=48", "ram": ">=2800000000", "app-version": ">=2.1.11" }',
         outDataDir = outDataDir,
         startFrame = 1,
         endFrame = 6,
