@@ -109,7 +109,11 @@ if __name__ == "__main__":
             inFilePath = outputDir + "/" + (resultsCsvPat % frameNum )
             iid = iidByFrame[ frameNum ]
             logger.debug( 'reading %s', inFilePath )
-            rows = ingestCsv( inFilePath )
+            try:
+                rows = ingestCsv( inFilePath )
+            except Exception as exc:
+                logger.warning( 'could not ingestCsv (%s) %s', type(exc), exc )
+                continue
             if not rows:
                 logger.info( 'no rows in %s', inFilePath )
                 continue
