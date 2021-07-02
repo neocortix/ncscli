@@ -15,7 +15,7 @@ class gatlingFrameProcessor(batchRunner.frameProcessor):
         return 'gatlingWorker/install.sh'
 
     def frameOutFileName( self, frameNum ):
-        return 'gatlingResults_%03d/' % frameNum
+        return 'gatlingResults_%03d' % frameNum
 
     def frameCmd( self, frameNum ):
         # substitute your own gatling simulation class, and put the scala file in the gatlingWorker dir
