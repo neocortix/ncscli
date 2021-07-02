@@ -366,7 +366,17 @@ if __name__ == "__main__":
             if not fields:
                 logger.info( 'no fields in %s', inFilePath )
                 continue
-            frameNum = int(resultFileNames[i].lstrip("TestPlan_results_").rstrip(".csv"))
+            # frameNum = int(resultFileNames[i].lstrip("TestPlan_results_").rstrip(".csv"))
+            if 'TestPlan_results_' in resultFileNames[i]:
+                frameNum = int(resultFileNames[i].lstrip("TestPlan_results_").rstrip(".csv"))
+            elif resultFileNames[i].startswith('jmeterOut_'):
+                numPart = resultFileNames[i].split('/')[0].split('_')[1]
+                frameNum = int( numPart )
+            else:
+                # should not happen, but may help debugging
+                print( 'file name not recognized', resultFileNames[i] )
+                continue
+
             startTimes = []
             elapsedTimes = []
             labels = []
