@@ -593,7 +593,7 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
             #stepTiming.finish()
             #eventTimings.append(stepTiming)
             logger.info( '%d good installs, %d bad installs', len(goodOnes), len(badOnes) )
-            logger.info( 'stepStatuses %s', stepStatuses )
+            logger.debug( 'stepStatuses %s', stepStatuses )
             goodInstances = [inst for inst in goodInstances if inst['instanceId'] in goodOnes ]
             badIids = []
             for status in badOnes:
