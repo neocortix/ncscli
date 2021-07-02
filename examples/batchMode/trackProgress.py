@@ -76,6 +76,15 @@ def clocker():
         if not thr.stopRequested:
             if statusbar and phase:
                 statusbar.update( demo=phase, force=True )
+            if pbar and phase == 'Running on Instances':
+                if startDateTime:
+                    lineDateTime = datetime.datetime.now( datetime.timezone.utc )
+                    elapsed = (lineDateTime - startDateTime).total_seconds()
+                    logger.debug( 'elapsed: %.1f, startDateTime: %s', elapsed, startDateTime )
+                    intElapsed = int(elapsed)
+                    constrainedElapsed = min( intElapsed, pbar.total * 98 / 100 )
+                    if constrainedElapsed > pbar.count and constrainedElapsed <= pbar.total:
+                        pbar.update( constrainedElapsed - pbar.count, force=True )
 
 
 if __name__ == "__main__":
