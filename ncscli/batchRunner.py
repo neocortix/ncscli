@@ -1324,6 +1324,10 @@ def runBatch( **kwargs ):
         return 1
 
     # validate the authToken
+    if not args.authToken.isalnum():
+        # if using python >=3.7, could also check .isascii()
+        logger.error( 'the given authToken was not an alphanumeric ascii string' )
+        return 1
     resp = ncs.queryNcsSc( 'instances', args.authToken )
     if resp['statusCode'] == 403:
         logger.error( 'the given authToken was not accepted' )
