@@ -46,7 +46,24 @@ def boolArg( v ):
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
+
+_allowedAuthTokenChars = set( '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ' )
+def validAuthToken( input ):
+    if not ( isinstance( input, str ) or isinstance( input, bytes ) ):
+        return False
+    if isinstance( input, bytes ):
+        input = input.decode( 'utf-8' )
+    # check that it contains only a subset of the allowed characters
+    return set( input ) <= _allowedAuthTokenChars
+
 def ncscReqHeaders( authToken ):
+    if isinstance( authToken, str ):
+        # encode using utf-8 to prevent lower-level code from using an inadequate encoder
+        authToken = authToken.encode( 'utf-8' )
+    else:
+        logger.warning( 'got a non-string authToken')
+    if not isinstance( authToken, bytes ):
+        raise TypeError( 'an authToken was passed that is not a str (or bytes)' )
     return {
         "Content-Type": "application/json",
         "Accept": "application/json",
