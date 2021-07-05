@@ -666,16 +666,20 @@ def rsyncFromRemote1( srcFileName, destFilePath, inst, timeLimit ):
 def rsyncFromRemote( srcFileName, destFilePath, inst, timeLimit ):
     deadline = time.time() + timeLimit
     returnCode = None
+    oldRC = None
     stderr = None
     while time.time() < deadline:
         try:
             returnCode, stderr = rsyncFromRemote1( srcFileName, destFilePath, inst, timeLimit )
             # we are done if good result or timeout was returned
+            if returnCode == 124:
+                return (oldRC or 124), stderr
             if returnCode in [0, 124]:
                 return returnCode, stderr
             # we are done if the desired file or directory was not found
             if returnCode == 23 and 'No such file' in stderr:
                 return returnCode, stderr
+            oldRC = returnCode
         except Exception as exc:
             logger.warning( 'unexpected exception (%s) %s', type(exc), exc )
             returnCode = 99
@@ -976,7 +980,7 @@ def renderFramesOnInstance( inst ):
         #    logger.warning( 'remote returnCode %d for %s', returnCode, abbrevIid )
         if curFrameRendered and outFileName:
             logFrameState( frameNum, 'retrieving', iid )
-            scpTimeLimit = min( timeLimit, 600 )  # sorry, doesn't account for time already spent
+            scpTimeLimit = min( timeLimit, 1200 )  # sorry, doesn't account for time already spent
             (returnCode, stderr) = rsyncFromRemote( 
                 outFileName, g_.dataDirPath, inst, timeLimit=scpTimeLimit
                 #outFileName, os.path.join( g_.dataDirPath, outFileName ), inst
@@ -1324,7 +1328,8 @@ def runBatch( **kwargs ):
         return 1
 
     # validate the authToken
-    if not args.authToken.isalnum():
+    #if not args.authToken.isalnum():
+    if not ncs.validAuthToken( args.authToken ):
         # if using python >=3.7, could also check .isascii()
         logger.error( 'the given authToken was not an alphanumeric ascii string' )
         return 1
@@ -1378,7 +1383,11 @@ def runBatch( **kwargs ):
     goodInstances = None
     try:
         if args.launch:
-            goodInstances= recruitInstances( nToRecruit, g_.dataDirPath+'/recruitLaunched.json', True, installerLogFilePath )
+            try:
+                goodInstances= recruitInstances( nToRecruit, g_.dataDirPath+'/recruitLaunched.json', True, installerLogFilePath )
+            except Exception as exc:
+                logger.info( 'exception (%s) %s', type(exc), exc )
+                return 1
         else:
             goodInstances = recruitInstances( nToRecruit, g_.dataDirPath+'/survivingInstances.json', False, installerLogFilePath )
         g_.installerLogFile = open( installerLogFilePath, 'a' )
