@@ -13,7 +13,7 @@ jmeterVersion = '5.4.1'  # 5.3 and 5.4.1 have been tested, others may work as we
 class JMeterFrameProcessor(batchRunner.frameProcessor):
     '''defines details for using JMeter for a simplistic load test'''
 
-    workerDirPath = 'uploaderWorker'
+    workerDirPath = 'jmeterWorker'
     #JMeterFilePath = workerDirPath+'/TestPlan.jmx'
     JMeterFilePath = workerDirPath+'/JImageUpload.jmx'
     JVM_ARGS ='-Xms30m -Xmx212m -XX:MaxMetaspaceSize=64m -Dnashorn.args=--no-deprecation-warning'
