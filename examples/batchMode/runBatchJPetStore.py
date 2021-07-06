@@ -93,7 +93,7 @@ try:
     if (rc == 0) and os.path.isfile( outDataDir +'/recruitLaunched.json' ):
         rampStepDuration = 60
         SLODuration = 240
-        SLOResponseTimeMax = 1.5
+        SLOResponseTimeMax =2.5
 
         rc2 = subprocess.call( [sys.executable, 'plotJMeterOutput.py',
             '--dataDirPath', outDataDir,
