@@ -98,6 +98,9 @@ $pyx -m pip install --user matplotlib
 # install enlighten for use by examples
 $pyx -m pip install --user enlighten
 
+# install defusedxml for use by jmeter examples
+$pyx -m pip install --user defusedxml
+
 
 sitePackagesDir=$($pyx -m site --user-site)
 examplesSrcDir=$sitePackagesDir/ncsexamples/
@@ -108,6 +111,15 @@ else
     # copy examples dir to a convenient editable location
     echo copying $examplesSrcDir to ncsexamples
     cp -p -r $examplesSrcDir ncsexamples
+fi
+
+# install rsync if it is not found
+if hash rsync 2>/dev/null; then
+    echo has rsync
+else
+    echo installing rsync
+    sudo apt-get -q update
+    sudo apt-get -q install rsync
 fi
 
 echo finished
