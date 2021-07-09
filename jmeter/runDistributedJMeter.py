@@ -41,18 +41,16 @@ class JMeterFrameProcessor(batchRunner.frameProcessor):
                 pretestFilePath
             )
         return cmd
-        
-
 
     def frameOutFileName( self, frameNum ):
         return 'jmeterOut_%03d' % frameNum
         #return 'TestPlan_results_%03d.csv' % frameNum
 
     def frameCmd( self, frameNum ):
-        cmd = 'mkdir -p jmeterOut && JVM_ARGS="%s" /opt/apache-jmeter/bin/jmeter.sh -n -t %s -l jmeterOut/TestPlan_results.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true' % (
-            self.JVM_ARGS, self.JMeterFilePath
+        cmd = 'cd %s && mkdir -p jmeterOut && JVM_ARGS="%s" /opt/apache-jmeter/bin/jmeter.sh -n -t %s -l jmeterOut/TestPlan_results.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true' % (
+            self.workerDirPath, self.JVM_ARGS, self.JMeterFilePath
         )
-        cmd += ' && mv jmeterOut %s' % (self.frameOutFileName( frameNum ))
+        cmd += ' && mv jmeterOut ~/%s' % (self.frameOutFileName( frameNum ))
         return cmd
 
 
@@ -95,28 +93,26 @@ if workerDirPath:
 else:
     logger.error( 'this version requires a workerDirPath' )
     sys.exit( 1 )
-logger.info( 'workerDirPath: %s', workerDirPath )
+logger.debug( 'workerDirPath: %s', workerDirPath )
 
 jmxFilePath = args.jmxFile
-if not os.path.isfile( jmxFilePath ):
-    logger.error( 'the jmx file "%s" was not found', jmxFilePath )
+jmxFullerPath = os.path.join( workerDirPath, jmxFilePath )
+if not os.path.isfile( jmxFullerPath ):
+    logger.error( 'the jmx file "%s" was not found in %s', jmxFilePath, workerDirPath )
     sys.exit( 1 )
 logger.debug( 'using test plan "%s"', jmxFilePath )
 
-if workerDirPath and jmxFilePath.find( workerDirPath+'/' ) != 0:
-    logger.error( 'the jmx file "%s" is not in the workerDirPath "%s"', jmxFilePath, workerDirPath )
-    sys.exit( 1 )
 
 jmeterBinPath = args.jmeterBinPath
 if not jmeterBinPath:
     jmeterVersion = '5.4.1'  # 5.3 and 5.4.1 have been tested, others may work as well
     jmeterBinPath = scriptDirPath()+'/apache-jmeter-%s/bin/jmeter.sh' % jmeterVersion
 
-jmxTree = jmxTool.parseJmxFile( jmxFilePath )
+jmxTree = jmxTool.parseJmxFile( jmxFullerPath )
 jmxDur = jmxTool.getDuration( jmxTree )
 logger.debug( 'jmxDur: %s seconds', jmxDur )
 
-frameTimeLimit = max( round( jmxDur * 1.25 ), jmxDur+6*60 ) # some slop beyond the planned duration
+frameTimeLimit = max( round( jmxDur * 1.5 ), jmxDur+8*60 ) # some slop beyond the planned duration
 
 JMeterFrameProcessor.JMeterFilePath = jmxFilePath
 
