@@ -40,13 +40,19 @@ def parseJmxFile( jmxFilePath ):
 
 def getDuration( tree ):
     root = tree
-    # works juast as well with a tree as with the root element of a tree
+    # works just as well with a tree as with the root element of a tree
     #root = tree.getroot()
     totDur = 0
+    # must consider RunTime elements as well as ThreadGroup elements
+    runTimes = root.findall("./hashTree/hashTree/hashTree/RunTime")
+    for runTime in runTimes:
+        prop = runTime.find( 'stringProp')
+        if prop != None:  # prop by itself is not bool-like
+            if prop.attrib.get( 'name' ) == 'RunTime.seconds':
+                runTimeDur = numberOrZero(prop.text)
+                totDur = max( totDur, runTimeDur )
     attribNames = set()
     groups =root.findall("./hashTree/hashTree/ThreadGroup")
-    nThreadGroups = len(groups)
-    #print( nThreadGroups, 'ThreadGroups' )
     for group in groups:
         delay = dur = 0
         for elem in group:
@@ -88,9 +94,9 @@ if __name__ == "__main__":
 
     tree = parseJmxFile( jmxFilePath )
 
-    #print( 'EXTRACTED duration', getDuration( tree ) )
+    print( 'EXTRACTED duration', getDuration( tree ) )
     root = tree.getroot()
-    if False:  # enable this for debuigging
+    if False:  # enable this for debugging
         totDur = 0
         
         # for iterating everything down to greatGrandChildren
@@ -101,8 +107,9 @@ if __name__ == "__main__":
                 print( '  ', grandChild.tag )
                 #print( '  ', grandChild.tag, grandChild.attrib)
                 for greatGrandChild in grandChild:
-                    #print( '    ', greatGrandChild.tag )
                     print( '    ', greatGrandChild.tag, grandChild.attrib )
+                    if greatGrandChild.find( 'RunTime' ):
+                        print( '      RUNTIME', greatGrandChild.find( 'RunTime' ) )
                 if grandChild.tag == 'hashTree':
                     groups = grandChild.findall( 'ThreadGroup' )
                     print( len(groups), 'ThreadGroups' )
@@ -120,6 +127,9 @@ if __name__ == "__main__":
                         effDur = delay + dur
                         totDur = max( totDur, effDur )
                         print( '      EFFDUR', effDur )
+                    runTime = grandChild.find( './hashTree/RunTime' )
+                    if runTime:
+                        print( '  FOUND', runTime )
         print( 'totDur', totDur )
         
     '''
@@ -132,12 +142,24 @@ if __name__ == "__main__":
     print( 'version info', root.attrib )
     print( 'jmeter version', root.attrib.get( 'jmeter') )
     
-    print( 'iterating with XPATH' )
     totDur = 0
     attribNames = set()
+    runTimes = root.findall("./hashTree/hashTree/hashTree/RunTime")
+    if runTimes:
+        print( len(runTimes), 'runTime(s)')
+        runTime = runTimes[0]
+    for runTime in runTimes:
+        #print('runTime', runTime.attrib )
+        prop = runTime.find( 'stringProp')
+        if prop != None:  # prop by itself is not bool-like
+            #print( prop.attrib, prop.text )
+            if prop.attrib.get( 'name' ) == 'RunTime.seconds':
+                runTimeDur = numberOrZero(prop.text)
+                print( 'runTimeDur', runTimeDur )
+                totDur = max( totDur, runTimeDur )
     groups = root.findall("./hashTree/hashTree/ThreadGroup")
     nThreadGroups = len(groups)
-    print( nThreadGroups, 'ThreadGroups' )
+    print( nThreadGroups, 'ThreadGroup(s)' )
     for group in groups:
         print( '  threadGroup:')
         delay = dur = 0
