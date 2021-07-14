@@ -65,18 +65,21 @@ logger.setLevel(logging.INFO)
 ap = argparse.ArgumentParser( description=__doc__,
     fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
 ap.add_argument( '--authToken', help='the NCS authorization token to use (or none, to use NCS_AUTH_TOKEN env var' )
-ap.add_argument( '--outDataDir', default='data', help='a path to the output data dir for this run' )
+ap.add_argument( '--outDataDir', required=True, help='a path to the output data dir for this run (required)' )
 ap.add_argument( '--filter', help='json to filter instances for launch',
     default = '{ "regions": ["usa", "india"], "dar": "==100", "dpr": ">=48", "ram": ">=3800000000", "storage": ">=2000000000" }'
     )
 ap.add_argument( '--jmxFile', required=True, help='the JMeter test plan file path (required)' )
-ap.add_argument( '--jtlFile', help='the file name of the jtl file produced by the test plan (if any)' )
+ap.add_argument( '--jtlFile', help='the file name of the jtl file produced by the test plan (if any)',
+    default='TestPlan_results.csv'
+    )
+ap.add_argument( '--planDuration', type=float, help='the expected duration of the test plan, in seconds' )
 ap.add_argument( '--workerDir', help='the directory to upload to workers',
     default='jmeterWorker'
     )
 ap.add_argument( '--nWorkers', type=int, default=6, help='the number of Load-generating workers' )
 # for analysis and plotting
-ap.add_argument( '--rampStepDuration', type=float, default=60, help='duration, in seconds, of ramp step' )
+ap.add_argument( '--rampStepDuration', type=float, default=60, help='duration of ramp step, in seconds' )
 ap.add_argument( '--SLODuration', type=float, default=240, help='SLO duration, in seconds' )
 ap.add_argument( '--SLOResponseTimeMax', type=float, default=2.5, help='SLO RT threshold, in seconds' )
 # environmental
@@ -108,11 +111,13 @@ if not jmeterBinPath:
     jmeterVersion = '5.4.1'  # 5.3 and 5.4.1 have been tested, others may work as well
     jmeterBinPath = scriptDirPath()+'/apache-jmeter-%s/bin/jmeter.sh' % jmeterVersion
 
-jmxTree = jmxTool.parseJmxFile( jmxFullerPath )
-jmxDur = jmxTool.getDuration( jmxTree )
-logger.debug( 'jmxDur: %s seconds', jmxDur )
-
-frameTimeLimit = max( round( jmxDur * 1.5 ), jmxDur+8*60 ) # some slop beyond the planned duration
+# use given planDuration unless it is not positive, in which case extract from the jmx
+planDuration = args.planDuration
+if planDuration <= 0:
+    jmxTree = jmxTool.parseJmxFile( jmxFullerPath )
+    planDuration = jmxTool.getDuration( jmxTree )
+    logger.debug( 'jmxDur: %s seconds', planDuration )
+frameTimeLimit = max( round( planDuration * 1.5 ), planDuration+8*60 ) # some slop beyond the planned duration
 
 JMeterFrameProcessor.JMeterFilePath = jmxFilePath
 
