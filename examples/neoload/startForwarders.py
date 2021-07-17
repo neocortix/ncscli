@@ -49,7 +49,7 @@ def startForwarders( agentInstances, forwarderHost='localhost',
             ]
             #logger.info( 'cmd: %s', cmd )
             rc = subprocess.call( cmd, shell=False,
-                stdin=subprocess.DEVNULL
+                stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                 )
             if rc:
                 logger.warning( 'could not forward to %s (rc %d)', iidAbbrev, rc )
