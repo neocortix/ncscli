@@ -368,7 +368,12 @@ def tellInstances( instancesSpec, command=None, resultsLogFilePath=None,
         eventLoop.set_debug(True)
     if stopOnSigterm:
         origHandler = signal.getsignal( signal.SIGTERM )
-        eventLoop.add_signal_handler(signal.SIGTERM, sigtermHandler)
+        try:
+            eventLoop.add_signal_handler(signal.SIGTERM, sigtermHandler)
+        except NotImplementedError:
+            logger.info( 'could not add_signal_handler (normal on Windows, not normal on Linux')
+        except Exception as exc:
+            logger.warning( 'add_signal_handler gave exception (%s) %s', type(exc), exc )
     try:
         statuses = eventLoop.run_until_complete(run_multiple_clients(
             startedInstances, program, scpSrcFilePath=upload,
