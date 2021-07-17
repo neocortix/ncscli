@@ -522,7 +522,11 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
         goodInstances = []
         badInstances = []
         if startedInstances:
-            returnCodes = checkInstanceClocks( startedInstances, timeLimit=120 )
+            # avoid calling checkInstanceClocks on windows because stdCommandInstance runs very slowly there
+            if sys.platform.startswith( 'win32' ):
+                returnCodes = []
+            else:
+                returnCodes = checkInstanceClocks( startedInstances, timeLimit=120 )
             if not any( returnCodes ):
                 logger.info( 'checkInstanceClocks found all good' )
                 goodInstances = startedInstances
@@ -566,20 +570,22 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
                         logger.info( 'waiting for installer' )
             narrator = threading.Thread( target=waiter )
             narrator.stopRequested = False
-            narrator.start()
-            installerCmd = getInstallerCmd()
-            logger.info( 'calling tellInstances to install on %d instances', len(goodInstances))
-            stepStatuses = tellInstances.tellInstances( goodInstances, installerCmd,
-                resultsLogFilePath=resultsLogFilePath,
-                download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
-                timeLimit=min(args.instTimeLimit, args.timeLimit), upload=args.commonInFilePath,
-                stopOnSigterm=True,
-                knownHostsOnly=True
-                )
-            narrator.stopRequested = True
-            narrator.join( timeout=60 )
-            if narrator.is_alive():
-                logger.warning( 'the narrator thread did not stop')
+            try:
+                narrator.start()
+                installerCmd = getInstallerCmd()
+                logger.info( 'calling tellInstances to install on %d instances', len(goodInstances))
+                stepStatuses = tellInstances.tellInstances( goodInstances, installerCmd,
+                    resultsLogFilePath=resultsLogFilePath,
+                    download=None, downloadDestDir=None, jsonOut=None, sshAgent=args.sshAgent,
+                    timeLimit=min(args.instTimeLimit, args.timeLimit), upload=args.commonInFilePath,
+                    stopOnSigterm=True,
+                    knownHostsOnly=True
+                    )
+            finally:
+                narrator.stopRequested = True
+                narrator.join( timeout=60 )
+                if narrator.is_alive():
+                    logger.warning( 'the narrator thread did not stop')
 
             # SHOULD restore our handler because tellInstances may have overridden it
             #signal.signal( signal.SIGTERM, sigtermHandler )
@@ -627,6 +633,13 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
             logger.debug( 'deleting sshClientKey %s', sshClientKeyName)
             ncs.deleteSshClientKey( args.authToken, sshClientKeyName )
         raise
+
+def checkForRsync():
+    try:
+        rc = subprocess.run(['rsync', '--version'], stdout=subprocess.DEVNULL).returncode
+    except FileNotFoundError:
+        return False
+    return rc == 0
 
 def rsyncFromRemote1( srcFileName, destFilePath, inst, timeLimit ):
     sshSpecs = inst['ssh']
@@ -818,6 +831,8 @@ def renderFramesOnInstance( inst ):
     logLevel = logger.getEffectiveLevel()
     logger.info( 'would compute frames on instance %s', abbrevIid )
 
+    hasRsync = checkForRsync()
+
     '''
     # rsync the common input file, if any
     rsyncTimeLimit = min( 18000, timeLimit )  # was 240; have used 1800 for big files
@@ -981,7 +996,8 @@ def renderFramesOnInstance( inst ):
         if curFrameRendered and outFileName:
             logFrameState( frameNum, 'retrieving', iid )
             scpTimeLimit = min( timeLimit, 1200 )  # sorry, doesn't account for time already spent
-            (returnCode, stderr) = rsyncFromRemote( 
+            rFunc = rsyncFromRemote if hasRsync else scpFromRemote
+            (returnCode, stderr) = rFunc( 
                 outFileName, g_.dataDirPath, inst, timeLimit=scpTimeLimit
                 #outFileName, os.path.join( g_.dataDirPath, outFileName ), inst
                 )
