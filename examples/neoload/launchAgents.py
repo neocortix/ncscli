@@ -15,7 +15,7 @@ import ncscli.tellInstances as tellInstances
 import startForwarders  # expected to be in the same directory
 
 
-neoloadVersion = '7.7'  # '7.6' and '7.7 are currently supported
+neoloadVersion = '7.10'  # '7.6', '7.7' and '7.10' are currently supported
 nlWebWanted = False
 
 class g_:
@@ -27,7 +27,9 @@ class neoloadFrameProcessor(batchRunner.frameProcessor):
     '''defines details for installing Neotys Load Generator agent on a worker'''
 
     def installerCmd( self ):
-        if neoloadVersion == '7.7':
+        if neoloadVersion == '7.10':
+            return 'nlAgent/install_7-10.sh'
+        elif neoloadVersion == '7.7':
             return 'nlAgent/install_7-7.sh'
         else:
             return 'nlAgent/install_7-6.sh'
@@ -101,7 +103,7 @@ def configureAgent( inst, port, timeLimit=500 ):
     if nlWebWanted:
         cmd = "cat %s/nlweb.properties >> %s/agent.properties" % tuple( [configDirPath]*2 )
     else:
-        cmd = "using standalone NeoLoad"
+        cmd = ":"  # a null command
     cmd += " && sed -i 's/NCS_LG_PORT/%d/' ~/neoload%s/conf/agent.properties" % (port, neoloadVersion)
     cmd += " && sed -i 's/NCS_LG_HOST/%s/' ~/neoload%s/conf/agent.properties" % (forwarderHost, neoloadVersion)
     logger.debug( 'cmd: %s', cmd )
@@ -140,15 +142,18 @@ logger.setLevel(logging.INFO)
 dateTimeTag = datetime.datetime.now().strftime( '%Y-%m-%d_%H%M%S' )
 outDataDir = 'data/neoload_' + dateTimeTag
 
-# if you are forwarding from a host other than this one, change this forwarderHost-setting code
+# you may set forwarderHost manually here, to override auto-detect
 forwarderHost = None
-try:
-    forwarderHost = requests.get( 'https://api.ipify.org' ).text
-except forwarderHost:
-    logger.warning( 'could not get public ip addr of this host')
+if not forwarderHost:
+    try:
+        forwarderHost = requests.get( 'https://api.ipify.org' ).text
+    except forwarderHost:
+        logger.warning( 'could not get public ip addr of this host')
 if not forwarderHost:
     logger.error( 'forwarderHost not set')
     exit(1)
+
+instTimeLimit = 9*60 if neoloadVersion in ['7.10'] else 30*60
 
 if nlWebWanted and not os.path.isfile( 'nlAgent/nlweb.properties'):
     logger.error( 'the file nlAgent/nlweb.properties was not found')
@@ -163,10 +168,10 @@ try:
         authToken = os.getenv('NCS_AUTH_TOKEN') or 'YourAuthTokenHere',
         encryptFiles=False,
         timeLimit = 60*60,
-        instTimeLimit = 30*60,
-        filter = '{"dpr": ">=48","ram:":">=2800000000","app-version": ">=2.1.11"}',
+        instTimeLimit = instTimeLimit,
+        filter = '{ "dar": "==100", "regions": ["usa"], "dpr": ">=48","ram:":">=5800000000","app-version": ">=2.1.14"}',
         outDataDir = outDataDir,
-        nWorkers = 9
+        nWorkers = 10
     )
     if rc == 0:
         portRangeStart=7100
@@ -182,7 +187,10 @@ try:
         startedInstances = [inst for inst in launchedInstances if inst['state'] == 'started' ]
         logger.info( '%d instances were launched', len(startedInstances) )
 
-        if neoloadVersion == '7.7':
+        if neoloadVersion == '7.10':
+            agentLogFilePath = '/root/.neotys/neoload/v7.10/logs/agent.log'
+            starterCmd = 'cd ~/neoload7.10/ && /usr/bin/java -Xms512m -Xmx512m -Dvertx.disableDnsResolver=true -classpath $HOME/neoload7.10/.install4j/i4jruntime.jar:$HOME/neoload7.10/.install4j/launchera03c11da.jar:$HOME/neoload7.10/bin/*:$HOME/neoload7.10/lib/crypto/*:$HOME/neoload7.10/lib/*:$HOME/neoload7.10/lib/jdbcDrivers/*:$HOME/neoload7.10/lib/plugins/ext/* install4j.com.neotys.nl.agent.launcher.AgentLauncher_LoadGeneratorAgent start &'
+        elif neoloadVersion == '7.7':
             agentLogFilePath = '/root/.neotys/neoload/v7.7/logs/agent.log'
             starterCmd = 'cd ~/neoload7.7/ && /usr/bin/java -Xmx512m -Dvertx.disableDnsResolver=true -classpath $HOME/neoload7.7/.install4j/i4jruntime.jar:$HOME/neoload7.7/.install4j/launchera03c11da.jar:$HOME/neoload7.7/bin/*:$HOME/neoload7.7/lib/crypto/*:$HOME/neoload7.7/lib/*:$HOME/neoload7.7/lib/jdbcDrivers/*:$HOME/neoload7.7/lib/plugins/ext/* install4j.com.neotys.nl.agent.launcher.AgentLauncher_LoadGeneratorAgent start &'
         else:
