@@ -75,7 +75,9 @@ def retrieveLogs( liveInstances, neoloadVersion ):
     goodInstances = liveInstances
     logger.info( 'retrieving logs for %d instance(s)', len(goodInstances) )
 
-    if neoloadVersion == '7.7':
+    if neoloadVersion == '7.10':
+        agentLogFilePath = '/root/.neotys/neoload/v7.10/logs/*.log'
+    elif neoloadVersion == '7.7':
         agentLogFilePath = '/root/.neotys/neoload/v7.7/logs/*.log'
     else:
         agentLogFilePath = '/root/.neotys/neoload/v7.6/logs/*.log'
@@ -108,7 +110,7 @@ def showLogs( dataDirPath ):
                 os.path.getsize( inFilePath ), fileModDateTime.strftime( '%H:%M:%S' ) 
                 )
 
-def checkLogs( liveInstances, dataDirPath ):
+def checkLogs( liveInstances, dataDirPath, nlWebWanted ):
     # prepare to read agent logs
     logsDirPath = os.path.join( dataDirPath, 'agentLogs' )
     logDirs = os.listdir( logsDirPath )
@@ -150,7 +152,7 @@ def checkLogs( liveInstances, dataDirPath ):
                         errorsByIid[iid] = theseErrors
                     if 'Neoload Web : CONNECTED status : READY' in line:
                         connected = True
-                if not connected:
+                if nlWebWanted and not connected:
                     logger.warning( 'instance %s did not connect to nlweb', iidAbbrev )
         '''
         logFilePath = os.path.join( logsDirPath, logDir, 'neoload-log4j.log' )
@@ -378,8 +380,9 @@ if __name__ == "__main__":
     retrieveLogs( liveInstances, args.neoloadVersion )
     #showLogs( dataDirPath )
 
+    nlWebWanted = bool( args.nlWebUrl )
     terminatedIids = []
-    errorsByIid = checkLogs( liveInstances, dataDirPath )
+    errorsByIid = checkLogs( liveInstances, dataDirPath, nlWebWanted )
     if errorsByIid:
         badIids = list( errorsByIid.keys() )
         logger.warning( 'terminating %d error-logged instance(s)', len( badIids ) )
