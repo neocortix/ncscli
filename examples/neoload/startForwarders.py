@@ -30,7 +30,7 @@ def startForwarders( agentInstances, forwarderHost='localhost',
             iid = inst['instanceId']
             if portMap:
                 assignedPort = portMap[ iid ]
-                logger.info( 'assigning mapped port %d', assignedPort )
+                logger.debug( 'assigning mapped port %d', assignedPort )
             else:
                 logger.info( 'assigning incremental port %d', assignedPort )
 
