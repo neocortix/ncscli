@@ -123,7 +123,7 @@ async def run_client(inst, cmd, sshAgent=None, scpSrcFilePath=None, dlDirPath='.
         #sshAgent = os.getenv( 'SSH_AUTH_SOCK' )
         #async with asyncssh.connect(host, port=port, username=user, password=password, known_hosts=None) as conn:
         async with asyncssh.connect(host, port=port, username=user,
-            keepalive_interval=30, keepalive_count_max=6, login_timeout=120,
+            keepalive_interval=30, keepalive_count_max=12, login_timeout=120,
             known_hosts=known_hosts, agent_path=sshAgent ) as conn:
             serverHostKey = conn.get_server_host_key()
             #logger.info( 'got serverHostKey (%s) %s', type(serverHostKey), serverHostKey )
