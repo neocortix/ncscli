@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 '''launches new NCS instances and starts the NeoLoad LoadGenerator agent on them'''
+import argparse
 from concurrent import futures
 import datetime
 import json
@@ -45,8 +46,8 @@ def commandInstance( inst, cmd, timeLimit ):
     #logInstallerOperation( iid, ['connect', sshSpecs['host'], sshSpecs['port']] )
     with subprocess.Popen(['ssh',
                     '-p', str(sshSpecs['port']),
-                    '-o', 'ServerAliveInterval=360',
-                    '-o', 'ServerAliveCountMax=3',
+                    '-o', 'ServerAliveInterval=30',
+                    '-o', 'ServerAliveCountMax=12',
                     sshSpecs['user'] + '@' + sshSpecs['host'], cmd],
                     encoding='utf8',
                     #stdout=subprocess.PIPE,  # subprocess.PIPE subprocess.DEVNULL
@@ -141,6 +142,14 @@ if __name__ == '__main__':
     #batchRunner.logger.setLevel(logging.DEBUG)  # for more verbosity
     logger.setLevel(logging.INFO)
 
+    ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter )
+    ap.add_argument( '--forwarderHost', help='IP addr (or host name) of the forwarder host',
+        default='localhost' )
+    ap.add_argument( '--nWorkers', type=int, help='the number of agents to launch',
+        default=10 )
+    args = ap.parse_args()
+
     supportedVersions = ['7.6', '7.7', '7.10']
     if neoloadVersion not in supportedVersions:
         logger.error( 'version "%s" is not suppoprted; supported versions are %s',
@@ -151,7 +160,7 @@ if __name__ == '__main__':
     outDataDir = 'data/neoload_' + dateTimeTag
 
     # you may set forwarderHost manually here, to override auto-detect
-    forwarderHost = None
+    forwarderHost = args.forwarderHost
     if not forwarderHost:
         try:
             forwarderHost = requests.get( 'https://api.ipify.org' ).text
@@ -180,7 +189,7 @@ if __name__ == '__main__':
             instTimeLimit = instTimeLimit,
             filter = '{ "dar": "==100", "regions": ["usa"], "dpr": ">=48","ram:":">=5800000000","app-version": ">=2.1.14"}',
             outDataDir = outDataDir,
-            nWorkers = 10
+            nWorkers = args.nWorkers
         )
         if rc == 0:
             portRangeStart=7100
@@ -264,12 +273,6 @@ if __name__ == '__main__':
                                     logger.warning( 'log for %s says it did not start', iid[0:8] )
                                 else:
                                     goodIids.append( iid )
-                                '''
-                                if ': Agent started' in contents:
-                                    goodIids.append( iid )
-                                else:
-                                    logger.warning( 'log for %s says it did not start', iid[0:8] )
-                                '''
                         except Exception as exc:
                             logger.warning( 'exception reading log (%s) %s', type(exc), exc )
                     else:
