@@ -20,7 +20,7 @@ setuptools.setup(
     scripts=['ncscli/ncs.py', 'ncscli/jsonToInv.py', 'ncscli/purgeKnownHosts.py', 'ncscli/tellInstances.py'],
     packages=["ncscli", 'ncsexamples'],
     package_dir = { 'ncscli': 'ncscli', 'ncsexamples': 'examples' },
-    package_data = { '': ['*', '*/*', '*/*/*'] },
+    package_data = { '': ['*', '*/*', '*/*/*', '*/*/*/*', '*/*/*/*/*'] },
     exclude_package_data = { '': ['*_pycache_*', '*.pyc', '*/*.pyc'] },
 
     description="ncscli is the command-line and python interface for Neocortix Cloud Services.",
