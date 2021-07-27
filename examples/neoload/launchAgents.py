@@ -31,6 +31,7 @@ class neoloadFrameProcessor(batchRunner.frameProcessor):
 
     def installerCmd( self ):
         if neoloadVersion == '7.10':
+            return 'nlAgent/install_7-10_slim.sh'
             return 'nlAgent/install_7-10.sh'
         elif neoloadVersion == '7.7':
             return 'nlAgent/install_7-7.sh'
@@ -59,7 +60,7 @@ def commandInstance( inst, cmd, timeLimit ):
         while time.time() < deadline:
             proc.poll() # sets proc.returncode
             if proc.returncode == None:
-                logger.info( 'waiting for command on instance %s', abbrevIid)
+                logger.debug( 'waiting for command on instance %s', abbrevIid)
             else:
                 if proc.returncode == 0:
                     logger.debug( 'command succeeded on instance %s', abbrevIid )
@@ -83,7 +84,7 @@ def commandInstance( inst, cmd, timeLimit ):
         try:
             proc.wait(timeout=5)
             if proc.returncode:
-                logger.warning( 'ssh return code %d', proc.returncode )
+                logger.debug( 'ssh return code %d', proc.returncode )
         except subprocess.TimeoutExpired:
             logger.warning( 'ssh did not terminate in time' )
         #stderrThr.join()
@@ -171,7 +172,7 @@ if __name__ == '__main__':
         exit(1)
     
     authToken = os.getenv('NCS_AUTH_TOKEN') or 'YourAuthTokenHere'
-    instTimeLimit = 13*60 if neoloadVersion in ['7.10'] else 30*60
+    instTimeLimit = 11*60 if neoloadVersion in ['7.10'] else 30*60
 
     if nlWebWanted and not os.path.isfile( 'nlAgent/nlweb.properties'):
         logger.error( 'the file nlAgent/nlweb.properties was not found')
@@ -187,7 +188,8 @@ if __name__ == '__main__':
             encryptFiles=False,
             timeLimit = 60*60,
             instTimeLimit = instTimeLimit,
-            filter = '{ "dar": "==100", "regions": ["usa"], "dpr": ">=48","ram:":">=5800000000","app-version": ">=2.1.14"}',
+            filter = '{ "dar": ">=100", "regions": ["usa"], "dpr": ">=48", "ram": ">=3800000000"}',
+            # "regions": ["usa"],  "regions": ["north-america", "europe"]
             outDataDir = outDataDir,
             nWorkers = args.nWorkers
         )
@@ -207,9 +209,11 @@ if __name__ == '__main__':
             startedInstances = [inst for inst in launchedInstances if inst['state'] == 'started' ]
             #logger.info( '%d instances were launched', len(startedInstances) )
 
+            #COULD check memory and available ports here
+
             if neoloadVersion == '7.10':
                 agentLogFilePath = '/root/.neotys/neoload/v7.10/logs/agent.log'
-                starterCmd = 'cd ~/neoload7.10/ && /usr/bin/java -Xms512m -Xmx512m -Dvertx.disableDnsResolver=true -classpath $HOME/neoload7.10/.install4j/i4jruntime.jar:$HOME/neoload7.10/.install4j/launchera03c11da.jar:$HOME/neoload7.10/bin/*:$HOME/neoload7.10/lib/crypto/*:$HOME/neoload7.10/lib/*:$HOME/neoload7.10/lib/jdbcDrivers/*:$HOME/neoload7.10/lib/plugins/ext/* install4j.com.neotys.nl.agent.launcher.AgentLauncher_LoadGeneratorAgent start &'
+                starterCmd = 'cd ~/neoload7.10/ && /usr/bin/java -Xms50m -Xmx100m -Dvertx.disableDnsResolver=true -classpath $HOME/neoload7.10/.install4j/i4jruntime.jar:$HOME/neoload7.10/.install4j/launchera03c11da.jar:$HOME/neoload7.10/bin/*:$HOME/neoload7.10/lib/crypto/*:$HOME/neoload7.10/lib/*:$HOME/neoload7.10/lib/jdbcDrivers/*:$HOME/neoload7.10/lib/plugins/ext/* install4j.com.neotys.nl.agent.launcher.AgentLauncher_LoadGeneratorAgent start & sleep 30 && free --mega 1>&2'
             elif neoloadVersion == '7.7':
                 agentLogFilePath = '/root/.neotys/neoload/v7.7/logs/agent.log'
                 starterCmd = 'cd ~/neoload7.7/ && /usr/bin/java -Xmx512m -Dvertx.disableDnsResolver=true -classpath $HOME/neoload7.7/.install4j/i4jruntime.jar:$HOME/neoload7.7/.install4j/launchera03c11da.jar:$HOME/neoload7.7/bin/*:$HOME/neoload7.7/lib/crypto/*:$HOME/neoload7.7/lib/*:$HOME/neoload7.7/lib/jdbcDrivers/*:$HOME/neoload7.7/lib/plugins/ext/* install4j.com.neotys.nl.agent.launcher.AgentLauncher_LoadGeneratorAgent start &'
@@ -225,6 +229,7 @@ if __name__ == '__main__':
                 for index, inst in enumerate( startedInstances ):
                     iid = inst['instanceId']
                     portMap[iid] = index + portRangeStart
+                logger.info( 'configuring agents')
                 returnCodes = configureAgents( startedInstances, ports, timeLimit=600 )
                 for index, code in enumerate( returnCodes ):
                     if code==0:
@@ -247,6 +252,8 @@ if __name__ == '__main__':
                     goodIids.append( status['instanceId'])
                 else:
                     logger.warning( 'could not start agent on %s', status['instanceId'][0:8] )
+            #COULD check bound ports again here
+            #COULD download logs from all installed instances rather than just good-started instances
             goodInstances = [inst for inst in startedInstances if inst['instanceId'] in goodIids ]
             if goodInstances:
                 time.sleep( 60 )
@@ -279,7 +286,7 @@ if __name__ == '__main__':
                         logger.warning( 'could not download log from %s', status['instanceId'][0:8] )
                 goodInstances = [inst for inst in goodInstances if inst['instanceId'] in goodIids ]
                 with open( outDataDir + '/startedAgents.json','w' ) as outFile:
-                    json.dump( goodInstances, outFile )
+                    json.dump( goodInstances, outFile, indent=2 )
 
                 # plot map of workers
                 if os.path.isfile( outDataDir +'/startedAgents.json' ):
@@ -303,7 +310,7 @@ if __name__ == '__main__':
                 forwardedIids = [inst['instanceId'] for inst in goodInstances ]
                 unusableIids = list( set(launchedIids) - set( forwardedIids) )
                 if unusableIids:
-                    logger.info( 'terminating %d unusable instances', len(unusableIids) )
+                    logger.debug( 'terminating %d unusable instances', len(unusableIids) )
                     ncs.terminateInstances( authToken, unusableIids )
             if launchedInstances:
                 print( 'when you want to terminate these instances, use %s terminateAgents.py "%s"'
