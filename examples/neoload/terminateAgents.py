@@ -8,7 +8,7 @@ import json
 import logging
 import os
 import subprocess
-#import sys
+import sys
 # neocortix modules
 import ncscli.ncs as ncs
 
@@ -30,19 +30,32 @@ if __name__ == "__main__":
 
     # use authToken env var if none given as arg
     authToken = args.authToken or os.getenv('NCS_AUTH_TOKEN')
-
+    if not authToken:
+        logger.error( 'no authToken given, so not terminating')
+        sys.exit(1)
     inFilePath = args.inFilePath
     if os.path.isdir( inFilePath ):
         inFilePath = os.path.join( inFilePath, 'recruitLaunched.json' )
-        logger.info( 'a directory path was given; reading from %s', inFilePath )
+        logger.debug( 'a directory path was given; reading from %s', inFilePath )
+    respCode = None
     with open( inFilePath ) as inFile:
         instances = json.load( inFile )
-        if instances:
-            jobId = instances[0]['job']
-            # terminate only if there's an authtoken  
-            if authToken:
-                ncs.terminateJobInstances( authToken, jobId )
+        if not instances:
+            logger.info( 'no instances found' )
+            respCode = 204
+        else:
+            jobId = instances[0].get('job')
+            # terminate only if there's a job id
+            if jobId:
+                logger.info( 'terminating instances for job %s', jobId )
+                respCode = ncs.terminateJobInstances( authToken, jobId )
             else:
-                logger.info( 'no authToken given, so not terminating')
+                logger.warning( 'no job id in instances file')
+                respCode = 500
             ncs.purgeKnownHosts( instances )
-    logger.info( 'finished' )
+    if respCode in [200, 204]:
+        logger.info( 'finished' )
+        sys.exit(0)
+    else:
+        logger.error( 'error code: %s', respCode )
+        sys.exit(2)
