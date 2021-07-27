@@ -50,6 +50,7 @@ def checkProcesses( liveInstances ):
     goodInstances = liveInstances
 
     cmd = "ps -ef | grep -v grep | grep 'LoadGeneratorAgent start' > /dev/null"
+    #cmd = "free --mega 1>&2 ; ps -ef | grep -v grep | grep 'LoadGeneratorAgent start' > /dev/null"
     # check for a running agent process on each instance
     stepStatuses = tellInstances.tellInstances( goodInstances, cmd,
         timeLimit=30*60,
@@ -304,7 +305,7 @@ if __name__ == "__main__":
 
     ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@' )
     ap.add_argument( '--dataDirPath', help='the path to the directory for input and output data' )
-    ap.add_argument( '--neoloadVersion', default ='7.7', help='version of neoload to check for' )
+    ap.add_argument( '--neoloadVersion', default ='7.10', help='version of neoload to check for' )
     ap.add_argument( '--nlWebUrl', help='the URL of a neoload web server to query' )
     ap.add_argument( '--nlWebToken', help='a token for authorized access to a neoload web server' )
     ap.add_argument( '--logLevel', default ='info', help='verbosity of log (e.g. debug, info, warning, error)' )
@@ -386,7 +387,7 @@ if __name__ == "__main__":
     if errorsByIid:
         badIids = list( errorsByIid.keys() )
         logger.warning( 'terminating %d error-logged instance(s)', len( badIids ) )
-        ncs.terminateInstances( authToken, badIids )
+        #ncs.terminateInstances( authToken, badIids )
         terminatedIids.extend( badIids )
 
     forwarders = findForwarders()
@@ -398,7 +399,7 @@ if __name__ == "__main__":
     badIids = checkForwarders( liveInstances,  forwarders )
     if badIids:
         logger.warning( 'terminating %d not-forwarded instance(s)', len( badIids ) )
-        ncs.terminateInstances( authToken, badIids )
+        #ncs.terminateInstances( authToken, badIids )
         terminatedIids.extend( badIids )
  
     terminatedIids = set( terminatedIids )
