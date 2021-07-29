@@ -18,7 +18,7 @@ import ncscli.tellInstances as tellInstances
 import startForwarders  # expected to be in the same directory
 
 
-neoloadVersion = '7.10'  # '7.6', '7.7' and '7.10' are currently supported
+neoloadVersion = None  # '7.6', '7.7' and '7.10' are currently supported
 nlWebWanted = False
 
 class g_:
@@ -147,15 +147,20 @@ if __name__ == '__main__':
         formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( '--forwarderHost', help='IP addr (or host name) of the forwarder host',
         default='localhost' )
+    ap.add_argument( '--neoloadVersion', default ='7.10', help='version of neoload agent' )
+    ap.add_argument( '--nlWeb', type=ncs.boolArg, default=False, help='whether to use NeoLoad Web' )
     ap.add_argument( '--nWorkers', type=int, help='the number of agents to launch',
         default=10 )
     args = ap.parse_args()
 
+    neoloadVersion =  args.neoloadVersion
     supportedVersions = ['7.6', '7.7', '7.10']
     if neoloadVersion not in supportedVersions:
         logger.error( 'version "%s" is not suppoprted; supported versions are %s',
             neoloadVersion, sorted( supportedVersions ) )
         sys.exit( 1 )
+
+    nlWebWanted = args.nlWeb
 
     dateTimeTag = datetime.datetime.now().strftime( '%Y-%m-%d_%H%M%S' )
     outDataDir = 'data/neoload_' + dateTimeTag
@@ -188,7 +193,8 @@ if __name__ == '__main__':
             encryptFiles=False,
             timeLimit = 60*60,
             instTimeLimit = instTimeLimit,
-            filter = '{ "dar": ">=100", "regions": ["usa"], "dpr": ">=48", "ram": ">=3800000000"}',
+            filter = '{ "dar": ">=100", "regions": ["north-america"], "dpr": ">=48", "ram": ">=3800000000"}',
+            #filter = '{ "dar": ">=100", "regions": ["usa"], "dpr": ">=48", "ram": ">=3800000000"}',
             # "regions": ["usa"],  "regions": ["north-america", "europe"]
             outDataDir = outDataDir,
             nWorkers = args.nWorkers
@@ -216,7 +222,7 @@ if __name__ == '__main__':
                 starterCmd = 'cd ~/neoload7.10/ && /usr/bin/java -Xms50m -Xmx100m -Dvertx.disableDnsResolver=true -classpath $HOME/neoload7.10/.install4j/i4jruntime.jar:$HOME/neoload7.10/.install4j/launchera03c11da.jar:$HOME/neoload7.10/bin/*:$HOME/neoload7.10/lib/crypto/*:$HOME/neoload7.10/lib/*:$HOME/neoload7.10/lib/jdbcDrivers/*:$HOME/neoload7.10/lib/plugins/ext/* install4j.com.neotys.nl.agent.launcher.AgentLauncher_LoadGeneratorAgent start & sleep 30 && free --mega 1>&2'
             elif neoloadVersion == '7.7':
                 agentLogFilePath = '/root/.neotys/neoload/v7.7/logs/agent.log'
-                starterCmd = 'cd ~/neoload7.7/ && /usr/bin/java -Xmx512m -Dvertx.disableDnsResolver=true -classpath $HOME/neoload7.7/.install4j/i4jruntime.jar:$HOME/neoload7.7/.install4j/launchera03c11da.jar:$HOME/neoload7.7/bin/*:$HOME/neoload7.7/lib/crypto/*:$HOME/neoload7.7/lib/*:$HOME/neoload7.7/lib/jdbcDrivers/*:$HOME/neoload7.7/lib/plugins/ext/* install4j.com.neotys.nl.agent.launcher.AgentLauncher_LoadGeneratorAgent start &'
+                starterCmd = 'cd ~/neoload7.7/ && /usr/bin/java -Xms50m -Xmx100m -Dvertx.disableDnsResolver=true -classpath $HOME/neoload7.7/.install4j/i4jruntime.jar:$HOME/neoload7.7/.install4j/launchera03c11da.jar:$HOME/neoload7.7/bin/*:$HOME/neoload7.7/lib/crypto/*:$HOME/neoload7.7/lib/*:$HOME/neoload7.7/lib/jdbcDrivers/*:$HOME/neoload7.7/lib/plugins/ext/* install4j.com.neotys.nl.agent.launcher.AgentLauncher_LoadGeneratorAgent start & sleep 30'
             else:
                 agentLogFilePath = '/root/.neotys/neoload/v7.6/logs/agent.log'
                 starterCmd = 'cd ~/neoload7.6/ && /usr/bin/java -Dneotys.vista.headless=true -Xmx512m -Dvertx.disableDnsResolver=true -classpath $HOME/neoload7.6/.install4j/i4jruntime.jar:$HOME/neoload7.6/.install4j/launcherc0a362f9.jar:$HOME/neoload7.6/bin/*:$HOME/neoload7.6/lib/crypto/*:$HOME/neoload7.6/lib/*:$HOME/neoload7.6/lib/jdbcDrivers/*:$HOME/neoload7.6/lib/plugins/ext/* install4j.com.neotys.nl.agent.launcher.AgentLauncher_LoadGeneratorAgentService start &'
