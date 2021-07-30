@@ -35,15 +35,7 @@ def universalizeDateTime( dt ):
     return dt.replace( tzinfo=datetime.timezone.utc )
 
 def checkProcesses( liveInstances ):
-    '''
-    startedInstances = []
-    # get details of launched instances from the json file
-    with open( instancesFilePath, 'r') as jsonInFile:
-        try:
-            startedInstances = json.load(jsonInFile)  # an array
-        except Exception as exc:
-            logger.warning( 'could not load json (%s) %s', type(exc), exc )
-    '''
+    '''check that the expected process is running on each instance'''
     logger.info( 'checking %d instance(s)', len(liveInstances) )
 
     #maybe should weed out some instances
@@ -57,7 +49,14 @@ def checkProcesses( liveInstances ):
         knownHostsOnly=True
         )
     #logger.info( 'cmd statuses: %s', stepStatuses )
-
+    errorsByIid = {}
+    for status in stepStatuses:
+        if status['status']:
+            # might like to be more selective here
+            #logger.info( 'status: %s', status )
+            errorsByIid[ status['instanceId'] ] = status
+    logger.debug( 'errorsByIid: %s', errorsByIid )
+    return errorsByIid
 
 def retrieveLogs( liveInstances, neoloadVersion ):
     '''
@@ -249,6 +248,17 @@ def parseLogLevel( arg ):
 
     return setting
 
+def purgeHostKeys( instanceRecs ):
+    '''try to purgeKnownHosts; warn if any exception'''
+    logger.info( 'purgeKnownHosts for %d instances', len(instanceRecs) )
+    try:
+        ncs.purgeKnownHosts( instanceRecs )
+    except Exception as exc:
+        logger.warning( 'exception from purgeKnownHosts (%s) %s', type(exc), exc, exc_info=True )
+        return 1
+    else:
+        return 0
+
 def queryMongoForLGs( mongoHost ):
     import pymongo
     mongoPort = 27017
@@ -280,7 +290,17 @@ def queryNlWebForResources( nlWebUrl, nlWebToken ):
     url = nlWebUrl+'/v3/resources/zones'
 
     logger.info( 'querying: %s', nlWebUrl )
-    resp = requests.get( url, headers=headers )
+    # set long timeouts for requests.get() as a tuple (connection timeout, read timeout) in seconds
+    timeouts = (30, 120)
+    try:
+        resp = requests.get( url, headers=headers, timeout=timeouts )
+    except requests.ConnectionError as exc:
+        logger.warning( 'ConnectionError exception (%s) %s', type(exc), exc )
+        return None
+    except Exception as exc:
+        logger.warning( 'Exception (%s) %s', type(exc), exc )
+        return None
+
     if (resp.status_code < 200) or (resp.status_code >= 300):
         logger.warning( 'error code from server (%s) %s', resp.status_code, resp.text )
     else:
@@ -293,6 +313,7 @@ def queryNlWebForResources( nlWebUrl, nlWebToken ):
             for lg in zone['loadgenerators']:
                 logger.debug( '  LG "%s" %s %s', lg['name'], lg['version'], lg['status'] )
             logger.info( '  %d LGs listed by nlweb in Zone %s', len(zone['loadgenerators']), zone['id'] )
+            logger.info( '  %d controllers listed by nlweb in Zone %s', len(zone['controllers']), zone['id'] )
 
 
 if __name__ == "__main__":
@@ -309,6 +330,7 @@ if __name__ == "__main__":
     ap.add_argument( '--nlWebUrl', help='the URL of a neoload web server to query' )
     ap.add_argument( '--nlWebToken', help='a token for authorized access to a neoload web server' )
     ap.add_argument( '--logLevel', default ='info', help='verbosity of log (e.g. debug, info, warning, error)' )
+    ap.add_argument( '--terminateBad', type=ncs.boolArg, default=False, help='whether to terminate instances found bad' )
     args = ap.parse_args()
 
     logLevel = parseLogLevel( args.logLevel )
@@ -382,13 +404,13 @@ if __name__ == "__main__":
     #showLogs( dataDirPath )
 
     nlWebWanted = bool( args.nlWebUrl )
-    terminatedIids = []
+    iidsToTerminate = []
     errorsByIid = checkLogs( liveInstances, dataDirPath, nlWebWanted )
     if errorsByIid:
         badIids = list( errorsByIid.keys() )
-        logger.warning( 'terminating %d error-logged instance(s)', len( badIids ) )
+        logger.warning( '%d error-logged instance(s)', len( badIids ) )
         #ncs.terminateInstances( authToken, badIids )
-        terminatedIids.extend( badIids )
+        iidsToTerminate.extend( badIids )
 
     forwarders = findForwarders()
     forwardersByPort = { fw['port']: fw for fw in forwarders }
@@ -398,11 +420,18 @@ if __name__ == "__main__":
 
     badIids = checkForwarders( liveInstances,  forwarders )
     if badIids:
-        logger.warning( 'terminating %d not-forwarded instance(s)', len( badIids ) )
+        logger.warning( '%d not-forwarded instance(s)', len( badIids ) )
         #ncs.terminateInstances( authToken, badIids )
-        terminatedIids.extend( badIids )
+        iidsToTerminate.extend( badIids )
  
-    terminatedIids = set( terminatedIids )
+    iidsToTerminate = set( iidsToTerminate )
+    terminatedIids = []
+    if args.terminateBad and iidsToTerminate:
+        ncs.terminateInstances( authToken, list( iidsToTerminate ) )
+        terminatedIids = list( iidsToTerminate )
+        toPurge = [inst for inst in startedInstances if inst['instanceId'] in iidsToTerminate]
+        purgeHostKeys( toPurge )
+
     stillLive = [inst for inst in liveInstances if inst['instanceId'] not in terminatedIids]
     logger.info( '%d instances are still live', len(stillLive) )
     with open( dataDirPath + '/liveAgents.json','w' ) as outFile:
