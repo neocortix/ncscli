@@ -13,6 +13,10 @@ import subprocess
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+# possible place for globals is this class's attributes
+class g_:
+    serverAliveInterval = 30
+    serverAliveCountMax = 6
 
 def startForwarders( agentInstances, forwarderHost='localhost',
     portRangeStart=7100, maxPort = 7199,
@@ -43,8 +47,10 @@ def startForwarders( agentInstances, forwarderHost='localhost',
             instPort = sshSpecs['port']
             user = sshSpecs['user']
             logger.info( '%d ->%s %s@%s:%s', assignedPort, iidAbbrev, user, instHost, instPort )
-            cmd = ['ssh', '-fNT', '-o', 'ExitOnForwardFailure=yes', '-p', str(instPort), '-L',
-                '*:'+str(assignedPort)+':localhost:'+str(assignedPort), 
+            cmd = ['ssh', '-fNT', '-o', 'ExitOnForwardFailure=yes', '-p', str(instPort),
+                '-o', 'ServerAliveInterval=%d' % g_.serverAliveInterval,
+                '-o', 'ServerAliveCountMax=%d' % g_.serverAliveCountMax,
+                '-L', '*:'+str(assignedPort)+':localhost:'+str(assignedPort), 
                 '%s@%s' % (user, instHost)
             ]
             #logger.info( 'cmd: %s', cmd )
