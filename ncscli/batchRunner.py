@@ -628,6 +628,8 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
                 jobId = launchedInstances[0].get('job')
                 if jobId:
                     ncs.terminateJobInstances( args.authToken, jobId )
+                # else (never happens) could terminateInstances using iids
+                purgeHostKeys( launchedInstances )
         # delete sshClientKey only if we just uploaded it
         if sshClientKeyName != args.sshClientKeyName:
             logger.debug( 'deleting sshClientKey %s', sshClientKeyName)
