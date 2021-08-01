@@ -110,7 +110,11 @@ def configureAgent( inst, port, timeLimit=500 ):
         cmd = ":"  # a null command
     cmd += " && sed -i 's/NCS_LG_PORT/%d/' ~/neoload%s/conf/agent.properties" % (port, neoloadVersion)
     cmd += " && sed -i 's/NCS_LG_HOST/%s/' ~/neoload%s/conf/agent.properties" % (forwarderHost, neoloadVersion)
-    logger.debug( 'cmd: %s', cmd )
+    if nlWebWanted:
+        escapedUrl = args.nlWebUrl.replace( '/', '\/' )
+        cmd += " && sed -i 's/NCS_NLWEB_TOKEN/%s/' %s/agent.properties" % (args.nlWebToken, configDirPath)
+        cmd += " && sed -i 's/NCS_NLWEB_URL/%s/' %s/agent.properties" % (escapedUrl, configDirPath)
+    logger.debug( 'info: %s', cmd )
     rc = commandInstance( inst, cmd, timeLimit=timeLimit )
     return rc
 
@@ -133,6 +137,18 @@ def configureAgents( instances, ports, timeLimit=600 ):
         logger.debug( 'returnCodes: %s', returnCodes )
     return returnCodes
 
+def purgeHostKeys( instanceRecs ):
+    '''try to purgeKnownHosts; warn if any exception'''
+    logger.debug( 'purgeKnownHosts for %d instances', len(instanceRecs) )
+    try:
+        ncs.purgeKnownHosts( instanceRecs )
+    except Exception as exc:
+        logger.warning( 'exception from purgeKnownHosts (%s) %s', type(exc), exc, exc_info=True )
+        return 1
+    else:
+        return 0
+
+
 if __name__ == '__main__':
     # configure logger formatting
     logger = logging.getLogger(__name__)
@@ -149,6 +165,8 @@ if __name__ == '__main__':
         default='localhost' )
     ap.add_argument( '--neoloadVersion', default ='7.10', help='version of neoload agent' )
     ap.add_argument( '--nlWeb', type=ncs.boolArg, default=False, help='whether to use NeoLoad Web' )
+    ap.add_argument( '--nlWebToken', help='a token for authorized access to a neoload web server' )
+    ap.add_argument( '--nlWebUrl', help='the URL of a neoload web server to query' )
     ap.add_argument( '--nWorkers', type=int, help='the number of agents to launch',
         default=10 )
     args = ap.parse_args()
@@ -161,6 +179,16 @@ if __name__ == '__main__':
         sys.exit( 1 )
 
     nlWebWanted = args.nlWeb
+
+    if nlWebWanted:
+        # make sure all the necessary nlWeb args were passed in non-empty
+        if not args.nlWebToken:
+            logger.error( 'please pass a non-empty --nlWebToken if you want to use NeoLoad Web')
+        if not args.nlWebUrl:
+            logger.error( 'please pass a non-empty --nlWebUrl if you want to use NeoLoad Web')
+        if not (args.nlWebUrl and args.nlWebUrl):
+            sys.exit( 1 )
+
 
     dateTimeTag = datetime.datetime.now().strftime( '%Y-%m-%d_%H%M%S' )
     outDataDir = 'data/neoload_' + dateTimeTag
@@ -193,7 +221,11 @@ if __name__ == '__main__':
             encryptFiles=False,
             timeLimit = 60*60,
             instTimeLimit = instTimeLimit,
-            filter = '{ "dar": ">=100", "regions": ["north-america"], "dpr": ">=48", "ram": ">=3800000000"}',
+            filter = '{ "dar": ">=99", "dpr": ">=48", "ram": ">=3800000000", "storage": ">=3800000000"}',
+            #filter = '{ "dar": ">=99", "regions": ["north-america"], "dpr": ">=39", "ram": ">=3800000000"}',
+            #filter = '{ "dar": ">=99", "regions": ["asia", "europe", "india", "middle-east", "oceania"], "dpr": ">=0", "ram": ">=3800000000"}',
+            #filter = '{ "dar": ">=99", "regions": ["north-america", "asia", "europe", "india", "middle-east", "oceania"], "dpr": ">=48", "ram": ">=3800000000"}',
+            #filter = '{ "dar": ">=99", "regions": ["north-america"], "dpr": ">=48", "ram": ">=3800000000"}',
             #filter = '{ "dar": ">=100", "regions": ["usa"], "dpr": ">=48", "ram": ">=3800000000"}',
             # "regions": ["usa"],  "regions": ["north-america", "europe"]
             outDataDir = outDataDir,
@@ -318,6 +350,9 @@ if __name__ == '__main__':
                 if unusableIids:
                     logger.debug( 'terminating %d unusable instances', len(unusableIids) )
                     ncs.terminateInstances( authToken, unusableIids )
+                    unusableInstances = [inst for inst in launchedInstances \
+                        if inst['instanceId'] in unusableIids]
+                    purgeHostKeys( unusableInstances )
             if launchedInstances:
                 print( 'when you want to terminate these instances, use %s terminateAgents.py "%s"'
                     % (sys.executable, outDataDir))
