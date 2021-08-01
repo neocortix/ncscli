@@ -375,13 +375,15 @@ if __name__ == "__main__":
     for iid in startedIids:
         reqParams = {"show-device-info":True}
         try:
-            response = ncs.queryNcsSc( 'instances/%s' % iid, authToken, reqParams=reqParams, maxRetries=1)
+            response = ncs.queryNcsSc( 'instances/%s' % iid, authToken, reqParams=reqParams, maxRetries=10)
         except Exception as exc:
             logger.warning( 'querying instance status got exception (%s) %s',
                 type(exc), exc )
         else:
             if response['statusCode'] != 200:
-                logger.warning( 'cloud server returned bad status code %s', response['statusCode'] )
+                logger.error( 'cloud server returned bad status code %s', response['statusCode'] )
+                # drastic hack to exit this early
+                sys.exit( 1 )
                 continue
             inst = response['content']
             instState = inst['state']
@@ -427,6 +429,7 @@ if __name__ == "__main__":
     iidsToTerminate = set( iidsToTerminate )
     terminatedIids = []
     if args.terminateBad and iidsToTerminate:
+        logger.info( 'terminating %d bad instances', len(iidsToTerminate) )
         ncs.terminateInstances( authToken, list( iidsToTerminate ) )
         terminatedIids = list( iidsToTerminate )
         toPurge = [inst for inst in startedInstances if inst['instanceId'] in iidsToTerminate]
