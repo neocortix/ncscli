@@ -221,7 +221,7 @@ if __name__ == '__main__':
             encryptFiles=False,
             timeLimit = 60*60,
             instTimeLimit = instTimeLimit,
-            filter = '{ "dar": ">=99", "dpr": ">=48", "ram": ">=3800000000", "storage": ">=3800000000"}',
+            filter = '{ "dar": ">=99", "dpr": ">=48", "regions": ["asia", "europe", "india", "middle-east", "north-america", "oceania"], "android": ">=28", "ram": ">=3800000000", "storage": ">=3800000000"}',
             #filter = '{ "dar": ">=99", "regions": ["north-america"], "dpr": ">=39", "ram": ">=3800000000"}',
             #filter = '{ "dar": ">=99", "regions": ["asia", "europe", "india", "middle-east", "oceania"], "dpr": ">=0", "ram": ">=3800000000"}',
             #filter = '{ "dar": ">=99", "regions": ["north-america", "asia", "europe", "india", "middle-east", "oceania"], "dpr": ">=48", "ram": ">=3800000000"}',
