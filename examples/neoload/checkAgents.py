@@ -411,8 +411,10 @@ if __name__ == "__main__":
     if errorsByIid:
         badIids = list( errorsByIid.keys() )
         logger.warning( '%d error-logged instance(s)', len( badIids ) )
-        #ncs.terminateInstances( authToken, badIids )
-        iidsToTerminate.extend( badIids )
+        if len( badIids ) > 1 and len( badIids ) == len( liveInstances ):
+            logger.warning( 'NOT terminating all instances, even though all had errors' )
+        else:
+            iidsToTerminate.extend( badIids )
 
     forwarders = findForwarders()
     forwardersByPort = { fw['port']: fw for fw in forwarders }
