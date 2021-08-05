@@ -32,13 +32,13 @@ class JMeterFrameProcessor(batchRunner.frameProcessor):
         cmd = 'free --mega -t 1>&2'  # to show amount of free ram
         if glob.glob( os.path.join( self.workerDirPath, '*.jar' ) ):
             cmd += ' && cp -p %s/*.jar /opt/apache-jmeter/lib/ext' % self.workerDirPath  # for plugins
-        cmd += ' && JVM_ARGS="%s" /opt/apache-jmeter/bin/jmeter.sh --version' % self.JVM_ARGS
+        cmd += " && JVM_ARGS='%s' /opt/apache-jmeter/bin/jmeter.sh --version" % self.JVM_ARGS
 
         # tougher pretest
         pretestFilePath = self.workerDirPath+'/pretest.jmx'
         if os.path.isfile( pretestFilePath ):
-            cmd += ' && /opt/apache-jmeter/bin/jmeter -n -t %s -l jmeterOut/pretest_results.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true' % (
-                pretestFilePath
+            cmd += " && cd %s && JVM_ARGS='%s' /opt/apache-jmeter/bin/jmeter -n -t pretest.jmx -l jmeterOut/pretest_results.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true" % (
+                self.workerDirPath, self.JVM_ARGS
             )
         return cmd
 
@@ -47,7 +47,7 @@ class JMeterFrameProcessor(batchRunner.frameProcessor):
         #return 'TestPlan_results_%03d.csv' % frameNum
 
     def frameCmd( self, frameNum ):
-        cmd = 'cd %s && mkdir -p jmeterOut && JVM_ARGS="%s" /opt/apache-jmeter/bin/jmeter.sh -n -t %s -l jmeterOut/TestPlan_results.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true' % (
+        cmd = "cd %s && mkdir -p jmeterOut && JVM_ARGS='%s' /opt/apache-jmeter/bin/jmeter.sh -n -t %s -l jmeterOut/TestPlan_results.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true" % (
             self.workerDirPath, self.JVM_ARGS, self.JMeterFilePath
         )
         cmd += ' && mv jmeterOut ~/%s' % (self.frameOutFileName( frameNum ))
@@ -73,7 +73,7 @@ ap.add_argument( '--jmxFile', required=True, help='the JMeter test plan file pat
 ap.add_argument( '--jtlFile', help='the file name of the jtl file produced by the test plan (if any)',
     default='TestPlan_results.csv'
     )
-ap.add_argument( '--planDuration', type=float, help='the expected duration of the test plan, in seconds' )
+ap.add_argument( '--planDuration', type=float, default=0, help='the expected duration of the test plan, in seconds' )
 ap.add_argument( '--workerDir', help='the directory to upload to workers',
     default='jmeterWorker'
     )
