@@ -1390,8 +1390,12 @@ if __name__ == "__main__":
     primaryDateString1 = datetime.now().strftime("%B %d, %Y  %H:%M:%S")
 
     outputFileName = outputDir + "/TestResults.html"
+    table1FileName = outputDir + "/Table1.csv"
+    table2FileName = outputDir + "/Table2.csv"
     copyfile( scriptDirPath()+"/LoadTestHeader_005.jpg", outputDir + "/LoadTestHeader_005.jpg")
     outputFile = open(outputFileName, "w",encoding='utf-8')
+    table1File = open(table1FileName, "w",encoding='utf-8')
+    table2File = open(table2FileName, "w",encoding='utf-8')
 
     print("<HTML>",file=outputFile)
     print("<HEAD>",file=outputFile)
@@ -1417,6 +1421,16 @@ if __name__ == "__main__":
     print("<TR><TD>Test Result:</TD><TD>%s</TD></TR>" % SLOstatus,file=outputFile)
     print("</TABLE>",file=outputFile)
     print("<BR><BR>",file=outputFile)
+
+
+
+    print("Test Date:,\"%s\"" % primaryDateString1,file=table1File)
+    print("Number of Virtual Users:,%i" % maxThreads,file=table1File)
+    print("Number of Instances:,%i" % len(culledRelativeResponseData),file=table1File)
+    print("Maximum Hits/Second:,%.2f" % max(deliveredLoad),file=table1File)
+    print("Test Result:,%s" % SLOstatus,file=table1File)
+
+
 
     print("<img src=\"./09_Graphs3.png\" width=900>",file=outputFile)
     print("<BR><BR><BR><BR>",file=outputFile)
@@ -1477,6 +1491,9 @@ if __name__ == "__main__":
         print("<TH style=\"background-color:#8bc0e6\">Throughput</TH>",file=outputFile)
         print("<TH colspan=\"2\" style=\"background-color:#8bc0e6\">Network (KB/sec)</TH>",file=outputFile)
         print("</TR>",file=outputFile)
+
+        print("Requests,Executions,,,Response Times (ms),,,,,,,Throughput,Network (KB/sec),",file=table2File)
+
         print("<TR>",file=outputFile)
         print("<TH style=\"background-color:#8bc0e6\">Label</TH>",file=outputFile)
         print("<TH style=\"background-color:#8bc0e6\"># Samples</TH>",file=outputFile)
@@ -1493,6 +1510,8 @@ if __name__ == "__main__":
         print("<TH style=\"background-color:#8bc0e6\">Received</TH>",file=outputFile)
         print("<TH style=\"background-color:#8bc0e6\">Sent</TH>",file=outputFile)
         print("</TR>",file=outputFile)
+
+        print("Label,# Samples,FAIL,Error %,Average,Min,Max,Median,90th pct,95th pct,99th pct,Transactions/s,Received,Sent",file=table2File)
 
         totalNumSamples = numberBadCodes # total = bad + good
         for i in range(0,len(badCodesByLabel)):
@@ -1538,6 +1557,8 @@ if __name__ == "__main__":
         print("</TR>",file=outputFile)
 
         
+        print("Total,%d,%d,%.2f%%,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f" % (totalNumSamples,numberBadCodes,totalBadCodePercentage,averageMs,minMs,maxMs,medianMs,percentile90ms,percentile95ms,percentile99ms,transactionsPerSecond,totalReceivedKBytesPerSecond,totalSentKBytesPerSecond),file=table2File)
+
         for i in range(0,len(numberedReducedLabels)):
             if i%2==0:
                 bgColorString = "#e9f2fa"
@@ -1609,6 +1630,8 @@ if __name__ == "__main__":
             print("<TD style=\"background-color:%s\">%.2f</TD>"%(bgColorString,sentKBytesPerSecond),file=outputFile)
             print("</TR>",file=outputFile)
 
+            print("%s,%d,%d,%.2f%%,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f" % (label,totalNumSamples,badCodeCount,badCodePercentage,averageMs,minMs,maxMs,medianMs,percentile90ms,percentile95ms,percentile99ms,transactionsPerSecond,receivedKBytesPerSecond,sentKBytesPerSecond),file=table2File)
+
         print("</TABLE>",file=outputFile)
         print("<BR><BR><BR>",file=outputFile)
 
@@ -1619,6 +1642,8 @@ if __name__ == "__main__":
     print("</Body>",file=outputFile)
     print("</HTML>",file=outputFile)
     outputFile.close()  
+    table1File.close()  
+    table2File.close()  
     print("Writing Output to %s" % outputFileName)
     print("Done.")
 
