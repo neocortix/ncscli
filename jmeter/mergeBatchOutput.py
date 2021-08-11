@@ -11,6 +11,8 @@ import logging
 import os
 import sys
 #import warnings
+# third-party modules
+import numpy as np
 
 
 logger = logging.getLogger(__name__)
@@ -55,6 +57,28 @@ def ingestCsv( inFilePath ):
             rows.append( row )
     return rows
 
+def findMinTimeStamps():
+    # uses global iidByFrame, outputDir, and others
+    startTimes = []
+    for frameNum in iidByFrame:
+        inFilePath = outputDir + "/" + (resultsCsvPat % frameNum )
+        logger.debug( 'reading %s', inFilePath )
+        try:
+            rows = ingestCsv( inFilePath )
+        except Exception as exc:
+            logger.warning( 'could not ingestCsv (%s) %s', type(exc), exc )
+            continue
+        if not rows:
+            logger.info( 'no rows in %s', inFilePath )
+            continue
+        logger.debug( 'read %d rows from %s', len(rows), inFilePath )
+        #totRowsRead += len(rows)
+        timeStamps = [float(row[args.tsField]) for row in rows]
+        minTimeStamp = min(timeStamps)
+        maxTimeStamp = max(timeStamps)
+        logger.info( 'maxTimeStamp seconds %.1f', (maxTimeStamp-1628353757304)/1000 )
+        startTimes.append( minTimeStamp )
+    return startTimes
 
 if __name__ == "__main__":
     # configure logger formatting
@@ -98,10 +122,21 @@ if __name__ == "__main__":
     logger.debug( 'found %d frames', len(completedFrames) )
     iidByFrame = { frame['frameNum']: frame['instanceId'] for frame in completedFrames }
     logger.debug( 'iidByFrame: %s', iidByFrame )
+    frameNums = [int(frame['frameNum']) for frame in completedFrames]
+    maxFrameNum = max( frameNums )
+    #print( 'maxFrameNum', maxFrameNum )
+
+    minTimeStamps = findMinTimeStamps()
+    logger.info( 'minTimeStamps %s', minTimeStamps )
+    minMinTimeStamp = int( min( minTimeStamps ) )
+
 
     extraFields = ['relTime', 'instanceId'] if args.augment else []
     outFilePath = outputDir + '/' + mergedCsvFileName
     totRowsRead = 0
+    allThreadsCounter = np.zeros( [86400, maxFrameNum], dtype=np.int64 )
+    grpThreadsCounter = np.zeros( [86400, maxFrameNum], dtype=np.int64 )
+    outRows = []
     with open( outFilePath, 'w', newline='') as outfile:
         fieldNames = None
         writer = None
@@ -121,6 +156,8 @@ if __name__ == "__main__":
             totRowsRead += len(rows)
             timeStamps = [float(row[args.tsField]) for row in rows]
             minTimeStamp = min(timeStamps)
+            if minTimeStamp > minMinTimeStamp + 60000:
+                print( 'frame', frameNum, 'is a laggard')
             if not fieldNames:
                 fieldNames = list( rows[0].keys() ) + extraFields
                 logger.debug( 'columns:  %s', fieldNames )
@@ -132,9 +169,23 @@ if __name__ == "__main__":
                 writer.writeheader()
             for row in rows:
                 outRow = row
+                relTime = (float(row[args.tsField])-minMinTimeStamp) / tsDivisor
+                roundedTs = round( relTime / 10 ) * 10
+                allThreadsCounter[ roundedTs, frameNum-1 ] = int( row['allThreads'] )
+                grpThreadsCounter[ roundedTs, frameNum-1 ] = int( row['grpThreads'] )
                 if args.augment:
-                    relTime = (float(row[args.tsField])-minTimeStamp) / tsDivisor
                     outRow['relTime'] = round( relTime, 4 )
                     outRow['instanceId'] = iid
-                writer.writerow( outRow )
+                #outRow['threadName'] = outRow['threadName'] + '-' + str( frameNum )
+                outRows.append( outRow )
+                #writer.writerow( outRow )
+        for row in outRows:
+            outRow = row
+            relTime = (float(row[args.tsField])-minMinTimeStamp) / tsDivisor
+            roundedTs = round( relTime / 10 ) * 10
+            nThreads = allThreadsCounter[ roundedTs, :].sum()
+            outRow['allThreads'] = nThreads
+            nThreads = grpThreadsCounter[ roundedTs, :].sum()
+            outRow['grpThreads'] = nThreads
+            writer.writerow( outRow )
     logger.debug( 'totRowsRead: %d', totRowsRead )
