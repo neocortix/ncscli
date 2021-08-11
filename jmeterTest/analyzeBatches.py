@@ -165,7 +165,7 @@ if __name__ == "__main__":
                 installerEntry = recruiterEntry
                 #logger.info( 'installerOp %s', installerEntry['operation'] )
 
-        # load details of launched instances, but only if we know the launch was complete
+        # load details of launched instances
         instancesByIid = {}  # for just this batch
         if installerEntry:
             with open( launchedJsonFilePath, 'r') as jsonInFile:
@@ -206,6 +206,27 @@ if __name__ == "__main__":
             print()
             print( 'BATCH %s completed %d out of %d' % (batchName, nFramesFinished, nFramesReq) )
             print( 'using filter %s' % (startingArgs['filter']) )
+
+            # scan installer (recruiter) log
+            for recruiterResult in recruiterResults:
+                rc = recruiterResult.get( 'returncode' )
+                if rc:
+                    failedStates[ 'installer-' + str(rc) ] += 1
+                    print( 'installer RC', rc, 'for inst', recruiterResult['instanceId'] )
+                rc = recruiterResult.get( 'timeout' )
+                if rc:
+                    failedStates[ 'installer-124' ] += 1
+                    print( 'installer TIMEOUT', rc, 'for inst', recruiterResult['instanceId'] )
+                ex = recruiterResult.get( 'exception' )
+                if ex:
+                    failedStates[ 'installer-exc' ] += 1
+                    print( 'installer EXCEPTION', ex, 'for inst', recruiterResult['instanceId'] )
+                sigKill = 'SIGKILL' in recruiterResult.get( 'stdout', '' ) or 'SIGILL' in recruiterResult.get( 'stdout', '' )
+                if sigKill:
+                    print( 'installer SIGKILL for inst', recruiterResult['instanceId'] )
+                onp = 'Operation not permitted' in recruiterResult.get( 'stdout', '' )
+                if onp:
+                    print( 'installer ONP for inst', recruiterResult['instanceId'] )
 
             frameStarts = findFrameStarts( brResults )
             logger.info( 'found %d frameStarts', len(frameStarts) )
@@ -290,7 +311,7 @@ if __name__ == "__main__":
     print()
     print( len(allDevsCounter), 'devices tested' )
     print( allDevsCounter )
-    if True:
+    if not True:
         for x, count in allDevsCounter.most_common():
             #print( '%s: %d' % (x, count) )
             errRate = 100 * failedDevsCounter[x] / count
