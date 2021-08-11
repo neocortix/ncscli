@@ -75,10 +75,31 @@ def findMinTimeStamps():
         #totRowsRead += len(rows)
         timeStamps = [float(row[args.tsField]) for row in rows]
         minTimeStamp = min(timeStamps)
-        maxTimeStamp = max(timeStamps)
-        logger.info( 'maxTimeStamp seconds %.1f', (maxTimeStamp-1628353757304)/1000 )
+        #maxTimeStamp = max(timeStamps)
         startTimes.append( minTimeStamp )
     return startTimes
+
+def findMinTimeStampBounds():
+    # uses global iidByFrame, outputDir, and others
+    outBounds = []
+    for frameNum in iidByFrame:
+        inFilePath = outputDir + "/" + (resultsCsvPat % frameNum )
+        logger.debug( 'reading %s', inFilePath )
+        try:
+            rows = ingestCsv( inFilePath )
+        except Exception as exc:
+            logger.warning( 'could not ingestCsv (%s) %s', type(exc), exc )
+            continue
+        if not rows:
+            logger.info( 'no rows in %s', inFilePath )
+            continue
+        logger.debug( 'read %d rows from %s', len(rows), inFilePath )
+        timeStamps = [float(row[args.tsField]) for row in rows]
+        minTimeStamp = min(timeStamps)
+        maxTimeStamp = max(timeStamps)
+        outBounds.append({ 'min': minTimeStamp, 'max': maxTimeStamp })
+    return outBounds
+
 
 if __name__ == "__main__":
     # configure logger formatting
@@ -126,10 +147,11 @@ if __name__ == "__main__":
     maxFrameNum = max( frameNums )
     #print( 'maxFrameNum', maxFrameNum )
 
+    #timeStampBounds = findMinTimeStampBounds()
+    #logger.debug( 'timeStampBounds %s', timeStampBounds )
     minTimeStamps = findMinTimeStamps()
-    logger.info( 'minTimeStamps %s', minTimeStamps )
+    logger.debug( 'minTimeStamps %s', minTimeStamps )
     minMinTimeStamp = int( min( minTimeStamps ) )
-
 
     extraFields = ['relTime', 'instanceId'] if args.augment else []
     outFilePath = outputDir + '/' + mergedCsvFileName
