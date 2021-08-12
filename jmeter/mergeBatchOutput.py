@@ -7,7 +7,7 @@ import argparse
 import csv
 import json
 import logging
-#import math
+import math
 import os
 import sys
 #import warnings
@@ -57,29 +57,7 @@ def ingestCsv( inFilePath ):
             rows.append( row )
     return rows
 
-def findMinTimeStamps():
-    # uses global iidByFrame, outputDir, and others
-    startTimes = []
-    for frameNum in iidByFrame:
-        inFilePath = outputDir + "/" + (resultsCsvPat % frameNum )
-        logger.debug( 'reading %s', inFilePath )
-        try:
-            rows = ingestCsv( inFilePath )
-        except Exception as exc:
-            logger.warning( 'could not ingestCsv (%s) %s', type(exc), exc )
-            continue
-        if not rows:
-            logger.info( 'no rows in %s', inFilePath )
-            continue
-        logger.debug( 'read %d rows from %s', len(rows), inFilePath )
-        #totRowsRead += len(rows)
-        timeStamps = [float(row[args.tsField]) for row in rows]
-        minTimeStamp = min(timeStamps)
-        #maxTimeStamp = max(timeStamps)
-        startTimes.append( minTimeStamp )
-    return startTimes
-
-def findMinTimeStampBounds():
+def findTimeStampBounds():
     # uses global iidByFrame, outputDir, and others
     outBounds = []
     for frameNum in iidByFrame:
@@ -147,17 +125,24 @@ if __name__ == "__main__":
     maxFrameNum = max( frameNums )
     #print( 'maxFrameNum', maxFrameNum )
 
-    #timeStampBounds = findMinTimeStampBounds()
-    #logger.debug( 'timeStampBounds %s', timeStampBounds )
-    minTimeStamps = findMinTimeStamps()
-    logger.debug( 'minTimeStamps %s', minTimeStamps )
+    timeStampBounds = findTimeStampBounds()
+    logger.debug( 'timeStampBounds %s', timeStampBounds )
+    minTimeStamps = [bounds['min'] for bounds in timeStampBounds]
+    maxTimeStamps = [bounds['max'] for bounds in timeStampBounds]
+
     minMinTimeStamp = int( min( minTimeStamps ) )
+    maxMaxTimeStamp = max( maxTimeStamps )
+
+    effDurs = [(bounds['max']-minMinTimeStamp)/args.timeDiv for bounds in timeStampBounds]
+    logger.debug( 'effDurs %s', effDurs )
+
+    maxSeconds = int( math.ceil( max(effDurs) ) )
 
     extraFields = ['relTime', 'instanceId'] if args.augment else []
     outFilePath = outputDir + '/' + mergedCsvFileName
     totRowsRead = 0
-    allThreadsCounter = np.zeros( [86400, maxFrameNum], dtype=np.int64 )
-    grpThreadsCounter = np.zeros( [86400, maxFrameNum], dtype=np.int64 )
+    allThreadsCounter = np.zeros( [maxSeconds+1, maxFrameNum], dtype=np.int64 )
+    grpThreadsCounter = np.zeros( [maxSeconds+1, maxFrameNum], dtype=np.int64 )
     outRows = []
     with open( outFilePath, 'w', newline='') as outfile:
         fieldNames = None
@@ -179,7 +164,7 @@ if __name__ == "__main__":
             timeStamps = [float(row[args.tsField]) for row in rows]
             minTimeStamp = min(timeStamps)
             if minTimeStamp > minMinTimeStamp + 60000:
-                print( 'frame', frameNum, 'is a laggard')
+                logger.debug( 'frame %d started late', frameNum )
             if not fieldNames:
                 fieldNames = list( rows[0].keys() ) + extraFields
                 logger.debug( 'columns:  %s', fieldNames )
