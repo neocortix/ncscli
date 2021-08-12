@@ -324,8 +324,8 @@ if __name__ == "__main__":
     logging.basicConfig(format=logFmt, datefmt=logDateFmt)
     logger.setLevel(logging.WARNING)
 
-    ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@' )
-    ap.add_argument( '--dataDirPath', help='the path to the directory for input and output data' )
+    ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
+    ap.add_argument( '--dataDirPath', required=True, help='the path to the directory for input and output data' )
     ap.add_argument( '--neoloadVersion', default ='7.10', help='version of neoload to check for' )
     ap.add_argument( '--nlWebUrl', help='the URL of a neoload web server to query' )
     ap.add_argument( '--nlWebToken', help='a token for authorized access to a neoload web server' )
