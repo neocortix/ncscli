@@ -161,6 +161,10 @@ if __name__ == '__main__':
 
     ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter )
+    ap.add_argument( '--authToken', help='the NCS authorization token to use (or none, to use NCS_AUTH_TOKEN env var' )
+    ap.add_argument( '--filter', help='json to filter instances for launch',
+        default = '{ "regions": ["asia", "europe", "middle-east", "north-america", "oceania"], "dar": ">=100", "dpr": ">=48", "ram": ">=3800000000", "storage": ">=2000000000" }'
+    )
     ap.add_argument( '--forwarderHost', help='IP addr (or host name) of the forwarder host',
         default='localhost' )
     ap.add_argument( '--neoloadVersion', default ='7.10', help='version of neoload agent' )
@@ -169,6 +173,9 @@ if __name__ == '__main__':
     ap.add_argument( '--nlWebUrl', help='the URL of a neoload web server to query' )
     ap.add_argument( '--nWorkers', type=int, help='the number of agents to launch',
         default=10 )
+    ap.add_argument( '--outDataDir', required=True, help='a path to the output data dir for this run (required)' )
+    ap.add_argument( '--portRangeStart', type=int, default=7100,
+        help='the beginning of the range of port numbers to forward' )
     args = ap.parse_args()
 
     neoloadVersion =  args.neoloadVersion
@@ -190,8 +197,10 @@ if __name__ == '__main__':
             sys.exit( 1 )
 
 
-    dateTimeTag = datetime.datetime.now().strftime( '%Y-%m-%d_%H%M%S' )
-    outDataDir = 'data/neoload_' + dateTimeTag
+    outDataDir = args.outDataDir
+    if not outDataDir:
+        dateTimeTag = datetime.datetime.now().strftime( '%Y-%m-%d_%H%M%S' )
+        outDataDir = 'data/neoload_' + dateTimeTag
 
     # you may set forwarderHost manually here, to override auto-detect
     forwarderHost = args.forwarderHost
@@ -204,7 +213,7 @@ if __name__ == '__main__':
         logger.error( 'forwarderHost not set')
         exit(1)
     
-    authToken = os.getenv('NCS_AUTH_TOKEN') or 'YourAuthTokenHere'
+    authToken = args.authToken or os.getenv('NCS_AUTH_TOKEN')
     instTimeLimit = 11*60 if neoloadVersion in ['7.10'] else 30*60
 
     if nlWebWanted and not os.path.isfile( 'nlAgent/nlweb.properties'):
@@ -221,18 +230,12 @@ if __name__ == '__main__':
             encryptFiles=False,
             timeLimit = 60*60,
             instTimeLimit = instTimeLimit,
-            filter = '{ "dar": ">=99", "dpr": ">=48", "regions": ["asia", "europe", "india", "middle-east", "north-america", "oceania"], "android": ">=28", "ram": ">=3800000000", "storage": ">=3800000000"}',
-            #filter = '{ "dar": ">=99", "regions": ["north-america"], "dpr": ">=39", "ram": ">=3800000000"}',
-            #filter = '{ "dar": ">=99", "regions": ["asia", "europe", "india", "middle-east", "oceania"], "dpr": ">=0", "ram": ">=3800000000"}',
-            #filter = '{ "dar": ">=99", "regions": ["north-america", "asia", "europe", "india", "middle-east", "oceania"], "dpr": ">=48", "ram": ">=3800000000"}',
-            #filter = '{ "dar": ">=99", "regions": ["north-america"], "dpr": ">=48", "ram": ">=3800000000"}',
-            #filter = '{ "dar": ">=100", "regions": ["usa"], "dpr": ">=48", "ram": ">=3800000000"}',
-            # "regions": ["usa"],  "regions": ["north-america", "europe"]
+            filter = args.filter,
             outDataDir = outDataDir,
             nWorkers = args.nWorkers
         )
         if rc == 0:
-            portRangeStart=7100
+            portRangeStart=args.portRangeStart
             launchedJsonFilePath = outDataDir +'/recruitLaunched.json'
             launchedInstances = []
             # get details of launched instances from the json file
