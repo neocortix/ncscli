@@ -26,6 +26,10 @@ class g_:
     interrupted = False
 
 
+def scriptDirPath():
+    '''returns the absolute path to the directory containing this script'''
+    return os.path.dirname(os.path.realpath(__file__))
+
 class neoloadFrameProcessor(batchRunner.frameProcessor):
     '''defines details for installing Neotys Load Generator agent on a worker'''
 
@@ -216,6 +220,22 @@ if __name__ == '__main__':
     authToken = args.authToken or os.getenv('NCS_AUTH_TOKEN')
     instTimeLimit = 11*60 if neoloadVersion in ['7.10'] else 30*60
 
+    nlAgentDirName = 'nlAgent'
+    if not os.path.isdir( nlAgentDirName ):
+        if os.path.exists( nlAgentDirName ) and not os.path.islink( nlAgentDirName ):
+            logger.error( 'you have an nlAgent that is neither a dir nor a symlink')
+            sys.exit( 1 )
+        targetPath = os.path.join( scriptDirPath(), nlAgentDirName )
+        if not os.path.isdir( targetPath ):
+            logger.error( 'nlAgent dir not found in %s', scriptDirPath() )
+            sys.exit( 1 )
+        try:
+            os.symlink( targetPath, nlAgentDirName, target_is_directory=True )
+        except Exception as exc:
+            logger.error( 'could not create symlink for nlAgent (%s) %s', type(exc), exc)
+            sys.exit( 1 )
+    logger.debug( 'nlAgent contents: %s', os.listdir(nlAgentDirName) )
+
     if nlWebWanted and not os.path.isfile( 'nlAgent/nlweb.properties'):
         logger.error( 'the file nlAgent/nlweb.properties was not found')
         sys.exit(1)
@@ -331,7 +351,7 @@ if __name__ == '__main__':
 
                 # plot map of workers
                 if os.path.isfile( outDataDir +'/startedAgents.json' ):
-                    rc2 = subprocess.call( ['./plotAgentMap.py', '--dataDirPath', outDataDir],
+                    rc2 = subprocess.call( [scriptDirPath()+'/plotAgentMap.py', '--dataDirPath', outDataDir],
                         stdout=subprocess.DEVNULL )
                     if rc2:
                         logger.warning( 'plotAgentMap exited with returnCode %d', rc2 )
@@ -357,8 +377,8 @@ if __name__ == '__main__':
                         if inst['instanceId'] in unusableIids]
                     purgeHostKeys( unusableInstances )
             if launchedInstances:
-                print( 'when you want to terminate these instances, use %s terminateAgents.py "%s"'
-                    % (sys.executable, outDataDir))
+                print( 'when you want to terminate these instances, use %s %s "%s"'
+                    % (sys.executable, scriptDirPath()+'/terminateAgents.py', outDataDir))
         sys.exit( rc )
     except KeyboardInterrupt:
         logger.warning( 'an interuption occurred')
