@@ -101,6 +101,9 @@ $pyx -m pip install --user enlighten
 # install defusedxml for use by jmeter examples
 $pyx -m pip install --user defusedxml
 
+# install psutil for use by neoload checkAgents
+$pyx -m pip install --user psutil
+
 
 sitePackagesDir=$($pyx -m site --user-site)
 examplesSrcDir=$sitePackagesDir/ncsexamples/
