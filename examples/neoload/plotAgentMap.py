@@ -23,6 +23,10 @@ logger.setLevel(logging.INFO)
 def getColumn(inputList,column):
     return [inputList[i][column] for i in range(0,len(inputList))]
 
+def scriptDirPath():
+    '''returns the absolute path to the directory containing this script'''
+    return os.path.dirname(os.path.realpath(__file__))
+
 
 if __name__ == "__main__":
     # configure logger formatting
@@ -96,8 +100,8 @@ if __name__ == "__main__":
         print("%s" % mappedFrameNumLocation[i][3])
 
     print("\nReading World Map data")
-    mapFileName = "./WorldCountryBoundaries.csv"
-    mapFile = open(mapFileName, "r")
+    mapFilePath =  os.path.join( scriptDirPath(), "WorldCountryBoundaries.csv" )
+    mapFile = open(mapFilePath, "r")
     mapLines = mapFile.readlines()
     mapFile.close()
     mapNumLines = len(mapLines)    
