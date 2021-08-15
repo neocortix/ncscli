@@ -132,6 +132,7 @@ if __name__ == "__main__":
 
     minMinTimeStamp = int( min( minTimeStamps ) )
     maxMaxTimeStamp = max( maxTimeStamps )
+    logger.debug( 'minMinTimeStamp %d', minMinTimeStamp )
 
     effDurs = [(bounds['max']-minMinTimeStamp)/args.timeDiv for bounds in timeStampBounds]
     logger.debug( 'effDurs %s', effDurs )
@@ -177,7 +178,7 @@ if __name__ == "__main__":
             for row in rows:
                 outRow = row
                 relTime = (float(row[args.tsField])-minMinTimeStamp) / tsDivisor
-                roundedTs = round( relTime / 10 ) * 10
+                roundedTs = min( maxSeconds, round( relTime / 10 ) * 10 )
                 allThreadsCounter[ roundedTs, frameNum-1 ] = int( row['allThreads'] )
                 grpThreadsCounter[ roundedTs, frameNum-1 ] = int( row['grpThreads'] )
                 if args.augment:
@@ -189,7 +190,7 @@ if __name__ == "__main__":
         for row in outRows:
             outRow = row
             relTime = (float(row[args.tsField])-minMinTimeStamp) / tsDivisor
-            roundedTs = round( relTime / 10 ) * 10
+            roundedTs = min( maxSeconds, round( relTime / 10 ) * 10 )
             nThreads = allThreadsCounter[ roundedTs, :].sum()
             outRow['allThreads'] = nThreads
             nThreads = grpThreadsCounter[ roundedTs, :].sum()
