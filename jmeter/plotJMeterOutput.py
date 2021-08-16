@@ -823,11 +823,11 @@ if __name__ == "__main__":
     #plt.show()
     plt.savefig( outputDir+'/01_WorldMap.png', bbox_inches='tight')
 
-    plotMarkerSize = 3
+    plotMarkerSize = 6
     plt.figure(10, figsize=figSize1)
-    plt.plot(startRelTimesAndMSPRsUnitedStates[0],startRelTimesAndMSPRsUnitedStates[1], linestyle='', color=(0.0, 0.6, 1.0),marker='o',markersize=plotMarkerSize)
-    plt.plot(startRelTimesAndMSPRsRussia[0],startRelTimesAndMSPRsRussia[1], linestyle='', color=(1.0, 0.0, 0.0),marker='o',markersize=plotMarkerSize)
-    plt.plot(startRelTimesAndMSPRsOther[0],startRelTimesAndMSPRsOther[1], linestyle='', color=(0.0, 1.0, 0.0),marker='o',markersize=plotMarkerSize)
+    plt.plot(startRelTimesAndMSPRsUnitedStates[0],startRelTimesAndMSPRsUnitedStates[1], linestyle='', color=(0.0, 0.6, 1.0),marker='o',markersize=plotMarkerSize, label="USA")
+    plt.plot(startRelTimesAndMSPRsRussia[0],startRelTimesAndMSPRsRussia[1], linestyle='', color=(1.0, 0.0, 0.0),marker='o',markersize=plotMarkerSize, label="Russia")
+    plt.plot(startRelTimesAndMSPRsOther[0],startRelTimesAndMSPRsOther[1], linestyle='', color=(0.0, 1.0, 0.0),marker='o',markersize=plotMarkerSize, label="Other")
     if not logYWanted:
         plt.ylim([0,clipTimeInSeconds])
     else:
@@ -836,6 +836,12 @@ if __name__ == "__main__":
         ax = plt.gca()
         ax.yaxis.set_major_locator( mpl.ticker.FixedLocator([ .02, .05, .1, .2, .5, 1, 2, 5, 10]) )
         ax.yaxis.set_major_formatter(mpl.ticker.ScalarFormatter())
+
+    plt.legend(loc="center left",ncol=1,bbox_to_anchor=(1, 0.5)) 
+    # lgnd = ax.legend(fontsize='medium',loc="upper right")
+    # lgnd.legendHandles[0]._legmarker.set_markersize(8)
+    # lgnd.legendHandles[1]._legmarker.set_markersize(8)
+    # lgnd.legendHandles[2]._legmarker.set_markersize(8)
 
     plt.title("Response Times (s)\n", fontsize=42*fontFactor)
     plt.xlabel("Time during Test (s)", fontsize=32*fontFactor)  
