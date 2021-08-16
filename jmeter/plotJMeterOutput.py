@@ -458,14 +458,17 @@ if __name__ == "__main__":
     # remove device records which ran too long
     # print(relativeResponseData[0])
     culledRelativeResponseData = []
-    cullResponseData = True
+    cullResponseData = False
     excessDurationThreshold = 30  # in seconds
     for i in range(0,len(relativeResponseData)):
         if cullResponseData:
-            # print("i = %d   min, max = %f  %f" % (i,min(relativeResponseData[i][1]),max(relativeResponseData[i][1])))
+            print("i = %d   min, max = %f  %f" % (i,min(relativeResponseData[i][1]),max(relativeResponseData[i][1])))
             if relativeResponseData[i][4]<(medianMaxStartTime+excessDurationThreshold):
+                # print("        Keeping This One")
                 # print("min, max = %f  %f" % (min(relativeResponseData2[i][1]),max(relativeResponseData2[i][1])))
                 culledRelativeResponseData.append(relativeResponseData[i])
+            # else:
+                # print("        Rejecting This One")
         else:
             culledRelativeResponseData.append(relativeResponseData[i])
 
