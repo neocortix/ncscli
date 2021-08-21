@@ -115,8 +115,13 @@ def configureAgent( inst, port, timeLimit=500 ):
     cmd += " && sed -i 's/NCS_LG_PORT/%d/' ~/neoload%s/conf/agent.properties" % (port, neoloadVersion)
     cmd += " && sed -i 's/NCS_LG_HOST/%s/' ~/neoload%s/conf/agent.properties" % (forwarderHost, neoloadVersion)
     if nlWebWanted:
+        # deployment type for nlweb
+        dtype = 'SAAS' if args.nlWebUrl == 'SAAS' else 'ONPREMISE'
+        cmd += " && sed -i 's/NCS_NLWEB_DTYPE/%s/g' %s/agent.properties" % (dtype, configDirPath)
+        # zone for nlweb
+        cmd += " && sed -i 's/NCS_NLWEB_ZONE/%s/g' %s/agent.properties" % (args.nlWebZone, configDirPath)
         escapedUrl = args.nlWebUrl.replace( '/', '\/' )
-        cmd += " && sed -i 's/NCS_NLWEB_TOKEN/%s/' %s/agent.properties" % (args.nlWebToken, configDirPath)
+        cmd += " && sed -i 's/NCS_NLWEB_TOKEN/%s/g' %s/agent.properties" % (args.nlWebToken, configDirPath)
         cmd += " && sed -i 's/NCS_NLWEB_URL/%s/' %s/agent.properties" % (escapedUrl, configDirPath)
     logger.debug( 'info: %s', cmd )
     rc = commandInstance( inst, cmd, timeLimit=timeLimit )
@@ -175,6 +180,7 @@ if __name__ == '__main__':
     ap.add_argument( '--nlWeb', type=ncs.boolArg, default=False, help='whether to use NeoLoad Web' )
     ap.add_argument( '--nlWebToken', help='a token for authorized access to a neoload web server' )
     ap.add_argument( '--nlWebUrl', help='the URL of a neoload web server to query' )
+    ap.add_argument( '--nlWebZone', default='defaultzone',  help='the URL of a neoload web server to query' )
     ap.add_argument( '--nWorkers', type=int, help='the number of agents to launch',
         default=10 )
     ap.add_argument( '--outDataDir', required=True, help='a path to the output data dir for this run (required)' )
