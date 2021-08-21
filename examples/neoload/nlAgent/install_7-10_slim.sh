@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -ex
+set -e
 
 curl -L -s -S https://archive-1.neocortix.net/neotys/neoload/v7.10/loadGenerator_7_10_0_slim.tar.gz > loadGenerator_7_10_0_slim.tar.gz
 #curl -L -s -S https://archive.neocortix.net/neotys/neoload/v7.10/loadGenerator_7_10_0_slim.tar.gz > loadGenerator_7_10_0_slim.tar.gz
