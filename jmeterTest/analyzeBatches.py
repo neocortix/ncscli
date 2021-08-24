@@ -112,6 +112,29 @@ def extractFrameInfo( inFilePath ):
                             )
     return instanceList
 
+def findTimeEmptyCsvs( iidByFrame, outputDir, csvPat ):
+    '''scan csv/jtl files for emptiness'''
+    empties = []
+    for frameNum in iidByFrame:
+        inFilePath = outputDir + "/" + (csvPat % frameNum )
+        logger.debug( 'reading %s', inFilePath )
+        try:
+            #rows = ingestCsv( inFilePath )
+            with open( inFilePath, 'r') as inFile:
+                lineCount = 0
+                for line in inFile:
+                    lineCount += 1
+                    if lineCount > 1:
+                        break
+                if lineCount <= 1:
+                    empties.append({ 'instanceId': iidByFrame[frameNum],
+                        'frameNum': frameNum
+                        })
+        except Exception as exc:
+            logger.warning( 'could not read csv (%s) %s', type(exc), exc )
+            continue
+    return empties
+
 def findTimeStampBounds( iidByFrame, outputDir, csvPat, tsFieldName='timeStamp' ):
     '''scan jmeter-style output csv/jtl files for first and last timeStamps'''
     outBounds = []
@@ -186,6 +209,7 @@ if __name__ == "__main__":
     nPerfect = 0
     nImperfect = 0
     nUnfinished = 0
+    allEmptyCsvs = []
     failedStates = collections.Counter()
     allDevsCounter = collections.Counter()
     failedDevsCounter = collections.Counter()
@@ -311,6 +335,10 @@ if __name__ == "__main__":
             maxFrameNum = max( frameNums )
             jtlFileName = 'TestPlan_results.csv'
             csvPat = 'jmeterOut_%%03d/%s' % jtlFileName
+            emptyCsvs = findTimeEmptyCsvs( iidByFrame, batchDirPath, csvPat=csvPat )
+            if emptyCsvs:
+                allEmptyCsvs.extend( emptyCsvs )
+                logger.info( '%d emptyCsvs: %s', len(emptyCsvs), emptyCsvs )
             timeDiv = 1000 # jmeter timeStamps are inb ms
             timeStampBounds = findTimeStampBounds( iidByFrame, batchDirPath,
                 csvPat=csvPat, tsFieldName='timeStamp' )
@@ -465,6 +493,16 @@ if __name__ == "__main__":
         info = locDict[ latLon ]
         if info['count'] >= 2:
             print( latLon, info['count'], info['device-location']['display-name'], info['devIds'] )
+    print()
+    for emptyCsv in allEmptyCsvs:
+        iid = emptyCsv['instanceId']
+        devId = devIdsByIid[ iid ]
+        inst = instancesByIid[ iid ]
+        launchedDateTime = inst.get( 'started-at')
+        locInfo = getDevLoc( devId )
+        displayName = locInfo.get( 'display-name' )
+        print( 'empty csv for dev %d, iid %s launched %s (%s) ' % (devId, iid, launchedDateTime, displayName) )
+
     print()
     print( '%d batches were analyzed ' % nAnalyzed)
     print( '%d batches were perfect (n out of n instances succeeded)' % nPerfect)
