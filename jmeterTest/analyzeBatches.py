@@ -6,6 +6,7 @@ does diagnostic analysis of batchMode batches
 import argparse
 import collections
 import csv
+import datetime
 import json
 import logging
 #import math
@@ -95,6 +96,44 @@ def findFrameStart( iid, frameNum, entries ):
                 return entry
     return None
 
+def extractFrameInfo( inFilePath ):
+    '''extract frame numbers and instance ids from a batchRunner jlog file'''
+    # this version finds only 'retrieved' frames
+    instanceList = []
+    with open( inFilePath, 'rb' ) as inFile:
+        for line in inFile:
+            decoded = json.loads( line )
+            if 'args' in decoded:
+                if type(decoded['args']) is dict and 'state' in decoded['args'].keys():
+                    if decoded['args']['state'] == 'retrieved':
+                        instanceList.append(
+                            {'frameNum': decoded['args']['frameNum'],
+                                'instanceId': decoded['instanceId']}
+                            )
+    return instanceList
+
+def findTimeStampBounds( iidByFrame, outputDir, csvPat, tsFieldName='timeStamp' ):
+    '''scan jmeter-style output csv/jtl files for first and last timeStamps'''
+    outBounds = []
+    for frameNum in iidByFrame:
+        inFilePath = outputDir + "/" + (csvPat % frameNum )
+        logger.debug( 'reading %s', inFilePath )
+        try:
+            rows = ingestCsv( inFilePath )
+        except Exception as exc:
+            logger.warning( 'could not ingestCsv (%s) %s', type(exc), exc )
+            continue
+        if not rows:
+            logger.info( 'no rows in %s', inFilePath )
+            continue
+        logger.debug( 'read %d rows from %s', len(rows), inFilePath )
+        timeStamps = [float(row[ tsFieldName ]) for row in rows]
+        minTimeStamp = min(timeStamps)
+        maxTimeStamp = max(timeStamps)
+        outBounds.append({ 'min': minTimeStamp, 'max': maxTimeStamp,
+            'instanceId': iidByFrame[frameNum] })
+    return outBounds
+
 
 def ingestCsv( inFilePath ):
     '''read the csv file; return contents as a list of dicts'''
@@ -105,6 +144,14 @@ def ingestCsv( inFilePath ):
             rows.append( row )
     return rows
 
+def getDevLoc( devId ):
+    inst = instancesByDevId.get( devId, {} )
+    return inst.get('device-location', {})
+
+def getDevDpr( devId ):
+    inst = instancesByDevId.get( devId, {} )
+    return inst.get('dpr', 0)
+
 
 if __name__ == "__main__":
     # configure logger formatting
@@ -113,7 +160,7 @@ if __name__ == "__main__":
     formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
     logging.basicConfig(format=logFmt, datefmt=logDateFmt)
     logging.captureWarnings(True)
-    logger.setLevel(logging.WARNING)  # for more verbosity
+    logger.setLevel(logging.INFO)  # for more verbosity
 
     ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( '--dataDirPath', required=True, help='the path to to directory for input and output data' )
@@ -144,6 +191,11 @@ if __name__ == "__main__":
     failedDevsCounter = collections.Counter()
     countryCounter = collections.Counter()
     instancesByDevId = {}
+    devIdsByIid = {}
+    lateStarts = []
+    lateStartCounter = collections.Counter()
+    locDict = {}  # indexed by lat,lon
+
 
     for batchName in batchNames:
         batchDirPath = os.path.join( args.dataDirPath, batchName )
@@ -196,11 +248,23 @@ if __name__ == "__main__":
             if nFramesFinished == nFramesReq:
                 nPerfect += 1
             
-            # update the global instancesByDevId, possibly overwriting an earlier records
+            # update the global dictionaries, possibly overwriting earlier records
             for inst in launchedInstances:
                 devId = inst.get( 'device-id', 0 )
                 if devId:
                     instancesByDevId[ devId ] = inst
+                    devIdsByIid[ inst['instanceId']] = devId
+                locInfo = inst.get( 'device-location', {} )
+                #latLon = str(locInfo.get( 'latitude', '')) + ',' + str(locInfo.get( 'longitude', '') )
+                latLon = locInfo.get( 'latitude', None), locInfo.get( 'longitude', None)
+                if latLon in locDict:
+                    locDevs = locDict[ latLon ]['devIds']
+                    if devId not in locDevs:
+                        locDict[ latLon ]['count'] += 1
+                        locDict[ latLon ]['devIds'].append( devId )
+                else:
+                    rec = {'device-location': locInfo, 'count': 1, 'devIds': [devId] }
+                    locDict[ latLon ] = rec
 
             #logger.info( 'batch %s completed: %d out of %d', batchName, nFramesFinished, nFramesReq )
             print()
@@ -237,6 +301,47 @@ if __name__ == "__main__":
                 allDevsCounter[ devId ] += 1
                 country = inst.get('device-location', {}).get( 'country', '' )
                 countryCounter[ country ] += 1
+
+            # frame-by-frame analysis within this batch
+            completedFrames = extractFrameInfo( batchJlogFilePath )
+            logger.debug( 'found %d frames', len(completedFrames) )
+            iidByFrame = { frame['frameNum']: frame['instanceId'] for frame in completedFrames }
+            logger.debug( 'iidByFrame: %s', iidByFrame )
+            frameNums = [int(frame['frameNum']) for frame in completedFrames]
+            maxFrameNum = max( frameNums )
+            jtlFileName = 'TestPlan_results.csv'
+            csvPat = 'jmeterOut_%%03d/%s' % jtlFileName
+            timeDiv = 1000 # jmeter timeStamps are inb ms
+            timeStampBounds = findTimeStampBounds( iidByFrame, batchDirPath,
+                csvPat=csvPat, tsFieldName='timeStamp' )
+            logger.debug( 'timeStampBounds %s', timeStampBounds )
+            minTimeStamps = [bounds['min'] for bounds in timeStampBounds]
+            maxTimeStamps = [bounds['max'] for bounds in timeStampBounds]
+
+            minMinTimeStamp = int( min( minTimeStamps ) )
+            maxMaxTimeStamp = max( maxTimeStamps )
+            logger.debug( 'minMinTimeStamp %d', minMinTimeStamp )
+
+            startingOffsets = [(bounds['min']-minMinTimeStamp)/timeDiv for bounds in timeStampBounds]
+            logger.debug( 'startingOffsets (sorted) %s', sorted( startingOffsets ) )
+
+            effDurs = [(bounds['max']-minMinTimeStamp)/timeDiv for bounds in timeStampBounds]
+            logger.debug( 'effDurs (sorted) %s', sorted( effDurs ) )
+
+            for bounds in timeStampBounds:
+                if bounds['min'] >= minMinTimeStamp + 120000:
+                    iid = bounds['instanceId']
+                    devId = devIdsByIid[ iid ]
+                    timeOffset = (bounds['min'] - minMinTimeStamp)
+                    lateStart = {'instanceId': iid, 'devId': devId,
+                        'timeStamp': bounds['min'], 'timeOffset': timeOffset
+                     }
+                    logger.info( 'lateStart: %s', lateStart )
+                    lateStarts.append( lateStart )
+                    lateStartCounter[devId] += 1
+
+            #maxSeconds = int( math.ceil( max(effDurs) ) )
+
 
             failedFrames = findFailedFrames( brResults )
             logger.debug( 'failedFrames: %s', failedFrames )
@@ -326,6 +431,41 @@ if __name__ == "__main__":
                 (x, countryCode, failedDevsCounter[x], allDevsCounter[x], errRate, dpr, totRam, locality) 
                 )
     print()
+    print( 'CountryCounter', countryCounter )
+    print()
+    print( len(lateStartCounter), 'devices had late starts' )
+    print( 'lateStartCounter', lateStartCounter )
+
+    for x, count in lateStartCounter.most_common():
+        #print( '%s: %d' % (x, count) )
+        errRate = 100 * count / allDevsCounter[x]
+        inst = instancesByDevId.get( x, {} )
+        dpr = round( inst.get( 'dpr', 0 ) )
+        locInfo = inst.get('device-location', {})
+        countryCode = locInfo.get( 'country-code' )
+        locality = locInfo.get( 'locality' ) + ', ' + locInfo.get( 'area' )
+        ramSpecs = inst.get( 'ram', {} )
+        totRam = ramSpecs.get('total', 0 )
+        print( 'dev %s in %s had %2d late start(s) in %2d attempt(s), %4.1f%% lateness rate; dpr %d, ram %d (%s)' %
+            (x, countryCode, count, allDevsCounter[x], errRate, dpr, totRam, locality) 
+            )
+    if False:
+        print( 'Late Starts' )
+        startsSorted = sorted( lateStarts, key=lambda x: x['devId'] )
+        for lateStart in startsSorted:
+            print( 'dev', lateStart['devId'], 'started', round(lateStart['timeOffset']/1000), 'seconds late at',
+            datetime.datetime.fromtimestamp(lateStart['timeStamp']/1000, tz=datetime.timezone.utc).strftime( '%Y/%m/%d %H:%M:%S' ),
+            'iid', lateStart['instanceId']
+            )
+        print()
+    print()
+    print( 'Collocation counts')
+    # print location info sorted by longitude
+    for latLon in sorted( locDict.keys(), key=lambda x: x[1] ):
+        info = locDict[ latLon ]
+        if info['count'] >= 2:
+            print( latLon, info['count'], info['device-location']['display-name'], info['devIds'] )
+    print()
     print( '%d batches were analyzed ' % nAnalyzed)
     print( '%d batches were perfect (n out of n instances succeeded)' % nPerfect)
     print( '%d batch(es) had at least 1 failure' % nImperfect)
@@ -333,6 +473,4 @@ if __name__ == "__main__":
         print( '%d batch(es) unfinished (interrupted or still running)' % nUnfinished)
     for state, count in failedStates.items():
         print( '%s: %d' % (state, count) )
-    print()
-    print( 'countryCounter', countryCounter )
     print()
