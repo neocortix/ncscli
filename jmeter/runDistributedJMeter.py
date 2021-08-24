@@ -23,6 +23,7 @@ def scriptDirPath():
 class JMeterFrameProcessor(batchRunner.frameProcessor):
     '''defines details for using JMeter for a simplistic load test'''
 
+    homeDirPath = '/root'
     workerDirPath = 'jmeterWorker'
     #JMeterFilePath = workerDirPath+'/TestPlan.jmx'
     JMeterFilePath = workerDirPath+'/XXX.jmx'
@@ -37,8 +38,8 @@ class JMeterFrameProcessor(batchRunner.frameProcessor):
         # tougher pretest
         pretestFilePath = self.workerDirPath+'/pretest.jmx'
         if os.path.isfile( pretestFilePath ):
-            cmd += " && cd %s && JVM_ARGS='%s' /opt/apache-jmeter/bin/jmeter -n -t pretest.jmx -l jmeterOut/pretest_results.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true" % (
-                self.workerDirPath, self.JVM_ARGS
+            cmd += " && cd %s && JVM_ARGS='%s' /opt/apache-jmeter/bin/jmeter -n -t %s/%s/pretest.jmx -l jmeterOut/pretest_results.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true" % (
+                self.workerDirPath, self.JVM_ARGS, self.homeDirPath, self.workerDirPath
             )
         return cmd
 
@@ -47,8 +48,8 @@ class JMeterFrameProcessor(batchRunner.frameProcessor):
         #return 'TestPlan_results_%03d.csv' % frameNum
 
     def frameCmd( self, frameNum ):
-        cmd = "cd %s && mkdir -p jmeterOut && JVM_ARGS='%s' /opt/apache-jmeter/bin/jmeter.sh -n -t %s -l jmeterOut/TestPlan_results.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true" % (
-            self.workerDirPath, self.JVM_ARGS, self.JMeterFilePath
+        cmd = "cd %s && mkdir -p jmeterOut && JVM_ARGS='%s' /opt/apache-jmeter/bin/jmeter.sh -n -t %s/%s/%s -l jmeterOut/TestPlan_results.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true" % (
+            self.workerDirPath, self.JVM_ARGS, self.homeDirPath, self.workerDirPath, self.JMeterFilePath
         )
         cmd += ' && mv jmeterOut ~/%s' % (self.frameOutFileName( frameNum ))
         return cmd
