@@ -419,7 +419,7 @@ def tellInstances( instancesSpec, command=None, resultsLogFilePath=None,
 if __name__ == "__main__":
     # configure logging
     logging.basicConfig(format='%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s', datefmt='%Y/%m/%d %H:%M:%S')
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(logging.INFO)
     logger.debug('the logger is configured')
     asyncssh.set_log_level( logging.WARNING )
     #logging.getLogger("asyncio").setLevel(logging.DEBUG)
