@@ -209,11 +209,14 @@ if __name__ == "__main__":
     nPerfect = 0
     nImperfect = 0
     nUnfinished = 0
+    totFramesReq = 0
     allEmptyCsvs = []
+    nBatchesWithEmpties = 0
     failedStates = collections.Counter()
     allDevsCounter = collections.Counter()
     failedDevsCounter = collections.Counter()
     countryCounter = collections.Counter()
+    allInstancesByIid = {}
     instancesByDevId = {}
     devIdsByIid = {}
     lateStarts = []
@@ -248,6 +251,7 @@ if __name__ == "__main__":
                 try:
                     launchedInstances = json.load(jsonInFile)  # an array
                     instancesByIid = { inst['instanceId']: inst for inst in launchedInstances }
+                    allInstancesByIid.update( instancesByIid )
                 except Exception as exc:
                     logger.warning( 'could not load json (%s) %s', type(exc), exc )
 
@@ -261,6 +265,7 @@ if __name__ == "__main__":
             logger.debug( 'startingArgs: %s', startingArgs )
             batchStartDateStr = startingOp['dateTime']
             nFramesReq = startingArgs['endFrame'] + 1 - startingArgs['startFrame']
+            totFramesReq += nFramesReq
 
             finishedOp = findOperation( 'finished', brResults )
             if not finishedOp or not finishedOp['args']:
@@ -337,6 +342,7 @@ if __name__ == "__main__":
             csvPat = 'jmeterOut_%%03d/%s' % jtlFileName
             emptyCsvs = findTimeEmptyCsvs( iidByFrame, batchDirPath, csvPat=csvPat )
             if emptyCsvs:
+                nBatchesWithEmpties += 1
                 allEmptyCsvs.extend( emptyCsvs )
                 logger.info( '%d emptyCsvs: %s', len(emptyCsvs), emptyCsvs )
             timeDiv = 1000 # jmeter timeStamps are inb ms
@@ -492,12 +498,13 @@ if __name__ == "__main__":
     for latLon in sorted( locDict.keys(), key=lambda x: x[1] ):
         info = locDict[ latLon ]
         if info['count'] >= 2:
-            print( latLon, info['count'], info['device-location']['display-name'], info['devIds'] )
+            print( latLon, info['count'], info['device-location']['display-name'], sorted(info['devIds']) )
     print()
-    for emptyCsv in allEmptyCsvs:
+    print( '%d cases of empty csv files' % len(allEmptyCsvs) )
+    for emptyCsv in sorted( allEmptyCsvs, key=lambda x: devIdsByIid[ x['instanceId'] ] ):
         iid = emptyCsv['instanceId']
         devId = devIdsByIid[ iid ]
-        inst = instancesByIid[ iid ]
+        inst = allInstancesByIid[ iid ]
         launchedDateTime = inst.get( 'started-at')
         locInfo = getDevLoc( devId )
         displayName = locInfo.get( 'display-name' )
@@ -505,7 +512,10 @@ if __name__ == "__main__":
 
     print()
     print( '%d batches were analyzed ' % nAnalyzed)
-    print( '%d batches were perfect (n out of n instances succeeded)' % nPerfect)
+    print( 'tot frames requested:', totFramesReq, '(%.1f per batch)' % (totFramesReq/nAnalyzed) )
+    print( '%d batches were "perfect" (n out of n instances succeeded)' % nPerfect)
+    if nBatchesWithEmpties:
+        print( '%d batches had one or more empty csv output files ' % nBatchesWithEmpties )
     print( '%d batch(es) had at least 1 failure' % nImperfect)
     if nUnfinished:
         print( '%d batch(es) unfinished (interrupted or still running)' % nUnfinished)
