@@ -11,6 +11,7 @@ import json
 import logging
 #import math
 import os
+import statistics
 import sys
 #import warnings
 
@@ -175,6 +176,30 @@ def getDevDpr( devId ):
     inst = instancesByDevId.get( devId, {} )
     return inst.get('dpr', 0)
 
+def printLatenessDetails( devCounter, eventList, tag ):
+    for x, count in devCounter.most_common():
+        #print( '%s: %d' % (x, count) )
+        errRate = 100 * count / allDevsCounter[x]
+        inst = instancesByDevId.get( x, {} )
+        dpr = round( inst.get( 'dpr', 0 ) )
+        locInfo = inst.get('device-location', {})
+        countryCode = locInfo.get( 'country-code' )
+        locality = locInfo.get( 'locality' ) + ', ' + locInfo.get( 'area' )
+        ramSpecs = inst.get( 'ram', {} )
+        totRam = ramSpecs.get('total', 0 )
+        print( 'dev %s in %s had %2d late %s(s) in %2d attempt(s), %4.1f%% lateness rate; dpr %d, ram %d (%s)' %
+            (x, countryCode, count, tag, allDevsCounter[x], errRate, dpr, totRam, locality) 
+            )
+    if not False:
+        print( 'Late %s events:' % (tag) )
+        eventsSorted = sorted( eventList, key=lambda x: x['devId'] )
+        for event in eventsSorted:
+            print( 'dev', event['devId'], tag, round(event['timeOffset']/1000), 'seconds late at',
+            datetime.datetime.fromtimestamp(event['timeStamp']/1000, tz=datetime.timezone.utc).strftime( '%Y/%m/%d %H:%M:%S' ),
+            'iid', event['instanceId']
+            )
+        print()
+
 
 if __name__ == "__main__":
     # configure logger formatting
@@ -219,6 +244,8 @@ if __name__ == "__main__":
     allInstancesByIid = {}
     instancesByDevId = {}
     devIdsByIid = {}
+    lateFinishes = []
+    lateFinishCounter = collections.Counter()
     lateStarts = []
     lateStartCounter = collections.Counter()
     locDict = {}  # indexed by lat,lon
@@ -322,7 +349,7 @@ if __name__ == "__main__":
                     print( 'installer ONP for inst', recruiterResult['instanceId'] )
 
             frameStarts = findFrameStarts( brResults )
-            logger.info( 'found %d frameStarts', len(frameStarts) )
+            logger.debug( 'found %d frameStarts', len(frameStarts) )
             for entry in frameStarts:
                 iid = entry['instanceId']
                 inst = instancesByIid.get( iid, {} )
@@ -355,6 +382,8 @@ if __name__ == "__main__":
             minMinTimeStamp = int( min( minTimeStamps ) )
             maxMaxTimeStamp = max( maxTimeStamps )
             logger.debug( 'minMinTimeStamp %d', minMinTimeStamp )
+            medianMaxTimeStamp = statistics.median( maxTimeStamps )
+            logger.debug( 'medianMaxTimeStamp %d', medianMaxTimeStamp )
 
             startingOffsets = [(bounds['min']-minMinTimeStamp)/timeDiv for bounds in timeStampBounds]
             logger.debug( 'startingOffsets (sorted) %s', sorted( startingOffsets ) )
@@ -363,16 +392,27 @@ if __name__ == "__main__":
             logger.debug( 'effDurs (sorted) %s', sorted( effDurs ) )
 
             for bounds in timeStampBounds:
-                if bounds['min'] >= minMinTimeStamp + 120000:
+                if bounds['min'] >= minMinTimeStamp + 80000:
                     iid = bounds['instanceId']
                     devId = devIdsByIid[ iid ]
                     timeOffset = (bounds['min'] - minMinTimeStamp)
                     lateStart = {'instanceId': iid, 'devId': devId,
                         'timeStamp': bounds['min'], 'timeOffset': timeOffset
                      }
-                    logger.info( 'lateStart: %s', lateStart )
+                    logger.debug( 'lateStart: %s', lateStart )
                     lateStarts.append( lateStart )
                     lateStartCounter[devId] += 1
+                if bounds['max'] >= medianMaxTimeStamp + 80000:
+                    iid = bounds['instanceId']
+                    devId = devIdsByIid[ iid ]
+                    timeOffset = (bounds['max'] - medianMaxTimeStamp)
+                    lateFinish = {'instanceId': iid, 'devId': devId,
+                        'timeStamp': bounds['max'], 'timeOffset': timeOffset
+                     }
+                    logger.debug( 'late-ending dev %d inst %s', devId, iid )
+                    logger.debug( 'late by %.1f seconds', timeOffset/1000 )
+                    lateFinishes.append( lateFinish )
+                    lateFinishCounter[devId] += 1
 
             #maxSeconds = int( math.ceil( max(effDurs) ) )
 
@@ -433,6 +473,35 @@ if __name__ == "__main__":
                      )
                     #TODO save data for this failed instance
     print()
+    print( 'Instances per country:', countryCounter )
+    print()
+    print( len(lateStartCounter), 'device(s) had late starts' )
+    print( 'lateStartCounter:', lateStartCounter )
+    printLatenessDetails( lateStartCounter, lateStarts, tag='start' )
+
+    print( len(lateFinishCounter), 'device(s) had late finishes' )
+    print( 'lateFinishCounter:', lateFinishCounter )
+    printLatenessDetails( lateFinishCounter, lateFinishes, tag='finish' )
+
+    print()
+    print( 'Collocation counts')
+    # print location info sorted by longitude
+    for latLon in sorted( locDict.keys(), key=lambda x: x[1] ):
+        info = locDict[ latLon ]
+        if info['count'] >= 2:
+            print( latLon, info['count'], info['device-location']['display-name'], sorted(info['devIds']) )
+    print()
+    print( '%d cases of empty csv files' % len(allEmptyCsvs) )
+    for emptyCsv in sorted( allEmptyCsvs, key=lambda x: devIdsByIid[ x['instanceId'] ] ):
+        iid = emptyCsv['instanceId']
+        devId = devIdsByIid[ iid ]
+        inst = allInstancesByIid[ iid ]
+        launchedDateTime = inst.get( 'started-at')
+        locInfo = getDevLoc( devId )
+        displayName = locInfo.get( 'display-name' )
+        print( 'empty csv for dev %d, iid %s launched %s (%s) ' % (devId, iid, launchedDateTime, displayName) )
+
+    print()
     print( '%d failed device(s)' % len(failedDevsCounter) )
     for x, count in failedDevsCounter.most_common():
         #print( '%s: %d' % (x, count) )
@@ -464,52 +533,6 @@ if __name__ == "__main__":
             print( 'dev %s in %s had %2d failure(s) in %2d attempt(s) %4.1f%% failure rate; dpr %d, ram %d (%s)' %
                 (x, countryCode, failedDevsCounter[x], allDevsCounter[x], errRate, dpr, totRam, locality) 
                 )
-    print()
-    print( 'CountryCounter', countryCounter )
-    print()
-    print( len(lateStartCounter), 'devices had late starts' )
-    print( 'lateStartCounter', lateStartCounter )
-
-    for x, count in lateStartCounter.most_common():
-        #print( '%s: %d' % (x, count) )
-        errRate = 100 * count / allDevsCounter[x]
-        inst = instancesByDevId.get( x, {} )
-        dpr = round( inst.get( 'dpr', 0 ) )
-        locInfo = inst.get('device-location', {})
-        countryCode = locInfo.get( 'country-code' )
-        locality = locInfo.get( 'locality' ) + ', ' + locInfo.get( 'area' )
-        ramSpecs = inst.get( 'ram', {} )
-        totRam = ramSpecs.get('total', 0 )
-        print( 'dev %s in %s had %2d late start(s) in %2d attempt(s), %4.1f%% lateness rate; dpr %d, ram %d (%s)' %
-            (x, countryCode, count, allDevsCounter[x], errRate, dpr, totRam, locality) 
-            )
-    if False:
-        print( 'Late Starts' )
-        startsSorted = sorted( lateStarts, key=lambda x: x['devId'] )
-        for lateStart in startsSorted:
-            print( 'dev', lateStart['devId'], 'started', round(lateStart['timeOffset']/1000), 'seconds late at',
-            datetime.datetime.fromtimestamp(lateStart['timeStamp']/1000, tz=datetime.timezone.utc).strftime( '%Y/%m/%d %H:%M:%S' ),
-            'iid', lateStart['instanceId']
-            )
-        print()
-    print()
-    print( 'Collocation counts')
-    # print location info sorted by longitude
-    for latLon in sorted( locDict.keys(), key=lambda x: x[1] ):
-        info = locDict[ latLon ]
-        if info['count'] >= 2:
-            print( latLon, info['count'], info['device-location']['display-name'], sorted(info['devIds']) )
-    print()
-    print( '%d cases of empty csv files' % len(allEmptyCsvs) )
-    for emptyCsv in sorted( allEmptyCsvs, key=lambda x: devIdsByIid[ x['instanceId'] ] ):
-        iid = emptyCsv['instanceId']
-        devId = devIdsByIid[ iid ]
-        inst = allInstancesByIid[ iid ]
-        launchedDateTime = inst.get( 'started-at')
-        locInfo = getDevLoc( devId )
-        displayName = locInfo.get( 'display-name' )
-        print( 'empty csv for dev %d, iid %s launched %s (%s) ' % (devId, iid, launchedDateTime, displayName) )
-
     print()
     print( '%d batches were analyzed ' % nAnalyzed)
     print( 'tot frames requested:', totFramesReq, '(%.1f per batch)' % (totFramesReq/nAnalyzed) )
