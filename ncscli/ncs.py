@@ -251,8 +251,11 @@ def launchScInstancesAsync( authToken, encryptFiles, numReq=1,
     if jsonFilter:
         try:
             filters = json.loads( jsonFilter )
+        except json.JSONDecodeError:
+            logger.warning( 'invalid json in filter "%s"', jsonFilter )
+            raise ValueError( 'invalid json passed as filter' )
         except Exception:
-            logger.error( 'invalid json in filter "%s"', jsonFilter )
+            logger.error( 'exception decoding filter "%s"', jsonFilter )
             raise
         else:
             if filters:
@@ -556,6 +559,9 @@ def doCmdLaunch( args ):
             if args.json:
                 print( '[]')
             return infos['serverError']
+    except ValueError as exc:
+        logger.error( 'ValueError exception launching instances: %s', exc )
+        return 13
     except Exception as exc:
         logger.error( 'exception launching instances (%s) "%s"',
             type(exc), exc, exc_info=True )
