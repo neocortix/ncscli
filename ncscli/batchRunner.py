@@ -523,12 +523,12 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted, result
         badInstances = []
         if startedInstances:
             # avoid calling checkInstanceClocks on windows because stdCommandInstance runs very slowly there
-            if sys.platform.startswith( 'win32' ):
+            if True or sys.platform.startswith( 'win32' ):
                 returnCodes = []
             else:
-                returnCodes = checkInstanceClocks( startedInstances, timeLimit=120 )
+                returnCodes = checkInstanceClocks( startedInstances, timeLimit=180 )
             if not any( returnCodes ):
-                logger.info( 'checkInstanceClocks found all good' )
+                logger.debug( 'checkInstanceClocks found all good' )
                 goodInstances = startedInstances
             else:
                 logger.warning( 'checkInstanceClocks returned %s', returnCodes )
