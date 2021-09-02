@@ -4,6 +4,7 @@ import argparse
 import datetime
 import glob
 import logging
+import math
 import os
 import shutil
 import subprocess
@@ -123,7 +124,8 @@ frameTimeLimit = max( round( planDuration * 1.5 ), planDuration+8*60 ) # some sl
 JMeterFrameProcessor.JMeterFilePath = jmxFilePath
 
 nFrames = args.nWorkers
-nWorkers = round( nFrames * 1.5 )
+#nWorkers = round( nFrames * 1.5 )  # old formula
+nWorkers = math.ceil(nFrames*1.5) if nFrames <=10 else round( max( nFrames*1.12, nFrames + 5 * math.log10( nFrames ) ) )
 
 dateTimeTag = datetime.datetime.now().strftime( '%Y-%m-%d_%H%M%S' )
 outDataDir = args.outDataDir
@@ -145,7 +147,7 @@ try:
         endFrame = nFrames,
         nWorkers = nWorkers,
         limitOneFramePerWorker = True,
-        autoscaleMax = 2
+        autoscaleMax = 1
     )
     if (rc == 0) and os.path.isfile( outDataDir +'/recruitLaunched.json' ):
         rampStepDuration = args.rampStepDuration
