@@ -300,7 +300,7 @@ if __name__ == "__main__":
         if not fields:
             logger.info( 'no fields in %s', inFilePath )
             continue
-        if 'TestPlan_results_' in resultFileNames[i]:
+        if 'TestPlan_results_' in resultFileNames[i] and '_merged_' not in resultFileNames[i]:
             frameNum = int(resultFileNames[i].lstrip("TestPlan_results_").rstrip(".csv"))
         elif resultFileNames[i].startswith('jmeterOut_'):
             numPart = resultFileNames[i].split('/')[0].split('_')[1]
@@ -955,9 +955,16 @@ if __name__ == "__main__":
 
         # compute means and percentiles within each window
         for i in range(0,numWindows):
-            MeanResponseTimesInWindows[i] = np.mean(ResponseTimesInWindows[i])
-            PercentileResponseTimesInWindows[i] = np.percentile(ResponseTimesInWindows[i],95)
-            Percentile5ResponseTimesInWindows[i] = np.percentile(ResponseTimesInWindows[i],5)
+            rtw = ResponseTimesInWindows[i]
+            if rtw:
+                MeanResponseTimesInWindows[i] = np.mean(ResponseTimesInWindows[i])
+                PercentileResponseTimesInWindows[i] = np.percentile(ResponseTimesInWindows[i],95)
+                Percentile5ResponseTimesInWindows[i] = np.percentile(ResponseTimesInWindows[i],5)
+            else:
+                print( 'no response times in window', i )
+                MeanResponseTimesInWindows[i] = 0
+                PercentileResponseTimesInWindows[i] = 0
+                Percentile5ResponseTimesInWindows[i] = 0
 
         # check 95th percentiles against SLO for PASS/FAIL
         numSLOwindows = int(min(SLODurationSeconds,maxDurationFound)/rampStepDurationSeconds)
