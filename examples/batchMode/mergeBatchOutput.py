@@ -119,8 +119,9 @@ if __name__ == "__main__":
                 continue
             logger.debug( 'read %d rows from %s', len(rows), inFilePath )
             totRowsRead += len(rows)
-            timeStamps = [float(row[args.tsField]) for row in rows]
-            minTimeStamp = min(timeStamps)
+            if args.augment:
+                timeStamps = [float(row[args.tsField]) for row in rows]
+                minTimeStamp = min(timeStamps)
             if not fieldNames:
                 fieldNames = list( rows[0].keys() ) + extraFields
                 logger.debug( 'columns:  %s', fieldNames )
