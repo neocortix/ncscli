@@ -199,14 +199,34 @@ if __name__ == "__main__":
     if False:
         print(len(launchedInstances))
         print(launchedInstances[0])
+        print("")
         print(launchedInstances[0]["instanceId"])
         print(launchedInstances[0]["device-location"])
         print(launchedInstances[0]["device-location"]["latitude"])
         print(launchedInstances[0]["device-location"]["longitude"])
         print(launchedInstances[0]["device-location"]["display-name"])
         print(launchedInstances[0]["device-location"]["country"])
+        print("")
 
+    # for i in range(0,len(launchedInstances)):
+        # print("i = %3d  %s" % (i,launchedInstances[i]))
+    
+    
     completedJobs = demuxResults(jlogFilePath)
+
+    if False:
+        for i in range(0,len(completedJobs)):
+            print("completedJobs[%3d] = %s" % (i,completedJobs[i]))
+
+        for i in range(0,len(completedJobs)):
+            for j in range(0,len(launchedInstances)):
+                if launchedInstances[j]["instanceId"] == completedJobs[i][1]:
+                    # print("launchedInstances[j]=%s" % (launchedInstances[j]))
+                    # deviceID = get(launchedInstances[j]["device-id"],0)
+                    deviceID = launchedInstances[j].get("device-id",0)
+                    print("jmeterOut_%03d  instanceId=%s  device-id=%s" % (completedJobs[i][0],completedJobs[i][1], deviceID))
+
+
 
     mappedFrameNumLocation = []
     mappedFrameNumLocationUnitedStates = []
@@ -221,7 +241,8 @@ if __name__ == "__main__":
                                            launchedInstances[j]["device-location"]["latitude"],
                                            launchedInstances[j]["device-location"]["longitude"],
                                            launchedInstances[j]["device-location"]["display-name"],
-                                           launchedInstances[j]["device-location"]["country"]
+                                           launchedInstances[j]["device-location"]["country"],
+                                           launchedInstances[j]["instanceId"]
                                            ])
                 if launchedInstances[j]["device-location"]["country"] == "United States":
                     mappedFrameNumLocationUnitedStates.append([completedJobs[i][0],
@@ -245,12 +266,13 @@ if __name__ == "__main__":
                                                launchedInstances[j]["device-location"]["country"]
                                                ])
                 
+    mappedFrameNumLocationSorted = sorted(mappedFrameNumLocation,key=lambda tup: tup[0])
 
-    '''
-    print("\nLocations:")
-    for i in range(0,len(mappedFrameNumLocation)):
-        print("%s" % mappedFrameNumLocation[i][3])
-    '''
+    if False:
+        print("\nLocations and Device Details:")
+        for i in range(0,len(mappedFrameNumLocationSorted)):
+            # print("%s" % mappedFrameNumLocation[i][3])
+            print("%s" % mappedFrameNumLocationSorted[i])
         
     print("\nReading Response Time data")    
     #determine number of files and their filenames  TestPlan_results_001.csv
@@ -1424,10 +1446,12 @@ if __name__ == "__main__":
     outputFileName = outputDir + "/TestResults.html"
     table1FileName = outputDir + "/Table1.csv"
     table2FileName = outputDir + "/Table2.csv"
+    table3FileName = outputDir + "/Table3.csv"
     copyfile( scriptDirPath()+"/LoadTestHeader_005.jpg", outputDir + "/LoadTestHeader_005.jpg")
     outputFile = open(outputFileName, "w",encoding='utf-8')
     table1File = open(table1FileName, "w",encoding='utf-8')
     table2File = open(table2FileName, "w",encoding='utf-8')
+    table3File = open(table3FileName, "w",encoding='utf-8')
 
     print("<HTML>",file=outputFile)
     print("<HEAD>",file=outputFile)
@@ -1439,6 +1463,7 @@ if __name__ == "__main__":
     print("<center>",file=outputFile)
 
 
+    # top table in HTML Report
     print("<TABLE style=\"border:3px solid #888888;background-color:White \"><TR><TD>",file=outputFile)
 
     print("<center>",file=outputFile)
@@ -1455,7 +1480,7 @@ if __name__ == "__main__":
     print("<BR><BR>",file=outputFile)
 
 
-
+    # top table in Table1.csv
     print("Test Date:,\"%s\"" % primaryDateString1,file=table1File)
     print("Number of Virtual Users:,%i" % maxThreads,file=table1File)
     print("Number of Instances:,%i" % len(culledRelativeResponseData),file=table1File)
@@ -1471,6 +1496,7 @@ if __name__ == "__main__":
     print("</TD></TR></TABLE>",file=outputFile)
     print("<BR><BR>",file=outputFile)
 
+    # second table in HTML Report, and Table2.csv:
     print("<TABLE style=\"border:3px solid #888888;background-color:White;width:1016px \"><TR><TD>",file=outputFile)
 
     print("<center>",file=outputFile)
@@ -1517,6 +1543,9 @@ if __name__ == "__main__":
         # print("<TABLE style=\"border:2px solid #444444;background-color:White;font-family:'Arial';color:Black;font-size:16pt;font-weight:bold\">",file=outputFile)
         print("<TABLE style=\"border:1px solid #888888;background-color:White;font-family:'Arial';color:Black;font-size:9pt;width:900px \">",file=outputFile)
         print("<TR>",file=outputFile)
+        print("<TH colspan=\"14\" style=\"background-color:#8bc0e6\">Response Times By Task</TH>",file=outputFile)
+        print("</TR>",file=outputFile)
+        print("<TR>",file=outputFile)
         print("<TH style=\"background-color:#8bc0e6\">Requests</TH>",file=outputFile)
         print("<TH colspan=\"3\" style=\"background-color:#8bc0e6\">Executions</TH>",file=outputFile)
         print("<TH colspan=\"7\" style=\"background-color:#8bc0e6\">Response Times (ms)</TH>",file=outputFile)
@@ -1524,6 +1553,7 @@ if __name__ == "__main__":
         print("<TH colspan=\"2\" style=\"background-color:#8bc0e6\">Network (KB/sec)</TH>",file=outputFile)
         print("</TR>",file=outputFile)
 
+        # header for Table2.csv
         print("Requests,Executions,,,Response Times (ms),,,,,,,Throughput,Network (KB/sec),",file=table2File)
 
         print("<TR>",file=outputFile)
@@ -1543,6 +1573,7 @@ if __name__ == "__main__":
         print("<TH style=\"background-color:#8bc0e6\">Sent</TH>",file=outputFile)
         print("</TR>",file=outputFile)
 
+        # header2 for Table2.csv
         print("Label,# Samples,FAIL,Error %,Average,Min,Max,Median,90th pct,95th pct,99th pct,Transactions/s,Received,Sent",file=table2File)
 
         totalNumSamples = numberBadCodes # total = bad + good
@@ -1589,8 +1620,10 @@ if __name__ == "__main__":
         print("</TR>",file=outputFile)
 
         
+        # totals row for Table2.csv
         print("Total,%d,%d,%.2f%%,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f" % (totalNumSamples,numberBadCodes,totalBadCodePercentage,averageMs,minMs,maxMs,medianMs,percentile90ms,percentile95ms,percentile99ms,transactionsPerSecond,totalReceivedKBytesPerSecond,totalSentKBytesPerSecond),file=table2File)
 
+        # alternating color rows
         for i in range(0,len(numberedReducedLabels)):
             if i%2==0:
                 bgColorString = "#e9f2fa"
@@ -1662,6 +1695,7 @@ if __name__ == "__main__":
             print("<TD style=\"background-color:%s\">%.2f</TD>"%(bgColorString,sentKBytesPerSecond),file=outputFile)
             print("</TR>",file=outputFile)
 
+            # main data row for Table2.csv
             print("%s,%d,%d,%.2f%%,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f" % (label,totalNumSamples,badCodeCount,badCodePercentage,averageMs,minMs,maxMs,medianMs,percentile90ms,percentile95ms,percentile99ms,transactionsPerSecond,receivedKBytesPerSecond,sentKBytesPerSecond),file=table2File)
 
         print("</TABLE>",file=outputFile)
@@ -1670,12 +1704,67 @@ if __name__ == "__main__":
         print("</center>",file=outputFile)
         print("</TD></TR></TABLE>",file=outputFile)
         print("<BR><BR><BR>",file=outputFile)
+
+    # third table in HTML Report
+    print("<TABLE style=\"border:3px solid #888888;background-color:White;width:1016px \"><TR><TD>",file=outputFile)
+    
+    print("<center>",file=outputFile)
+  
+    print("<BR><BR><BR>",file=outputFile)
+
+    # print("<TABLE style=\"border:1px solid #888888;background-color:White;font-family:'Arial';color:Black;font-size:9pt;width:900px \">",file=outputFile)
+    print("<TABLE style=\"border:1px solid #888888;background-color:White;font-family:'Arial';color:Black;font-size:9pt\">",file=outputFile)
+
+    # table header
+    print("<TR>",file=outputFile)
+    print("<TH colspan=\"5\" style=\"background-color:#8bc0e6\">Device Locations and Instance IDs</TH>",file=outputFile)
+    print("</TR>",file=outputFile)
+    print("<TR>",file=outputFile)
+    print("<TH style=\"background-color:#8bc0e6\">File</TH>",file=outputFile)
+    print("<TH style=\"background-color:#8bc0e6\">Latitude</TH>",file=outputFile)
+    print("<TH style=\"background-color:#8bc0e6\">Longitude</TH>",file=outputFile)
+    print("<TH style=\"background-color:#8bc0e6\">Location</TH>",file=outputFile)
+    print("<TH style=\"background-color:#8bc0e6\">Instance ID</TH>",file=outputFile)
+    print("</TR>",file=outputFile)
+
+    # header for Table3.csv
+    print("File,Latitude,Longitude,Location,Instance ID",file=table3File)
+
+    # alternating color rows
+    for i in range(0,len(mappedFrameNumLocation)):
+        if i%2==0:
+            bgColorString = "#e9f2fa"
+        else:
+            bgColorString = "#ffffff"
+
+        print("<TR>",file=outputFile)
+        print("<TD style=\"background-color:%s\">%s</TD>"%(bgColorString,mappedFrameNumLocationSorted[i][0]),file=outputFile)
+        print("<TD style=\"background-color:%s\">%s</TD>"%(bgColorString,mappedFrameNumLocationSorted[i][1]),file=outputFile)
+        print("<TD style=\"background-color:%s\">%s</TD>"%(bgColorString,mappedFrameNumLocationSorted[i][2]),file=outputFile)
+        print("<TD style=\"background-color:%s\">%s</TD>"%(bgColorString,mappedFrameNumLocationSorted[i][3]),file=outputFile)
+        print("<TD style=\"background-color:%s\">%s</TD>"%(bgColorString,mappedFrameNumLocationSorted[i][5]),file=outputFile)
+        print("</TR>",file=outputFile)
+            
+        # main data row for Table3.csv
+        print("%s,%s,%s,\"%s\",%s" % (mappedFrameNumLocationSorted[i][0], mappedFrameNumLocationSorted[i][1], mappedFrameNumLocationSorted[i][2], mappedFrameNumLocationSorted[i][3], mappedFrameNumLocationSorted[i][5]),file=table3File)
+
+
+    print("</TABLE>",file=outputFile)
+    print("<BR><BR><BR>",file=outputFile)
+
+    print("</center>",file=outputFile)
+    print("</TD></TR></TABLE>",file=outputFile)
+    print("<BR><BR><BR>",file=outputFile)
+
+
+
     print("</center>",file=outputFile)
     print("</Body>",file=outputFile)
     print("</HTML>",file=outputFile)
     outputFile.close()  
     table1File.close()  
     table2File.close()  
+    table3File.close()  
     print("Writing Output to %s" % outputFileName)
     print("Done.")
 
