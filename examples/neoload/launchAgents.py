@@ -183,7 +183,7 @@ if __name__ == '__main__':
     ap.add_argument( '--nlWebZone', default='defaultzone',  help='the URL of a neoload web server to query' )
     ap.add_argument( '--nWorkers', type=int, help='the number of agents to launch',
         default=10 )
-    ap.add_argument( '--outDataDir', required=True, help='a path to the output data dir for this run (required)' )
+    ap.add_argument( '--outDataDir', required=False, help='a path to the output data dir for this run' )
     ap.add_argument( '--portRangeStart', type=int, default=7100,
         help='the beginning of the range of port numbers to forward' )
     args = ap.parse_args()
