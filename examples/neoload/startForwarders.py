@@ -53,12 +53,16 @@ def startForwarders( agentInstances, forwarderHost='localhost',
                 '-L', '*:'+str(assignedPort)+':localhost:'+str(assignedPort), 
                 '%s@%s' % (user, instHost)
             ]
-            #logger.info( 'cmd: %s', cmd )
+            logger.debug( 'cmd: %s', cmd )
+            logLevel = logger.getEffectiveLevel()
+            # will force ssh process to be quiet unless we are in a debug-like logLevel
+            stderr = None if logLevel < logging.INFO else subprocess.DEVNULL
+
             rc = subprocess.call( cmd, shell=False,
-                stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                stdin=subprocess.DEVNULL, stderr=stderr,
                 )
             if rc:
-                logger.warning( 'could not forward to %s (rc %d)', iidAbbrev, rc )
+                logger.warning( 'could not forward to %s (rc %d)', iid, rc )
             else:
                 mapping = '%s:%d' % (forwarderHost, assignedPort)
                 mappings.append( mapping )
