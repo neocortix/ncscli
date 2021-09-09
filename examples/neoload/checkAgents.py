@@ -75,7 +75,7 @@ def retrieveLogs( liveInstances, neoloadVersion ):
     goodInstances = liveInstances
     logger.info( 'retrieving logs for %d instance(s)', len(goodInstances) )
 
-    if neoloadVersion == '7.10':
+    if neoloadVersion.startswith( '7.10' ):
         agentLogFilePath = '/root/.neotys/neoload/v7.10/logs/*.log'
     elif neoloadVersion == '7.7':
         agentLogFilePath = '/root/.neotys/neoload/v7.7/logs/*.log'
