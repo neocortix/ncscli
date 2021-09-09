@@ -18,7 +18,7 @@ import ncscli.tellInstances as tellInstances
 import startForwarders  # expected to be in the same directory
 
 
-neoloadVersion = None  # '7.6', '7.7', '7.10', and '7.10.1' are currently supported
+neoloadVersion = '7.10'  # will be overridden by cmd-line arg
 nlWebWanted = False
 
 class g_:
@@ -170,6 +170,7 @@ if __name__ == '__main__':
     formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
     logging.basicConfig(format=logFmt, datefmt=logDateFmt)
     #batchRunner.logger.setLevel(logging.DEBUG)  # for more verbosity
+    #startForwarders.logger.setLevel(logging.DEBUG)  # for more verbosity
     logger.setLevel(logging.INFO)
 
     ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@',
@@ -180,7 +181,7 @@ if __name__ == '__main__':
     )
     ap.add_argument( '--forwarderHost', help='IP addr (or host name) of the forwarder host',
         default='localhost' )
-    ap.add_argument( '--neoloadVersion', default ='7.10', help='version of neoload agent' )
+    ap.add_argument( '--neoloadVersion', default=neoloadVersion, help='version of neoload LG agent' )
     ap.add_argument( '--nlWeb', type=ncs.boolArg, default=False, help='whether to use NeoLoad Web' )
     ap.add_argument( '--nlWebToken', help='a token for authorized access to a neoload web server' )
     ap.add_argument( '--nlWebUrl', help='the URL of a neoload web server to query' )
