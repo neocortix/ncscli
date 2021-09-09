@@ -148,7 +148,7 @@ def findTimeStampBounds( iidByFrame, outputDir, csvPat, tsFieldName='timeStamp' 
             logger.warning( 'could not ingestCsv (%s) %s', type(exc), exc )
             continue
         if not rows:
-            logger.info( 'no rows in %s', inFilePath )
+            logger.debug( 'no rows in %s', inFilePath )
             continue
         logger.debug( 'read %d rows from %s', len(rows), inFilePath )
         timeStamps = [float(row[ tsFieldName ]) for row in rows]
@@ -182,13 +182,14 @@ def printLatenessDetails( devCounter, eventList, tag ):
         errRate = 100 * count / allDevsCounter[x]
         inst = instancesByDevId.get( x, {} )
         dpr = round( inst.get( 'dpr', 0 ) )
+        dar = round( inst.get( 'dar', 0 ) )
         locInfo = inst.get('device-location', {})
         countryCode = locInfo.get( 'country-code' )
         locality = locInfo.get( 'locality' ) + ', ' + locInfo.get( 'area' )
         ramSpecs = inst.get( 'ram', {} )
         totRam = ramSpecs.get('total', 0 )
-        print( 'dev %s in %s had %2d late %s(s) in %2d attempt(s), %4.1f%% lateness rate; dpr %d, ram %d (%s)' %
-            (x, countryCode, count, tag, allDevsCounter[x], errRate, dpr, totRam, locality) 
+        print( 'dev %s in %s had %2d late %s(s) in %2d attempt(s), %4.1f%% lateness rate; dpr %d, dar %d, ram %d (%s)' %
+            (x, countryCode, count, tag, allDevsCounter[x], errRate, dpr, dar, totRam, locality) 
             )
     if not False:
         print( 'Late %s events:' % (tag) )
@@ -228,7 +229,7 @@ if __name__ == "__main__":
         innerPath = os.path.join( dataDir, innerDir )
         if os.path.isdir( innerPath ) and innerDir >= args.batchA and innerDir <= args.batchB:
             batchNames.append( innerDir )
-    logger.info( 'analyzing %d batches: %s', len(batchNames), batchNames )
+    print( 'Analyzing %d batch(es): %s' % (len(batchNames), batchNames) )
 
     nAnalyzed = 0
     nPerfect = 0
@@ -258,6 +259,10 @@ if __name__ == "__main__":
         batchJlogFilePath = batchDirPath + "/batchRunner_results.jlog"
         launchedJsonFilePath = batchDirPath + "/recruitLaunched.json"
         recruiterJlogFilePath = batchDirPath + "/recruitInstances.jlog"
+        pngFilePath = batchDirPath + "/09_Graphs3.png"
+
+        if not os.path.isfile( pngFilePath ):
+            print( 'missing composite PNG file(s) for', batchName )
 
         installerEntry = None
         if os.path.isfile( recruiterJlogFilePath ):
@@ -299,11 +304,16 @@ if __name__ == "__main__":
                 logger.info( 'batch %s is not finished', batchName )
                 nUnfinished += 1
                 continue
+            renderOp = findOperation( 'parallelRender', brResults )
+            renderArgs = renderOp['args'].get( 'parallelRender' )
+            nRecruited = renderArgs.get( 'nInstances', 0 )
+
             finishedArgs = finishedOp['args'].get( 'finished' )
             nFramesFinished = finishedArgs['nFramesFinished']
             if nFramesFinished == nFramesReq:
                 nPerfect += 1
-            
+
+            batchLocs = {}
             # update the global dictionaries, possibly overwriting earlier records
             for inst in launchedInstances:
                 devId = inst.get( 'device-id', 0 )
@@ -321,11 +331,26 @@ if __name__ == "__main__":
                 else:
                     rec = {'device-location': locInfo, 'count': 1, 'devIds': [devId] }
                     locDict[ latLon ] = rec
+                if latLon in batchLocs:
+                    locDevs = batchLocs[ latLon ]['devIds']
+                    if devId not in locDevs:
+                        batchLocs[ latLon ]['count'] += 1
+                        batchLocs[ latLon ]['devIds'].append( devId )
+                else:
+                    rec = {'device-location': locInfo, 'count': 1, 'devIds': [devId] }
+                    batchLocs[ latLon ] = rec
 
             #logger.info( 'batch %s completed: %d out of %d', batchName, nFramesFinished, nFramesReq )
             print()
-            print( 'BATCH %s completed %d out of %d' % (batchName, nFramesFinished, nFramesReq) )
+            print( 'BATCH %s completed %d out of %d (recruited %d)' %
+                (batchName, nFramesFinished, nFramesReq, nRecruited) )
             print( 'using filter %s' % (startingArgs['filter']) )
+            print( len(batchLocs), 'locations in batch')
+            # print location info sorted by longitude
+            for latLon in sorted( batchLocs.keys(), key=lambda x: x[1] ):
+                info = batchLocs[ latLon ]
+                if info['count'] >= 2:
+                    print( latLon, info['count'], info['device-location']['display-name'], sorted(info['devIds']) )
 
             # scan installer (recruiter) log
             for recruiterResult in recruiterResults:
@@ -343,7 +368,7 @@ if __name__ == "__main__":
                     print( 'installer EXCEPTION', ex, 'for inst', recruiterResult['instanceId'] )
                 sigKill = 'SIGKILL' in recruiterResult.get( 'stdout', '' ) or 'SIGILL' in recruiterResult.get( 'stdout', '' )
                 if sigKill:
-                    print( 'installer SIGKILL for inst', recruiterResult['instanceId'] )
+                    print( '(installer SIGKILL) for inst', recruiterResult['instanceId'] )
                 onp = 'Operation not permitted' in recruiterResult.get( 'stdout', '' )
                 if onp:
                     print( 'installer ONP for inst', recruiterResult['instanceId'] )
@@ -508,14 +533,24 @@ if __name__ == "__main__":
         errRate = 100 * count / allDevsCounter[x]
         inst = instancesByDevId.get( x, {} )
         dpr = round( inst.get( 'dpr', 0 ) )
+        dar = inst.get( 'dar', 0 )
         locInfo = inst.get('device-location', {})
         countryCode = locInfo.get( 'country-code' )
         locality = locInfo.get( 'locality' ) + ', ' + locInfo.get( 'area' )
         ramSpecs = inst.get( 'ram', {} )
         totRam = ramSpecs.get('total', 0 )
-        print( 'dev %s in %s had %2d failure(s) in %2d attempt(s) %4.1f%% failure rate; dpr %d, ram %d (%s)' %
-            (x, countryCode, count, allDevsCounter[x], errRate, dpr, totRam, locality) 
+        print( 'dev %s in %s had %2d failure(s) in %2d attempt(s) %4.1f%% failure rate; dpr %d, dar: %.1f, ram %d (%s)' %
+            (x, countryCode, count, allDevsCounter[x], errRate, dpr, dar, totRam, locality)
             )
+    if True:
+        darCounter = collections.Counter()
+        for devId, inst in instancesByDevId.items():
+            darCounter[ inst.get('dar') ] += 1
+        print()
+        #print( 'devices per DAR:', darCounter )
+        for dar, count in sorted( darCounter.items() ):
+            print( 'dar', dar, 'had', count, 'device(s)' )
+
     print()
     print( len(allDevsCounter), 'devices tested' )
     print( allDevsCounter )
@@ -534,6 +569,8 @@ if __name__ == "__main__":
                 (x, countryCode, failedDevsCounter[x], allDevsCounter[x], errRate, dpr, totRam, locality) 
                 )
     print()
+    print( 'batchA', batchNames[0], '- batchB', batchNames[-1])
+    print()
     print( '%d batches were analyzed ' % nAnalyzed)
     print( 'tot frames requested:', totFramesReq, '(%.1f per batch)' % (totFramesReq/nAnalyzed) )
     print( '%d batches were "perfect" (n out of n instances succeeded)' % nPerfect)
@@ -542,6 +579,10 @@ if __name__ == "__main__":
     print( '%d batch(es) had at least 1 failure' % nImperfect)
     if nUnfinished:
         print( '%d batch(es) unfinished (interrupted or still running)' % nUnfinished)
-    for state, count in failedStates.items():
+    nFrameFailures = 0
+    for state, count in sorted( failedStates.items() ):
+        if 'installer' not in state:
+            nFrameFailures += count
         print( '%s: %d' % (state, count) )
+    print( '%d frames failed (%.1f%% of requested frames)' % (nFrameFailures, 100*nFrameFailures/totFramesReq) )
     print()
