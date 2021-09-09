@@ -18,7 +18,7 @@ import ncscli.tellInstances as tellInstances
 import startForwarders  # expected to be in the same directory
 
 
-neoloadVersion = None  # '7.6', '7.7' and '7.10' are currently supported
+neoloadVersion = None  # '7.6', '7.7', '7.10', and '7.10.1' are currently supported
 nlWebWanted = False
 
 class g_:
@@ -34,7 +34,9 @@ class neoloadFrameProcessor(batchRunner.frameProcessor):
     '''defines details for installing Neotys Load Generator agent on a worker'''
 
     def installerCmd( self ):
-        if neoloadVersion == '7.10':
+        if neoloadVersion == '7.10.1':
+            return 'nlAgent/install_7-10-1.sh'
+        elif neoloadVersion == '7.10':
             return 'nlAgent/install_7-10_slim.sh'
             return 'nlAgent/install_7-10.sh'
         elif neoloadVersion == '7.7':
@@ -106,14 +108,16 @@ def configureAgent( inst, port, timeLimit=500 ):
     iid = inst['instanceId']
     logger.debug( 'would configure agent on instance %s for port %d', iid[0:16], port )
     rc = 1
+    # drop patch-level part of version number, if any
+    truncatedVersion = '.'.join(neoloadVersion.split('.')[:-1]) if neoloadVersion.count('.') > 1 else neoloadVersion
     # generate a command to modify agent.properties on the instance
-    configDirPath = '~/neoload%s/conf' % neoloadVersion
+    configDirPath = '~/neoload%s/conf' % truncatedVersion
     if nlWebWanted:
         cmd = "cat %s/nlweb.properties >> %s/agent.properties" % tuple( [configDirPath]*2 )
     else:
         cmd = ":"  # a null command
-    cmd += " && sed -i 's/NCS_LG_PORT/%d/' ~/neoload%s/conf/agent.properties" % (port, neoloadVersion)
-    cmd += " && sed -i 's/NCS_LG_HOST/%s/' ~/neoload%s/conf/agent.properties" % (forwarderHost, neoloadVersion)
+    cmd += " && sed -i 's/NCS_LG_PORT/%d/' %s/agent.properties" % (port, configDirPath)
+    cmd += " && sed -i 's/NCS_LG_HOST/%s/' %s/agent.properties" % (forwarderHost, configDirPath)
     if nlWebWanted:
         # deployment type for nlweb
         dtype = 'SAAS' if args.nlWebUrl == 'SAAS' else 'ONPREMISE'
@@ -189,7 +193,7 @@ if __name__ == '__main__':
     args = ap.parse_args()
 
     neoloadVersion =  args.neoloadVersion
-    supportedVersions = ['7.6', '7.7', '7.10']
+    supportedVersions = ['7.6', '7.7', '7.10', '7.10.1']
     if neoloadVersion not in supportedVersions:
         logger.error( 'version "%s" is not suppoprted; supported versions are %s',
             neoloadVersion, sorted( supportedVersions ) )
@@ -278,7 +282,7 @@ if __name__ == '__main__':
 
             #COULD check memory and available ports here
 
-            if neoloadVersion == '7.10':
+            if neoloadVersion.startswith( '7.10' ):
                 agentLogFilePath = '/root/.neotys/neoload/v7.10/logs/agent.log'
                 starterCmd = 'cd ~/neoload7.10/ && /usr/bin/java -Xms50m -Xmx100m -Dvertx.disableDnsResolver=true -classpath $HOME/neoload7.10/.install4j/i4jruntime.jar:$HOME/neoload7.10/.install4j/launchera03c11da.jar:$HOME/neoload7.10/bin/*:$HOME/neoload7.10/lib/crypto/*:$HOME/neoload7.10/lib/*:$HOME/neoload7.10/lib/jdbcDrivers/*:$HOME/neoload7.10/lib/plugins/ext/* install4j.com.neotys.nl.agent.launcher.AgentLauncher_LoadGeneratorAgent start & sleep 30 && free --mega 1>&2'
             elif neoloadVersion == '7.7':
