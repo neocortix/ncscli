@@ -30,12 +30,20 @@ def scriptDirPath():
     '''returns the absolute path to the directory containing this script'''
     return os.path.dirname(os.path.realpath(__file__))
 
+def truncateVersion( nlVersion ):
+    '''drop patch-level part of version number, if any'''
+    return '.'.join(nlVersion.split('.')[:-1]) if nlVersion.count('.') > 1 else nlVersion
+
 class neoloadFrameProcessor(batchRunner.frameProcessor):
     '''defines details for installing Neotys Load Generator agent on a worker'''
 
     def installerCmd( self ):
-        if neoloadVersion == '7.10.1':
-            return 'nlAgent/install_7-10-1.sh'
+        truncVersion = truncateVersion( neoloadVersion )
+        scoredVersion = neoloadVersion.replace( '.', '_' )
+        if neoloadVersion == '7.11.0':
+            return 'nlAgent/install_7-x.sh %s %s %s' % (neoloadVersion, truncVersion, scoredVersion )
+        elif neoloadVersion == '7.10.1':
+            return 'nlAgent/install_7-x.sh %s %s %s' % (neoloadVersion, truncVersion, scoredVersion )
         elif neoloadVersion == '7.10':
             return 'nlAgent/install_7-10_slim.sh'
             return 'nlAgent/install_7-10.sh'
@@ -109,7 +117,7 @@ def configureAgent( inst, port, timeLimit=500 ):
     logger.debug( 'would configure agent on instance %s for port %d', iid[0:16], port )
     rc = 1
     # drop patch-level part of version number, if any
-    truncatedVersion = '.'.join(neoloadVersion.split('.')[:-1]) if neoloadVersion.count('.') > 1 else neoloadVersion
+    truncatedVersion = truncateVersion( neoloadVersion )
     # generate a command to modify agent.properties on the instance
     configDirPath = '~/neoload%s/conf' % truncatedVersion
     if nlWebWanted:
@@ -194,7 +202,7 @@ if __name__ == '__main__':
     args = ap.parse_args()
 
     neoloadVersion =  args.neoloadVersion
-    supportedVersions = ['7.6', '7.7', '7.10', '7.10.1']
+    supportedVersions = ['7.6', '7.7', '7.10', '7.10.1', '7.11.0']
     if neoloadVersion not in supportedVersions:
         logger.error( 'version "%s" is not suppoprted; supported versions are %s',
             neoloadVersion, sorted( supportedVersions ) )
@@ -286,6 +294,9 @@ if __name__ == '__main__':
             if neoloadVersion.startswith( '7.10' ):
                 agentLogFilePath = '/root/.neotys/neoload/v7.10/logs/agent.log'
                 starterCmd = 'cd ~/neoload7.10/ && /usr/bin/java -Xms50m -Xmx100m -Dvertx.disableDnsResolver=true -classpath $HOME/neoload7.10/.install4j/i4jruntime.jar:$HOME/neoload7.10/.install4j/launchera03c11da.jar:$HOME/neoload7.10/bin/*:$HOME/neoload7.10/lib/crypto/*:$HOME/neoload7.10/lib/*:$HOME/neoload7.10/lib/jdbcDrivers/*:$HOME/neoload7.10/lib/plugins/ext/* install4j.com.neotys.nl.agent.launcher.AgentLauncher_LoadGeneratorAgent start & sleep 30 && free --mega 1>&2'
+            elif neoloadVersion.startswith( '7.11' ):
+                agentLogFilePath = '/root/.neotys/neoload/v7.11/logs/agent.log'
+                starterCmd = 'cd ~/neoload7.11/ && /usr/bin/java -Xms50m -Xmx100m -Dvertx.disableDnsResolver=true -classpath $HOME/neoload7.11/.install4j/i4jruntime.jar:$HOME/neoload7.11/.install4j/launchera03c11da.jar:$HOME/neoload7.11/bin/*:$HOME/neoload7.11/lib/crypto/*:$HOME/neoload7.11/lib/*:$HOME/neoload7.11/lib/jdbcDrivers/*:$HOME/neoload7.11/lib/plugins/ext/* install4j.com.neotys.nl.agent.launcher.AgentLauncher_LoadGeneratorAgent start & sleep 30 && free --mega 1>&2'
             elif neoloadVersion == '7.7':
                 agentLogFilePath = '/root/.neotys/neoload/v7.7/logs/agent.log'
                 starterCmd = 'cd ~/neoload7.7/ && /usr/bin/java -Xms50m -Xmx100m -Dvertx.disableDnsResolver=true -classpath $HOME/neoload7.7/.install4j/i4jruntime.jar:$HOME/neoload7.7/.install4j/launchera03c11da.jar:$HOME/neoload7.7/bin/*:$HOME/neoload7.7/lib/crypto/*:$HOME/neoload7.7/lib/*:$HOME/neoload7.7/lib/jdbcDrivers/*:$HOME/neoload7.7/lib/plugins/ext/* install4j.com.neotys.nl.agent.launcher.AgentLauncher_LoadGeneratorAgent start & sleep 30'
