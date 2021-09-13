@@ -40,17 +40,14 @@ class neoloadFrameProcessor(batchRunner.frameProcessor):
     def installerCmd( self ):
         truncVersion = truncateVersion( neoloadVersion )
         scoredVersion = neoloadVersion.replace( '.', '_' )
-        if neoloadVersion == '7.11.0':
-            return 'nlAgent/install_7-x.sh %s %s %s' % (neoloadVersion, truncVersion, scoredVersion )
-        elif neoloadVersion == '7.10.1':
-            return 'nlAgent/install_7-x.sh %s %s %s' % (neoloadVersion, truncVersion, scoredVersion )
-        elif neoloadVersion == '7.10':
+        if neoloadVersion == '7.10':
             return 'nlAgent/install_7-10_slim.sh'
-            return 'nlAgent/install_7-10.sh'
         elif neoloadVersion == '7.7':
             return 'nlAgent/install_7-7.sh'
-        else:
+        elif neoloadVersion == '7.6':
             return 'nlAgent/install_7-6.sh'
+        else:
+            return 'nlAgent/install_7-x.sh %s %s %s' % (neoloadVersion, truncVersion, scoredVersion )
 
 def sigtermSignaled():
     return g_.signaled
@@ -291,17 +288,14 @@ if __name__ == '__main__':
 
             #COULD check memory and available ports here
 
-            if neoloadVersion.startswith( '7.10' ):
-                agentLogFilePath = '/root/.neotys/neoload/v7.10/logs/agent.log'
-                starterCmd = 'cd ~/neoload7.10/ && /usr/bin/java -Xms50m -Xmx100m -Dvertx.disableDnsResolver=true -classpath $HOME/neoload7.10/.install4j/i4jruntime.jar:$HOME/neoload7.10/.install4j/launchera03c11da.jar:$HOME/neoload7.10/bin/*:$HOME/neoload7.10/lib/crypto/*:$HOME/neoload7.10/lib/*:$HOME/neoload7.10/lib/jdbcDrivers/*:$HOME/neoload7.10/lib/plugins/ext/* install4j.com.neotys.nl.agent.launcher.AgentLauncher_LoadGeneratorAgent start & sleep 30 && free --mega 1>&2'
-            elif neoloadVersion.startswith( '7.11' ):
-                agentLogFilePath = '/root/.neotys/neoload/v7.11/logs/agent.log'
-                starterCmd = 'cd ~/neoload7.11/ && /usr/bin/java -Xms50m -Xmx100m -Dvertx.disableDnsResolver=true -classpath $HOME/neoload7.11/.install4j/i4jruntime.jar:$HOME/neoload7.11/.install4j/launchera03c11da.jar:$HOME/neoload7.11/bin/*:$HOME/neoload7.11/lib/crypto/*:$HOME/neoload7.11/lib/*:$HOME/neoload7.11/lib/jdbcDrivers/*:$HOME/neoload7.11/lib/plugins/ext/* install4j.com.neotys.nl.agent.launcher.AgentLauncher_LoadGeneratorAgent start & sleep 30 && free --mega 1>&2'
-            elif neoloadVersion == '7.7':
-                agentLogFilePath = '/root/.neotys/neoload/v7.7/logs/agent.log'
+            truncVersion = truncateVersion( neoloadVersion )
+            agentLogFilePath = '/root/.neotys/neoload/v%s/logs/agent.log' % truncVersion
+            starterCmd = 'cd ~/neoload7.xx/ && /usr/bin/java -Xms50m -Xmx100m -Dvertx.disableDnsResolver=true -classpath $HOME/neoload7.xx/.install4j/i4jruntime.jar:$HOME/neoload7.xx/.install4j/launchera03c11da.jar:$HOME/neoload7.xx/bin/*:$HOME/neoload7.xx/lib/crypto/*:$HOME/neoload7.xx/lib/*:$HOME/neoload7.xx/lib/jdbcDrivers/*:$HOME/neoload7.xx/lib/plugins/ext/* install4j.com.neotys.nl.agent.launcher.AgentLauncher_LoadGeneratorAgent start & sleep 30 && free --mega 1>&2'
+            starterCmd = starterCmd.replace( 'neoload7.xx', 'neoload'+truncVersion )
+
+            if neoloadVersion == '7.7':
                 starterCmd = 'cd ~/neoload7.7/ && /usr/bin/java -Xms50m -Xmx100m -Dvertx.disableDnsResolver=true -classpath $HOME/neoload7.7/.install4j/i4jruntime.jar:$HOME/neoload7.7/.install4j/launchera03c11da.jar:$HOME/neoload7.7/bin/*:$HOME/neoload7.7/lib/crypto/*:$HOME/neoload7.7/lib/*:$HOME/neoload7.7/lib/jdbcDrivers/*:$HOME/neoload7.7/lib/plugins/ext/* install4j.com.neotys.nl.agent.launcher.AgentLauncher_LoadGeneratorAgent start & sleep 30'
-            else:
-                agentLogFilePath = '/root/.neotys/neoload/v7.6/logs/agent.log'
+            elif neoloadVersion == '7.6':
                 starterCmd = 'cd ~/neoload7.6/ && /usr/bin/java -Dneotys.vista.headless=true -Xmx512m -Dvertx.disableDnsResolver=true -classpath $HOME/neoload7.6/.install4j/i4jruntime.jar:$HOME/neoload7.6/.install4j/launcherc0a362f9.jar:$HOME/neoload7.6/bin/*:$HOME/neoload7.6/lib/crypto/*:$HOME/neoload7.6/lib/*:$HOME/neoload7.6/lib/jdbcDrivers/*:$HOME/neoload7.6/lib/plugins/ext/* install4j.com.neotys.nl.agent.launcher.AgentLauncher_LoadGeneratorAgentService start &'
 
             configuredInstances = []
