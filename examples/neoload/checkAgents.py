@@ -346,7 +346,10 @@ if __name__ == "__main__":
         if not args.nlWebToken:
             logger.warning( 'please pass --nlWebToken if you want to query an nlWeb server')
         else:
-            queryNlWebForResources( args.nlWebUrl, args.nlWebToken )
+            url = args.nlWebUrl
+            if url == 'SAAS':
+                url = 'https://neoload-api.saas.neotys.com'
+            queryNlWebForResources( url, args.nlWebToken )
     if False:
         mongoHost = 'yourNLWebMongoHost'
         queryMongoForLGs( mongoHost )
