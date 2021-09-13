@@ -34,6 +34,10 @@ def universalizeDateTime( dt ):
         return dt.astimezone(datetime.timezone.utc)
     return dt.replace( tzinfo=datetime.timezone.utc )
 
+def truncateVersion( nlVersion ):
+    '''drop patch-level part of version number, if any'''
+    return '.'.join(nlVersion.split('.')[:-1]) if nlVersion.count('.') > 1 else nlVersion
+
 def checkProcesses( liveInstances ):
     '''check that the expected process is running on each instance'''
     logger.info( 'checking %d instance(s)', len(liveInstances) )
@@ -75,14 +79,8 @@ def retrieveLogs( liveInstances, neoloadVersion ):
     goodInstances = liveInstances
     logger.info( 'retrieving logs for %d instance(s)', len(goodInstances) )
 
-    if neoloadVersion.startswith( '7.10' ):
-        agentLogFilePath = '/root/.neotys/neoload/v7.10/logs/*.log'
-    elif neoloadVersion.startswith( '7.11' ):
-        agentLogFilePath = '/root/.neotys/neoload/v7.11/logs/*.log'
-    elif neoloadVersion == '7.7':
-        agentLogFilePath = '/root/.neotys/neoload/v7.7/logs/*.log'
-    else:
-        agentLogFilePath = '/root/.neotys/neoload/v7.6/logs/*.log'
+    truncVersion = truncateVersion( neoloadVersion )
+    agentLogFilePath = '/root/.neotys/neoload/v%s/logs/*.log' % truncVersion
 
     # download the agent.log file from each instance
     stepStatuses = tellInstances.tellInstances( goodInstances,
