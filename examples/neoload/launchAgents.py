@@ -234,7 +234,7 @@ if __name__ == '__main__':
         exit(1)
     
     authToken = args.authToken or os.getenv('NCS_AUTH_TOKEN')
-    instTimeLimit = 11*60 if neoloadVersion in ['7.10'] else 30*60
+    instTimeLimit = 11*60  #  if neoloadVersion in ['7.10'] else 30*60
 
     nlAgentDirName = 'nlAgent'
     if not os.path.isdir( nlAgentDirName ):
