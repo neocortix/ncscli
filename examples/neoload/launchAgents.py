@@ -18,7 +18,7 @@ import ncscli.tellInstances as tellInstances
 import startForwarders  # expected to be in the same directory
 
 
-neoloadVersion = '7.10'  # will be overridden by cmd-line arg
+neoloadVersion = '7.10.1'  # will be overridden by cmd-line arg
 nlWebWanted = False
 
 class g_:
@@ -182,7 +182,7 @@ if __name__ == '__main__':
         formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( '--authToken', help='the NCS authorization token to use (or none, to use NCS_AUTH_TOKEN env var' )
     ap.add_argument( '--filter', help='json to filter instances for launch',
-        default = '{ "regions": ["asia", "europe", "middle-east", "north-america", "oceania"], "dar": ">=100", "dpr": ">=48", "ram": ">=3800000000", "storage": ">=2000000000" }'
+        default = '{ "regions": ["asia", "europe", "middle-east", "north-america", "oceania"], "dar": ">=99", "dpr": ">=48", "ram": ">=3800000000", "storage": ">=2000000000" }'
     )
     ap.add_argument( '--forwarderHost', help='IP addr (or host name) of the forwarder host',
         default='localhost' )
@@ -190,16 +190,21 @@ if __name__ == '__main__':
     ap.add_argument( '--nlWeb', type=ncs.boolArg, default=False, help='whether to use NeoLoad Web' )
     ap.add_argument( '--nlWebToken', help='a token for authorized access to a neoload web server' )
     ap.add_argument( '--nlWebUrl', help='the URL of a neoload web server to query' )
-    ap.add_argument( '--nlWebZone', default='defaultzone',  help='the URL of a neoload web server to query' )
+    ap.add_argument( '--nlWebZone', help='the neoload zone that the agents should belong to',
+        default='defaultzone' )
     ap.add_argument( '--nWorkers', type=int, help='the number of agents to launch',
         default=10 )
     ap.add_argument( '--outDataDir', required=False, help='a path to the output data dir for this run' )
     ap.add_argument( '--portRangeStart', type=int, default=7100,
         help='the beginning of the range of port numbers to forward' )
+    ap.add_argument( '--supportedVersions', action='store_true', help='to list supported versions and exit' )
     args = ap.parse_args()
 
+    supportedVersions = ['7.6', '7.7', '7.10', '7.10.0', '7.10.1', '7.11.0']
+    if args.supportedVersions:
+        print( json.dumps( supportedVersions ) )
+        sys.exit( 0 )
     neoloadVersion =  args.neoloadVersion
-    supportedVersions = ['7.6', '7.7', '7.10', '7.10.1', '7.11.0']
     if neoloadVersion not in supportedVersions:
         logger.error( 'version "%s" is not suppoprted; supported versions are %s',
             neoloadVersion, sorted( supportedVersions ) )
