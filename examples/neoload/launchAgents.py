@@ -26,6 +26,22 @@ class g_:
     interrupted = False
 
 
+def readJLog( inFilePath ):
+    '''read JLog file, return list of decoded objects'''
+    recs = []
+    # read and decode each line as json
+    try:
+        with open( inFilePath, 'rb' ) as inFile:
+            for line in inFile:
+                try:
+                    decoded = json.loads( line )
+                except Exception as exc:
+                    logger.warning( 'exception decoding json (%s) %s', type(exc), exc )
+                recs.append( decoded )
+    except Exception as exc:
+        logger.warning( 'exception reading file (%s) %s', type(exc), exc )
+    return recs
+
 def scriptDirPath():
     '''returns the absolute path to the directory containing this script'''
     return os.path.dirname(os.path.realpath(__file__))
@@ -276,11 +292,28 @@ if __name__ == '__main__':
             nWorkers = args.nWorkers
         )
         if rc == 0:
+            # get iids of instances successfully installed
+            recruiterJlogFilePath = os.path.join( outDataDir, 'recruitInstances.jlog' )
+            recruitedIids = []
+            if os.path.isfile( recruiterJlogFilePath ):
+                recruiterResults = readJLog( recruiterJlogFilePath )
+                if not recruiterResults:
+                    logger.warning( 'no entries in %s', recruiterJlogFilePath )
+                for result in recruiterResults:
+                    if 'timeout' in result:
+                        logger.debug( 'recruiter timeout: %s', result )
+                    elif 'returncode' in result:
+                        if result['returncode'] != 0:
+                            logger.debug( 'recruiter result: %s', result )
+                        else:
+                            recruitedIids.append( result.get( 'instanceId' ) )
+            recruitedIids = set( recruitedIids )
+            logger.debug( '%d recruitedIids: %s', len(recruitedIids), recruitedIids )
+
             portRangeStart=args.portRangeStart
             launchedJsonFilePath = outDataDir +'/recruitLaunched.json'
             launchedInstances = []
             # get details of launched instances from the json file
-            #TODO should get list of instances with good install, rather than all started instances
             with open( launchedJsonFilePath, 'r') as jsonInFile:
                 try:
                     launchedInstances = json.load(jsonInFile)  # an array
@@ -288,8 +321,10 @@ if __name__ == '__main__':
                     logger.warning( 'could not load json (%s) %s', type(exc), exc )
                     sys.exit( 2 )
             launchedIids = [inst['instanceId'] for inst in launchedInstances ]
-            startedInstances = [inst for inst in launchedInstances if inst['state'] == 'started' ]
+            #startedInstances = [inst for inst in launchedInstances if inst['state'] == 'started' ]
             #logger.info( '%d instances were launched', len(startedInstances) )
+
+            startedInstances = [inst for inst in launchedInstances if inst['instanceId'] in recruitedIids ]
 
             #COULD check memory and available ports here
 
@@ -376,7 +411,6 @@ if __name__ == '__main__':
                         stdout=subprocess.DEVNULL )
                     if rc2:
                         logger.warning( 'plotAgentMap exited with returnCode %d', rc2 )
-
                 # start the ssh port-forwarding
                 logger.info( 'would forward ports for %d instances', len(goodInstances) )
                 forwarders = startForwarders.startForwarders( goodInstances,
