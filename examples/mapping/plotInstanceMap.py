@@ -173,7 +173,8 @@ if __name__ == "__main__":
     fontFactor = 0.75
     mpl.rcParams.update({'font.size': 22})
     mpl.rcParams['axes.linewidth'] = 2 #set the value globally
-    markerSize = 6
+    markerSize = 8
+    markeredgecolor='black'
 
     # plot world map
     fig = plt.figure(3, figsize=figSize1)
@@ -195,13 +196,19 @@ if __name__ == "__main__":
 
     plt.plot(getColumn(mappedFrameNumLocationUnitedStates,2),
         getColumn(mappedFrameNumLocationUnitedStates,1),
-        linestyle='',color=(0.0, 0.5, 1.0),marker='o',markersize=markerSize)
+        linestyle='',color=(0.0, 0.5, 1.0),marker='o',
+        markersize=markerSize, markeredgecolor='black', markeredgewidth=0.75
+        )
     plt.plot(getColumn(mappedFrameNumLocationRussia,2),
         getColumn(mappedFrameNumLocationRussia,1),
-        linestyle='', color=(1.0, 0.0, 0.0),marker='o',markersize=markerSize)
+        linestyle='', color=(1.0, 0.0, 0.0),marker='o',
+        markersize=markerSize, markeredgecolor='black', markeredgewidth=0.75
+        )
     plt.plot(getColumn(mappedFrameNumLocationOther,2),
         getColumn(mappedFrameNumLocationOther,1),
-        linestyle='', color=(0.0, 0.9, 0.0),marker='o',markersize=markerSize)
+        linestyle='', color=(0.0, 0.9, 0.0),marker='o',
+        markersize=markerSize, markeredgecolor='black', markeredgewidth=0.75
+        )
     plt.xlim([-180,180])
     plt.ylim([-60,90])
     #plt.show()
