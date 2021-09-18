@@ -890,8 +890,8 @@ def renderFramesOnInstance( inst ):
         if time.time() >= g_.deadline:
             logger.warning( 'exiting thread because global deadline has passed' )
             break
-        if nFailures >= 3:
-            logger.warning( 'exiting thread because instance has encountered %d failures', nFailures )
+        if nFailures >= 2:
+            logger.warning( 'exiting thread because instance %s has encountered %d failures', abbrevIid, nFailures )
             logOperation( 'terminateFailedWorker', iid, '<master>')
             terminateInstances( args.authToken, [iid] )
             purgeHostKeys( [inst] )
@@ -1018,6 +1018,7 @@ def renderFramesOnInstance( inst ):
                 logFrameState( frameNum, 'retrieveFailed', iid, returnCode )
                 logger.warning( 'retrieveFailed with rc %d for frame %d on %s', returnCode, frameNum, iid )
                 frameDetails[ 'progress' ] = 0
+                time.sleep( 10 )
             saveProgress()
         if returnCode:
             nFailures += 1
