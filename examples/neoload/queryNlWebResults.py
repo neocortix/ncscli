@@ -119,6 +119,7 @@ if __name__ == "__main__":
     # the "monitors" api is where we get per-LG information
     monitorsUrlTail = 'workspaces/%s/test-results/%s/monitors' % (workspaceId, resultId)
 
+    counterIdDict = {}
     counterSpecs = []
     monitorsData = queryNlWeb( nlWebUrl, nlWebToken, monitorsUrlTail )
     if not monitorsData:
@@ -127,23 +128,39 @@ if __name__ == "__main__":
     logger.info( 'monitorsData type: %s, len: %d', type(monitorsData), len(monitorsData) )
     for monitor in monitorsData:
         logger.debug( 'monitor name: %s', monitor['name'] )
-        # in addition to 'User Load', the 'Throughput' monitor could be useful
+        path = monitor.get( 'path', [] )
+        pathStr = '/'.join( path )
+        if 'LG ' not in pathStr:
+            logger.info( 'ignoring path "%s"', pathStr )
+            continue
         if monitor['name'] == 'User Load':
-            path = monitor['path']
-            pathStr = '/'.join( path )
-            if 'LG ' not in pathStr:
-                print( pathStr )
-            else:
-                counterId = monitor['id']
-                lgSpec = path[1]
-                print( lgSpec, counterId )
-                counterSpecs.append({ 'lg': lgSpec, 'counter': counterId })
+            counterId = monitor['id']
+            lgSpec = path[1]
+            #print( lgSpec, counterId )
+            counterSpecs.append({ 'lg': lgSpec, 'counter': counterId })
+            counterIdDict[ (lgSpec, 'User Load' ) ] = counterId
+        #elif monitor['name'] == 'Throughput':
+        else:
+            counterId = monitor['id']
+            lgSpec = path[1]
+            #print( lgSpec, counterId )
+            #counterSpecs.append({ 'lg': lgSpec, 'counter': counterId })
+            #counterIdDict[ (lgSpec, 'Throughput' ) ] = counterId
+            counterIdDict[ (lgSpec, monitor['name'] ) ] = counterId
+    logger.debug( 'counterSpecs: %s', counterSpecs )
+    logger.debug( 'counterIdDict: %s', counterIdDict )
     logger.info( 'querying monitors for %d LGs', len( counterSpecs ) )
     for counterSpec in counterSpecs:
         counterUrlTail = os.path.join( monitorsUrlTail, counterSpec['counter'], 'values' )
         values = queryNlWeb( nlWebUrl, nlWebToken, counterUrlTail )
-        #print( counterSpec['lg'] )
         #print( values )
         print( counterSpec['lg'], 'user load max:', values['max'], 'avg:', '%.2f' % values['avg'] )
+        tpCounterId = counterIdDict.get( (counterSpec['lg'], 'Throughput') )
+        if tpCounterId:
+            #logger.info( 'tpCounterId: %s', tpCounterId )
+            counterUrlTail = '/'.join([ monitorsUrlTail, tpCounterId, 'values' ])
+            values = queryNlWeb( nlWebUrl, nlWebToken, counterUrlTail )
+            #logger.info( 'values: %s', values )
+            print( counterSpec['lg'], 'throughput max:', '%.3f' % values['max'], 'avg:', '%.3f' % values['avg'] )
 
     logger.info( 'finished' )
