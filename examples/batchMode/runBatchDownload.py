@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+''' launches instances to download resources from the web and return their contents '''
+import argparse
 import datetime
 import logging
 import os
@@ -14,7 +16,8 @@ class dlProcessor(batchRunner.frameProcessor):
         return 'frame_%d.out' % (frameNum)
 
     def frameCmd( self, frameNum ):
-        cmd = 'curl -L -s -S --remote-time -o %s %s' % (self.frameOutFileName(frameNum), urlList[frameNum] )
+        cmd = 'rm -f frame_*.out'
+        cmd += '&& curl -L -s -S --remote-time -o %s %s' % (self.frameOutFileName(frameNum), urlList[frameNum] )
         return cmd
 
 if __name__ == '__main__':
@@ -27,12 +30,31 @@ if __name__ == '__main__':
     #batchRunner.logger.setLevel(logging.DEBUG)  # for more verbosity
     logger.setLevel(logging.INFO)
 
-    dateTimeTag = datetime.datetime.now().strftime( '%Y-%m-%d_%H%M%S' )
-    outDataDir = 'data/download_' + dateTimeTag
+    ap = argparse.ArgumentParser( description=__doc__,
+        fromfile_prefix_chars='@' )
+    ap.add_argument( '--authToken',
+        help='the NCS authorization token to use (default empty, to use NCS_AUTH_TOKEN env var' )
+    ap.add_argument( '--filter', help='json to filter instances for launch (default: %(default)s)',
+        default = '{ "storage": ">=4000000000", "dar": ">=95" }' )
+    ap.add_argument( '--outDataDir',
+        help='a path to the output data dir for this run (default: empty for a new timestamped dir)' )
+    ap.add_argument( '--timeLimit', type=float, default=30*60,
+        help='amount of time (in seconds) allowed for the whole job (default: %(default)s)' )
+    ap.add_argument( '--unitTimeLimit', type=float, default=5*60,
+        help='amount of time (in seconds) allowed for each download (default: %(default)s)' )
+    ap.add_argument( '--urlListFile', help='a path to a text file containing urls to download from (default: %(default)s)',
+        default='dlUrlList.txt' )
+    ap.add_argument( '--nWorkers', type=int, help='the # of worker instances to launch (or 0 for autoscale) (default: 0)',
+        default=0 )
+    args = ap.parse_args()
 
-    urlFilePath = 'dlUrlList.txt'
-    #filtersJson = '{ "regions": ["russia-ukraine-belarus"], "dpr": "<60", "dar": "<100" }'
-    filtersJson = '{ "regions": ["russia-ukraine-belarus"], "storage": ">=4000000000" }'
+
+    outDataDir = args.outDataDir
+    if not outDataDir:
+        dateTimeTag = datetime.datetime.now().strftime( '%Y-%m-%d_%H%M%S' )
+        outDataDir = 'data/download_' + dateTimeTag
+
+    urlFilePath = args.urlListFile  # 'dlUrlList.txt'
 
     with open( urlFilePath, 'r' ) as urlFile:
         urlList = urlFile.readlines()
@@ -61,11 +83,12 @@ if __name__ == '__main__':
     #sys.exit( 'DEBUGGING' )
     rc = batchRunner.runBatch(
         frameProcessor = processor,
-        authToken = os.getenv('NCS_AUTH_TOKEN') or 'YourAuthTokenHere',
-        filter = filtersJson,
-        timeLimit = 30 * 60,  # seconds
-        frameTimeLimit = 300,
+        authToken = args.authToken or os.getenv('NCS_AUTH_TOKEN'),
+        filter = args.filter,
+        timeLimit = args.timeLimit,
+        frameTimeLimit = args.unitTimeLimit,
         outDataDir = outDataDir,
+        nWorkers = args.nWorkers,
         autoscaleInit = 1.25,
         autoscaleMax = 3.0,
         startFrame = 0,
