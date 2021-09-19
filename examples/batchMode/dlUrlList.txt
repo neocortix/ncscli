@@ -1,0 +1,12 @@
+# put 1 url on each line; lines starting with # are comments
+https://archive-1.neocortix.net/video/videos/Globe_022_tightLoop_jumbotron_008.mp4
+https://archive-1.neocortix.net/video/videos/IntervalLogo_044c.mp4
+https://archive-1.neocortix.net/video/videos/NeocortixNewsVideo_005.mp4
+https://archive-1.neocortix.net/video/videos/PhonePaycheck_003.mp4
+https://archive-1.neocortix.net/video/videos/PhoneWorkforceVideo_002.mp4
+https://archive-1.neocortix.net/video/videos/SpinDemo3_001e.mp4
+# it will automatically replace spaces with %20
+https://archive-1.neocortix.net/video/videos/The Third and The Seventh HD.mp4
+https://archive-1.neocortix.net/video/videos/Video2ClickDemoRender_016.mp4
+https://archive-1.neocortix.net/video/videos/Windmill_040.mp4
+https://archive-1.neocortix.net/video/videos/bmw_003.mp4
