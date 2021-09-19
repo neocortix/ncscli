@@ -650,7 +650,8 @@ def rsyncFromRemote1( srcFileName, destFilePath, inst, timeLimit ):
     user = sshSpecs['user']
 
     destFilePathFull = os.path.realpath(os.path.abspath( destFilePath ))
-    cmd = [ 'rsync', '-a', '-e', 'ssh -p ' + str(port), user+'@'+host+':~/'+srcFileName,
+    timeLimitMinutes = max( 1, int( timeLimit/60 ) )
+    cmd = [ 'rsync', '--time-limit=%d' % timeLimitMinutes, '-a', '-e', 'ssh -p ' + str(port), user+'@'+host+':~/'+srcFileName,
         destFilePathFull+'/'
     ]
     logger.info( 'retrieving from %s', inst['instanceId'] )
@@ -1384,10 +1385,12 @@ def runBatch( **kwargs ):
 
     if not args.nWorkers:
         # regular case, where we pick a suitably large number to launch, based on # of frames
-        nAvail = round( ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter ) * .9 )
+        nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
         logger.debug( 'args.filter: %s', args.filter )
         logger.info( '%d filtered devices available', nAvail )
         nFrames = len( range(args.startFrame, args.endFrame+1, args.frameStep ) )
+        # cap the number at significantly less than all of them
+        nAvail = round( nAvail * .5 )
         nToRecruit = min( nAvail, round( nFrames * g_.autoscaleInit ) )
         logger.debug( 'recruiting up to %d instances', nToRecruit )
     elif args.nWorkers > 0:
