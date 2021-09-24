@@ -1257,12 +1257,14 @@ def checkForInstances():
         nWorkers = len( g_.workingInstances )
         if nWorkers < round(nUnfinished * g_.autoscaleMin):
             nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
-            if nAvail >= 2:
+            if nAvail > 12:
                 logger.info( 'starting thread because not enough workers (%d unfinished, %d workers)',
                     nUnfinished, nWorkers )
                 rendererThread = threading.Thread( target=recruitAndRender, name='recruitAndRender' )
                 threads.append( rendererThread )
                 rendererThread.start()
+            else:
+                logger.info( 'only %d supplemental devices available', nAvail )
 
         time.sleep( 20 )
     logger.info( 'waiting for worker threads to finish')
