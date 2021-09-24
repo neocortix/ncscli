@@ -5,8 +5,19 @@ import datetime
 import logging
 import os
 import sys
+import urllib
 
 import ncscli.batchRunner as batchRunner
+
+
+def checkUrl( url ):
+    if not url:
+        return None
+    parsed = urllib.parse.urlparse( url )
+    if parsed.scheme and parsed.netloc:
+        return url
+    logger.info( 'invalid url given "%s"', url )
+    return None
 
 
 class dlProcessor(batchRunner.frameProcessor):
@@ -62,12 +73,19 @@ if __name__ == '__main__':
     urlList = [x.strip() for x in urlList if x.strip()]
     # strip out lines beginning with '#'
     urlList = [x for x in urlList if not x.startswith( '#' )]
+    origUrlList = urlList
+    # strip out invalid urls
+    urlList = [x for x in urlList if checkUrl( x )]
     # replace spaces with '%20'
     urlList = [x.replace( ' ', '%20' ) for x in urlList]
     logger.debug( 'urlList: %s', urlList )
+    if len( urlList ) < len( origUrlList):
+        logger.warning( '%d of the given %d urls were not valid', 
+            len(origUrlList) - len(urlList), len(origUrlList)
+            )
 
     if not urlList:
-        logger.warning('no urls in the url file')
+        logger.warning('no valid urls in the url file')
         sys.exit(1)
 
     processor = dlProcessor()
