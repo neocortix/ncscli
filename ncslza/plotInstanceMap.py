@@ -41,7 +41,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     #ap.add_argument( '--dataDirPath', required=True, help='the path to to directory for input and output data' )
     ap.add_argument( 'launchedJsonFilePath', help='the path to the instances file to map' )
-    ap.add_argument( 'outFilePath', help='the path to the png file to create' )
+    ap.add_argument( 'outFilePath', help='the path to the png or svg file to create' )
     args = ap.parse_args()
 
     launchedJsonFilePath = args.launchedJsonFilePath
