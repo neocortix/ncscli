@@ -21,12 +21,12 @@ class dlProcessor(batchRunner.frameProcessor):
 
     def frameOutFileName( self, frameNum ):
         spiderName = spiderNames[frameNum]
-        return '%s_out.csv' % (spiderName)
+        return '%s_out.%s' % (spiderName, args.outFileFormat)
 
     def frameCmd( self, frameNum ):
         spiderName = spiderNames[frameNum]
-        cmd = 'rm -f *_out.csv'
-        cmd += ' && cd %s && ~/.local/bin/scrapy crawl %s -o ../%s' % \
+        cmd = 'rm -f *_out.' + args.outFileFormat
+        cmd += ' && cd %s && ~/.local/bin/scrapy crawl %s --loglevel INFO -o ../%s' % \
             (self.scrapyProjPath, spiderName, self.frameOutFileName(frameNum) )
         #cmd += ' && cd %s && ~/.local/bin/scrapy crawl %s && cp -p %s ~/' % \
         #    (self.scrapyProjPath, spiderName, self.frameOutFileName(frameNum) )
@@ -59,6 +59,8 @@ if __name__ == '__main__':
         default = '{ "storage": ">=4000000000", "dar": ">=95" }' )
     ap.add_argument( '--outDataDir',
         help='a path to the output data dir for this run (default: empty for a new timestamped dir)' )
+    ap.add_argument( '--outFileFormat', choices=['csv', 'jl', 'json', 'xml'], help='the format of output file',
+        default='csv' )
     ap.add_argument( '--timeLimit', type=float, default=30*60,
         help='amount of time (in seconds) allowed for the whole job (default: %(default)s)' )
     ap.add_argument( '--unitTimeLimit', type=float, default=5*60,
@@ -71,11 +73,6 @@ if __name__ == '__main__':
     args = ap.parse_args()
 
 
-    outDataDir = args.outDataDir
-    if not outDataDir:
-        dateTimeTag = datetime.datetime.now().strftime( '%Y-%m-%d_%H%M%S' )
-        outDataDir = 'data/scrapy_' + dateTimeTag
-
     scrapyProjPath = args.scrapyProj
     scrapyProjPath = scrapyProjPath.strip()  # no surrounding spaces wanted
     scrapyProjPath = scrapyProjPath.rstrip( '/' )  # trailing slash could cause problems with rsync
@@ -87,6 +84,12 @@ if __name__ == '__main__':
         logger.error('the given scrapy project is not a directory name')
         sys.exit(1)
     dlProcessor.scrapyProjPath = scrapyProjPath
+
+    outDataDir = args.outDataDir
+    if not outDataDir:
+        dateTimeTag = datetime.datetime.now().strftime( '%Y-%m-%d_%H%M%S' )
+        outDataDir = ('data/%s_' % scrapyProjPath)  + dateTimeTag
+
 
     scrapyInstalled = subprocess.call( 'hash scrapy', shell=True ) == 0
     if not scrapyInstalled and not args.spiders:
