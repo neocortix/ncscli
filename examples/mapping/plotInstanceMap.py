@@ -173,7 +173,7 @@ if __name__ == "__main__":
     fontFactor = 0.75
     mpl.rcParams.update({'font.size': 22})
     mpl.rcParams['axes.linewidth'] = 2 #set the value globally
-    markerSize = 8
+    markerSize = 10
     markeredgecolor='black'
 
     # plot world map
