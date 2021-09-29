@@ -2,10 +2,11 @@
 '''launches new NCS instances and starts the loadzilla agent on them'''
 import argparse
 import collections
-#import datetime
+import datetime
 import json
 import logging
 import os
+import shutil
 import subprocess
 import sys
 #import time
@@ -61,9 +62,9 @@ logger.setLevel(logging.INFO)
 ap = argparse.ArgumentParser( description=__doc__,
     fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
 ap.add_argument( '--authToken', help='the NCS authorization token to use (or leave this out, to use NCS_AUTH_TOKEN env var' )
-ap.add_argument( '--outDataDir', required=True, help='a path to the output data dir for this run' )
+ap.add_argument( '--outDataDir', help='a path to the output data dir for this run' )
 ap.add_argument( '--filter', help='json to filter instances for launch',
-    default = '{ "app-version": ">=2.1.14", "regions": ["usa"], "dar": "==100", "dpr": ">=48", "ram": ">=3800000000", "storage": ">=2000000000" }'
+    default = '{ "regions": ["usa", "india"], "dar": "==100", "dpr": ">=48", "ram": ">=3800000000", "storage": ">=2000000000" }'
     )
 ap.add_argument( '--jarFileName', help='the name of the agent jar file',
     default='agent.jar'
@@ -79,6 +80,9 @@ args = ap.parse_args()
 
 
 outDataDir = args.outDataDir
+if not outDataDir:
+    dateTimeTag = datetime.datetime.now().strftime( '%Y-%m-%d_%H%M%S' )
+    outDataDir = 'data/loadzilla_' + dateTimeTag
 
 # abort if outDataDir is not empty enough
 if os.path.isfile( outDataDir+'/batchRunner_results.jlog') \
@@ -170,9 +174,13 @@ try:
                 )
         # plot a map of instances, if possible
         if goodInstances:
-            plotterBinPath = os.path.join( scriptDirPath(), 'plotInstanceMap.py' )
-            if os.path.isfile( plotterBinPath ):
-                rc2 = subprocess.call( [sys.executable, plotterBinPath,
+            # this works on linux but maybe not on windows
+            plotterBinPath = shutil.which( 'plotInstanceMap.py' )
+            if not plotterBinPath:
+                if os.path.isfile( '../ncscli/plotInstanceMap.py' ):
+                    plotterBinPath = '../ncscli/plotInstanceMap.py'
+            if plotterBinPath:
+                rc2 = subprocess.call( [plotterBinPath,
                     os.path.join( outDataDir, 'agents.json' ),
                     os.path.join( outDataDir, 'worldMap.png' )
                     ],
