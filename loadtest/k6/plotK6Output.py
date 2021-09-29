@@ -16,8 +16,11 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 # neocortix modules
-import ncscli.plotInstanceMap as plotInstanceMap
-
+try:
+    import ncscli.plotInstanceMap as plotInstanceMap
+except Exception as exc:
+    print( 'WARNING: could not import plotInstanceMap', file=sys.stderr )
+    plotInstanceMap = None
 
 logger = logging.getLogger(__name__)
 
@@ -111,8 +114,9 @@ if __name__ == "__main__":
     goodInstances = [inst for inst in launchedInstances if inst['instanceId'] in goodIids ]
     logger.debug( '%d goodInstances', len(goodInstances) )
 
-    plotInstanceMap.plotInstanceMap( goodInstances, outputDir + "/worldMap.png" )
-    plotInstanceMap.plotInstanceMap( goodInstances, outputDir + "/worldMap.svg" )
+    if plotInstanceMap:
+        plotInstanceMap.plotInstanceMap( goodInstances, outputDir + "/worldMap.png" )
+        plotInstanceMap.plotInstanceMap( goodInstances, outputDir + "/worldMap.svg" )
 
     mappedFrameNumLocation = []
     mappedFrameNumLocationUnitedStates = []
