@@ -27,90 +27,53 @@ def scriptDirPath():
     '''returns the absolute path to the directory containing this script'''
     return os.path.dirname(os.path.realpath(__file__))
 
-
-if __name__ == "__main__":
-    # configure logger formatting
-    logFmt = '%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s'
-    logDateFmt = '%Y/%m/%d %H:%M:%S'
-    formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
-    logging.basicConfig(format=logFmt, datefmt=logDateFmt)
-
-    # treat numpy deprecations as errors
-    warnings.filterwarnings('error', category=np.VisibleDeprecationWarning)
-
-    ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
-    #ap.add_argument( '--dataDirPath', required=True, help='the path to to directory for input and output data' )
-    ap.add_argument( 'launchedJsonFilePath', help='the path to the instances file to map' )
-    ap.add_argument( 'outFilePath', help='the path to the png or svg file to create' )
-    args = ap.parse_args()
-
-    launchedJsonFilePath = args.launchedJsonFilePath
-    logger.info("launchedJsonFilePath: %s", launchedJsonFilePath)
-
-    outFilePath = args.outFilePath
-    # make sure outFilePath ends with a supported file-type extension (.png, ,pdf, or whatever)
-    extension = os.path.splitext(outFilePath)[1]
-    if extension:
-        extension = extension[1:]
-    allowedTypes = set(plt.figure().canvas.get_supported_filetypes().keys() )
-    if extension not in allowedTypes:
-        outFilePath += '.png'
-        logger.info( 'saving to PNG file')
-        logger.info( 'supported file types: %s', allowedTypes )
-    logger.info("outFilePath: %s", outFilePath)
-
-    if not os.path.isfile( launchedJsonFilePath ):
-        logger.error( 'file not found: %s', launchedJsonFilePath )
-        sys.exit( 1 )
-
-    launchedInstances = []
-    with open( launchedJsonFilePath, 'r') as jsonInFile:
-        try:
-            launchedInstances = json.load(jsonInFile)  # an array
-        except Exception as exc:
-            sys.exit( 'could not load json (%s) %s' % (type(exc), exc) )
-
-    logger.info("number of launchedInstances: %d", len(launchedInstances))
-
+def plotInstanceMap( instances, outFilePath ):
     mappedFrameNumLocation = []
     mappedFrameNumLocationUnitedStates = []
     mappedFrameNumLocationRussia = []
     mappedFrameNumLocationOther = []
     
-    for j in range(0,len(launchedInstances)):
+    logger.debug( 'plotting %d instances', len(instances))
+    for j in range(0,len(instances)):
+        inst = instances[j]
+        #locInfo = inst.get( 'device-location', {} )
+        #latLon = locInfo.get( 'latitude', None), locInfo.get( 'longitude', None)
+        #logger.info( 'loc: %s, %s', latLon, locInfo['display-name'] )
+        #print( latLon, locInfo['display-name'] )
+
         mappedFrameNumLocation.append([j,
-            launchedInstances[j]["device-location"]["latitude"],
-            launchedInstances[j]["device-location"]["longitude"],
-            launchedInstances[j]["device-location"]["display-name"],
-            launchedInstances[j]["device-location"]["country"]
+            inst["device-location"]["latitude"],
+            inst["device-location"]["longitude"],
+            inst["device-location"]["display-name"],
+            inst["device-location"]["country"]
             ])
-        if launchedInstances[j]["device-location"]["country"] =="United States":
+        if inst["device-location"]["country"] =="United States":
             mappedFrameNumLocationUnitedStates.append([j,
-                launchedInstances[j]["device-location"]["latitude"],
-                launchedInstances[j]["device-location"]["longitude"],
-                launchedInstances[j]["device-location"]["display-name"],
-                launchedInstances[j]["device-location"]["country"]
+                inst["device-location"]["latitude"],
+                inst["device-location"]["longitude"],
+                inst["device-location"]["display-name"],
+                inst["device-location"]["country"]
                 ])
-        elif launchedInstances[j]["device-location"]["country"] == "Russia":
+        elif inst["device-location"]["country"] == "Russia":
             mappedFrameNumLocationRussia.append([j,
-                launchedInstances[j]["device-location"]["latitude"],
-                launchedInstances[j]["device-location"]["longitude"],
-                launchedInstances[j]["device-location"]["display-name"],
-                launchedInstances[j]["device-location"]["country"]
+                inst["device-location"]["latitude"],
+                inst["device-location"]["longitude"],
+                inst["device-location"]["display-name"],
+                inst["device-location"]["country"]
                 ])
         else:
             mappedFrameNumLocationOther.append([j,
-                launchedInstances[j]["device-location"]["latitude"],
-                launchedInstances[j]["device-location"]["longitude"],
-                launchedInstances[j]["device-location"]["display-name"],
-                launchedInstances[j]["device-location"]["country"]
+                inst["device-location"]["latitude"],
+                inst["device-location"]["longitude"],
+                inst["device-location"]["display-name"],
+                inst["device-location"]["country"]
                 ])
 
     logger.debug("Locations:")
     for i in range(0,len(mappedFrameNumLocation)):
         logger.debug("%s", mappedFrameNumLocation[i][3])
 
-    logger.info("reading World Map data")
+    logger.debug("reading World Map data")
     # assume the base map is in the same dir as this running script
     mapFilePath =  os.path.join( scriptDirPath(), "WorldCountryBoundaries.csv" )
     mapFile = open(mapFilePath, "r")
@@ -168,12 +131,13 @@ if __name__ == "__main__":
             CountryData.append([countryString,coordinateList])
             CountrySphericalData.append([countryString,coordinateSphericalList])
 
-    logger.info("Plotting")
+    logger.debug("Plotting")
     figSize1 = (19.2, 10.8)
     fontFactor = 0.75
     mpl.rcParams.update({'font.size': 22})
     mpl.rcParams['axes.linewidth'] = 2 #set the value globally
     markerSize = 10
+    markeredgecolor='black'
 
     # plot world map
     fig = plt.figure(3, figsize=figSize1)
@@ -195,14 +159,67 @@ if __name__ == "__main__":
 
     plt.plot(getColumn(mappedFrameNumLocationUnitedStates,2),
         getColumn(mappedFrameNumLocationUnitedStates,1),
-        linestyle='',color=(0.0, 0.5, 1.0),marker='o',markersize=markerSize)
+        linestyle='',color=(0.0, 0.5, 1.0),marker='o',
+        markersize=markerSize, markeredgecolor='black', markeredgewidth=0.75
+        )
     plt.plot(getColumn(mappedFrameNumLocationRussia,2),
         getColumn(mappedFrameNumLocationRussia,1),
-        linestyle='', color=(1.0, 0.0, 0.0),marker='o',markersize=markerSize)
+        linestyle='', color=(1.0, 0.0, 0.0),marker='o',
+        markersize=markerSize, markeredgecolor='black', markeredgewidth=0.75
+        )
     plt.plot(getColumn(mappedFrameNumLocationOther,2),
         getColumn(mappedFrameNumLocationOther,1),
-        linestyle='', color=(0.0, 0.9, 0.0),marker='o',markersize=markerSize)
+        linestyle='', color=(0.0, 0.9, 0.0),marker='o',
+        markersize=markerSize, markeredgecolor='black', markeredgewidth=0.75
+        )
     plt.xlim([-180,180])
     plt.ylim([-60,90])
     #plt.show()
     plt.savefig( outFilePath, bbox_inches='tight')
+
+
+if __name__ == "__main__":
+    # configure logger formatting
+    logFmt = '%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s'
+    logDateFmt = '%Y/%m/%d %H:%M:%S'
+    formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
+    logging.basicConfig(format=logFmt, datefmt=logDateFmt)
+
+    # treat numpy deprecations as errors
+    warnings.filterwarnings('error', category=np.VisibleDeprecationWarning)
+
+    ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
+    #ap.add_argument( '--dataDirPath', required=True, help='the path to to directory for input and output data' )
+    ap.add_argument( 'launchedJsonFilePath', help='the path to the instances file to map' )
+    ap.add_argument( 'outFilePath', help='the path to the png file to create' )
+    args = ap.parse_args()
+
+    launchedJsonFilePath = args.launchedJsonFilePath
+    logger.debug("launchedJsonFilePath: %s", launchedJsonFilePath)
+
+    outFilePath = args.outFilePath
+    # make sure outFilePath ends with a supported file-type extension (.png, ,pdf, or whatever)
+    extension = os.path.splitext(outFilePath)[1]
+    if extension:
+        extension = extension[1:]
+    allowedTypes = set(plt.figure().canvas.get_supported_filetypes().keys() )
+    if extension not in allowedTypes:
+        outFilePath += '.png'
+        logger.info( 'saving to PNG file')
+        logger.info( 'supported file types: %s', allowedTypes )
+    logger.info("outFilePath: %s", outFilePath)
+
+    if not os.path.isfile( launchedJsonFilePath ):
+        logger.error( 'file not found: %s', launchedJsonFilePath )
+        sys.exit( 1 )
+
+    launchedInstances = []
+    with open( launchedJsonFilePath, 'r') as jsonInFile:
+        try:
+            launchedInstances = json.load(jsonInFile)  # an array
+        except Exception as exc:
+            sys.exit( 'could not load json (%s) %s' % (type(exc), exc) )
+
+    logger.debug("number of launchedInstances: %d", len(launchedInstances))
+
+    plotInstanceMap( launchedInstances, outFilePath )
