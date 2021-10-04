@@ -66,6 +66,7 @@ ap.add_argument( '--outDataDir', help='a path to the output data dir for this ru
 ap.add_argument( '--filter', help='json to filter instances for launch',
     default = '{ "regions": ["usa", "india"], "dar": "==100", "dpr": ">=48", "ram": ">=3800000000", "storage": ">=2000000000" }'
     )
+ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use (default is random)' )
 ap.add_argument( '--jarFileName', help='the name of the agent jar file',
     default='agent.jar'
     )
@@ -110,6 +111,7 @@ try:
         pushDeviceLocs=False,
         commonInFilePath = loadzillaFrameProcessor.agentDirPath,
         authToken = args.authToken or os.getenv('NCS_AUTH_TOKEN'),
+        sshClientKeyName=args.sshClientKeyName,
         encryptFiles=False,
         timeLimit = 12*60,
         instTimeLimit = 6*60,
