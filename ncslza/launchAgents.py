@@ -49,6 +49,22 @@ class loadzillaFrameProcessor(batchRunner.frameProcessor):
         cmd += ' sleep 10 && ps -ef'  # for debugging
         return cmd
 
+def plotInstanceMap( inFilePath, outFilePath ):
+    rc = 2
+    # this works on linux but maybe not on windows
+    plotterBinPath = shutil.which( 'plotInstanceMap.py' )
+    if not plotterBinPath:
+        if os.path.isfile( '../ncscli/plotInstanceMap.py' ):
+            plotterBinPath = '../ncscli/plotInstanceMap.py'
+    if plotterBinPath:
+        rc = subprocess.call( [plotterBinPath,
+            inFilePath, outFilePath
+            ],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+        if rc:
+            logger.warning( 'plotInstanceMap exited with returnCode %d', rc2 )
+    return rc
+
 
 # configure logger formatting
 logger = logging.getLogger(__name__)
@@ -174,21 +190,14 @@ try:
                 inst.get('ipAddr' ),
                 loc.get( 'country-code'), loc.get( 'area'), loc.get( 'locality')
                 )
-        # plot a map of instances, if possible
+        # plot a map of instances, if any good
         if goodInstances:
-            # this works on linux but maybe not on windows
-            plotterBinPath = shutil.which( 'plotInstanceMap.py' )
-            if not plotterBinPath:
-                if os.path.isfile( '../ncscli/plotInstanceMap.py' ):
-                    plotterBinPath = '../ncscli/plotInstanceMap.py'
-            if plotterBinPath:
-                rc2 = subprocess.call( [plotterBinPath,
-                    os.path.join( outDataDir, 'agents.json' ),
-                    os.path.join( outDataDir, 'worldMap.png' )
-                    ],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
-                if rc2:
-                    logger.warning( 'plotInstanceMap exited with returnCode %d', rc2 )
+            rc2_ = plotInstanceMap( os.path.join( outDataDir, 'agents.json' ),
+                os.path.join( outDataDir, 'worldMap.png' )
+                )
+            rc2_ = plotInstanceMap( os.path.join( outDataDir, 'agents.json' ),
+                os.path.join( outDataDir, 'worldMap.svg' )
+                )
 
         if launchedInstances:
             print( 'when you want to terminate these instances, use %s terminateAgents.py "%s"'
