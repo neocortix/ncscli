@@ -200,6 +200,7 @@ if __name__ == '__main__':
     ap.add_argument( '--filter', help='json to filter instances for launch',
         default = '{ "regions": ["asia", "europe", "middle-east", "north-america", "oceania"], "dar": ">=99", "dpr": ">=48", "ram": ">=3800000000", "storage": ">=2000000000" }'
     )
+    ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use (default is random)' )
     ap.add_argument( '--forwarderHost', help='IP addr (or host name) of the forwarder host',
         default='localhost' )
     ap.add_argument( '--neoloadVersion', default=neoloadVersion, help='version of neoload LG agent' )
@@ -284,6 +285,7 @@ if __name__ == '__main__':
             pushDeviceLocs=False,
             commonInFilePath = 'nlAgent',
             authToken = authToken,
+            sshClientKeyName=args.sshClientKeyName,
             encryptFiles=False,
             timeLimit = 60*60,
             instTimeLimit = instTimeLimit,
