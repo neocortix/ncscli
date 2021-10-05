@@ -17,9 +17,11 @@ import warnings
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
+# neocortix modules
+import ncscli.plotInstanceMap as plotInstanceMap
+
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 
 def demuxResults( inFilePath ):
@@ -65,6 +67,7 @@ if __name__ == "__main__":
     logDateFmt = '%Y/%m/%d %H:%M:%S'
     formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
     logging.basicConfig(format=logFmt, datefmt=logDateFmt)
+    logger.setLevel(logging.INFO)
 
     # treat numpy deprecations as errors
     warnings.filterwarnings('error', category=np.VisibleDeprecationWarning)
@@ -103,6 +106,15 @@ if __name__ == "__main__":
         print(launchedInstances[0]["device-location"]["country"])
 
     completedJobs = demuxResults(jlogFilePath)
+
+    goodIids = set([ job[1] for job in completedJobs ])
+    logger.debug( 'goodIids: %s', goodIids )
+    goodInstances = [inst for inst in launchedInstances if inst['instanceId'] in goodIids ]
+    logger.debug( '%d goodInstances', len(goodInstances) )
+
+    if plotInstanceMap:
+        plotInstanceMap.plotInstanceMap( goodInstances, outputDir + "/worldMap.png" )
+        plotInstanceMap.plotInstanceMap( goodInstances, outputDir + "/worldMap.svg" )
 
     mappedFrameNumLocation = []
     mappedFrameNumLocationUnitedStates = []
@@ -284,113 +296,10 @@ if __name__ == "__main__":
     # print(deliveredLoadTimes)
 
 
-
-    print("\nReading World Map data")
-    mapFileName = "./WorldCountryBoundaries.csv"
-    mapFile = open(mapFileName, "r")
-    mapLines = mapFile.readlines()
-    mapFile.close()
-    mapNumLines = len(mapLines)    
-
-    CountryData = []
-    CountrySphericalData = []
-
-    # for i in range(1,8) :
-    for i in range(1,mapNumLines) :
-        firstSplitString = mapLines[i].split("\"")
-        nonCoordinateString = firstSplitString[2]    
-        noncoordinates = nonCoordinateString.split(",")
-        countryString = noncoordinates[6]
-
-        if firstSplitString[1].startswith('<Polygon><outerBoundaryIs><LinearRing><coordinates>') and firstSplitString[1].endswith('</coordinates></LinearRing></outerBoundaryIs></Polygon>'):
-            coordinateString = firstSplitString[1].replace('<Polygon><outerBoundaryIs><LinearRing><coordinates>','').replace('</coordinates></LinearRing></outerBoundaryIs></Polygon>','').replace(',0 ',',0,')
-            # print("coordinateString = %s" % coordinateString)
-            # print("nonCoordinateString = %s" % nonCoordinateString)
-            coordinates = [float(j) for j in coordinateString.split(",")]  
-            coordinateList = np.zeros([int(len(coordinates)/3),2])
-            for j in range(0,len(coordinateList)) :
-                coordinateList[j,:] = coordinates[j*3:j*3+2]
-            coordinateSphericalList = np.zeros([int(len(coordinates)/3),3])
-            for j in range(0,len(coordinateSphericalList)) :
-                r = 1
-                phi = 2*math.pi*coordinates[j*3]/360
-                theta = 2*math.pi*(90-coordinates[j*3+1])/360
-                coordinateSphericalList[j,0] = r * np.sin(theta) * np.cos(phi)
-                coordinateSphericalList[j,1] = r * np.sin(theta) * np.sin(phi)
-                coordinateSphericalList[j,2] = r * np.cos(theta)
-
-            # print("noncoordinates = %s" % str(noncoordinates))
-            # print("countryString = %s" % countryString)
-            # print("coordinateList = %s" % str(coordinateList))
-            CountryData.append([countryString,coordinateList])
-            CountrySphericalData.append([countryString,coordinateSphericalList])
-        else :
-            # print("Exception Line %i  %s" % (i,countryString))
-            # if firstSplitString[1].startswith("<MultiGeometry>") :
-            #     print("MultiGeometry  Line %i  %s" % (i,countryString))
-            # else :
-            #     print("Inner Boundary Line %i  %s" % (i,countryString))
-            reducedCoordinateString = firstSplitString[1].replace('<MultiGeometry>','').replace('</MultiGeometry>','').replace('<Polygon>','').replace('</Polygon>','').replace('<outerBoundaryIs>','').replace('</outerBoundaryIs>','').replace('<innerBoundaryIs>','').replace('</innerBoundaryIs>','').replace('<LinearRing>','').replace('</LinearRing>','').replace('</coordinates>','').replace(',0 ',',0,')
-            # print("reducedCoordinateString = %s" % reducedCoordinateString)
-            coordinateStringSets = reducedCoordinateString.split("<coordinates>")
-            # print("coordinateStringSets = %s" % str(coordinateStringSets))
-            coordinateSets= []
-            for j in range(1,len(coordinateStringSets)) :
-                coordinateSets.append([float(k) for k in coordinateStringSets[j].split(",")])
-            # print("coordinateSets = %s" % str(coordinateSets))
-            coordinateList = []
-            coordinateSphericalList = []
-            for j in range(0,len(coordinateSets)) :
-                # print("\ncoordinateSets[%i] = %s" % (j,str(coordinateSets[j])))
-                coordinateList.append(np.zeros([int(len(coordinateSets[j])/3),2]))
-                for k in range(0,len(coordinateList[j])) :
-                    coordinateList[j][k,:] = coordinateSets[j][k*3:k*3+2]
-                # print("\ncoordinateList[%i] = %s" % (j,str(coordinateList[j])))
-                coordinateSphericalList.append(np.zeros([int(len(coordinateSets[j])/3),3]))
-                for k in range(0,len(coordinateSphericalList[j])) :
-                    r = 1
-                    phi = 2*math.pi*coordinateSets[j][k*3]/360
-                    theta = 2*math.pi*(90-coordinateSets[j][k*3+1])/360
-                    coordinateSphericalList[j][k,0] = r * np.sin(theta) * np.cos(phi)
-                    coordinateSphericalList[j][k,1] = r * np.sin(theta) * np.sin(phi)
-                    coordinateSphericalList[j][k,2] = r * np.cos(theta)
-
-            CountryData.append([countryString,coordinateList])
-            CountrySphericalData.append([countryString,coordinateSphericalList])
-
     figSize1 = (19.2, 10.8)
     fontFactor = 0.75
     mpl.rcParams.update({'font.size': 22})
     mpl.rcParams['axes.linewidth'] = 2 #set the value globally
-    markerSizeValue = 10
-
-    # plot world map
-    fig = plt.figure(3, figsize=figSize1)
-    ax = fig.gca()
-    # Turn off tick labels
-    ax.set_yticklabels([])
-    ax.set_xticklabels([])
-    # ax.set_aspect('equal')
-    # for i in range(0,20) :
-    colorValue = 0.85
-    edgeColor = (colorValue*.85, colorValue*.85, colorValue*.85)
-
-    for i in range(0,len(CountryData)) :
-        if isinstance( CountryData[i][1], np.ndarray ):
-            ax.add_artist(plt.Polygon(CountryData[i][1],edgecolor=edgeColor,
-                facecolor=(colorValue,colorValue,colorValue),aa=True))
-        else :
-            for j in range(0,len(CountryData[i][1])) :
-                ax.add_artist(plt.Polygon(CountryData[i][1][j],edgecolor=edgeColor,
-                    facecolor=(colorValue,colorValue,colorValue),aa=True))
-
-    plt.plot(getColumn(mappedFrameNumLocationUnitedStates,2),getColumn(mappedFrameNumLocationUnitedStates,1),linestyle='', color=(0.0, 0.5, 1.0),marker='o',markersize=markerSizeValue)
-    plt.plot(getColumn(mappedFrameNumLocationRussia,2),getColumn(mappedFrameNumLocationRussia,1),linestyle='', color=(1.0, 0.0, 0.0),marker='o',markersize=markerSizeValue)
-    plt.plot(getColumn(mappedFrameNumLocationOther,2),getColumn(mappedFrameNumLocationOther,1),linestyle='', color=(0.0, 0.9, 0.0),marker='o',markersize=markerSizeValue)
-    plt.xlim([-180,180])
-    plt.ylim([-60,90])
-    #plt.show()
-    plt.savefig( outputDir+'/worldMap.png', bbox_inches='tight')
 
     plotMarkerSize = 3
     plt.figure(10, figsize=figSize1)
