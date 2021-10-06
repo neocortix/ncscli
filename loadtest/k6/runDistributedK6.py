@@ -68,7 +68,7 @@ ap.add_argument( '--planDuration', type=float, default=600, help='the expected d
 ap.add_argument( '--workerDir', help='the directory to upload to workers',
     default='simpleWorker'
     )
-ap.add_argument( '--scriptFile', required=True, help='the k6 test script (required)' )
+ap.add_argument( '--scriptFile', help='the k6 test script (required)' )
 ap.add_argument( '--nWorkers', type=int, default=6, help='the number of Load-generating workers' )
 ap.add_argument( '--supportedVersions', action='store_true', help='to list supported versions and exit' )
 args = ap.parse_args()
@@ -97,6 +97,10 @@ else:
 logger.debug( 'workerDirPath: %s', workerDirPath )
 
 scriptFilePath = args.scriptFile
+if not scriptFilePath:
+    logger.error( 'no --scriptFile was given' )
+    sys.exit( 1 )
+
 scriptFullerPath = os.path.join( workerDirPath, scriptFilePath )
 if not os.path.isfile( scriptFullerPath ):
     logger.error( 'the script file "%s" was not found in %s', scriptFilePath, workerDirPath )
