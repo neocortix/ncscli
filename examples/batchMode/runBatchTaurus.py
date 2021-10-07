@@ -10,15 +10,22 @@ import ncscli.batchRunner as batchRunner
 
 class taurusFrameProcessor(batchRunner.frameProcessor):
     '''defines details for using taurus for a simplistic load test'''
+    # disable not-fully-working code for using preinstalled jmeter and installing plugins
+    usePreinstalled = False
 
     def installerCmd( self ):
         cmd = 'sudo apt-get -qq update'
-        cmd += ' && sudo apt-get -qq install build-essential'
-        cmd += ' && sudo apt-get -qq install python3-dev'
-        cmd += ' && python3 -m pip install --user numpy==1.19.4 bzt==1.15.1'
+        cmd += ' && sudo apt-get -qq -y install build-essential > /dev/null'
+        cmd += ' && sudo apt-get -qq -y install python3-dev > /dev/null'
+        cmd += ' && python3 -m pip install --user --quiet numpy>=1.19.4 bzt>=1.15.4'
         cmd += ' && cd taurusWorker'
-        cmd += ' && patch -b -p4 ../.local/lib/python3.7/site-packages/bzt/modules/monitoring.py < monitoring.patch'
-        cmd += ' && bzt warmup.yml'
+        if self.usePreinstalled:
+            cmd += ' && cp -p PluginsManagerCMD.sh /opt/apache-jmeter/bin'
+            cmd += ' && cp -p cmdrunner-*.jar /opt/apache-jmeter/lib'
+            cmd += ' && cp -p jmeter-plugins-manager-*.jar /opt/apache-jmeter/lib/ext'
+            cmd += ' && bzt -o modules.jmeter.path=/opt/apache-jmeter/bin/jmeter.sh -o modules.jmeter.version=5.4.1 warmup.yml'
+        else:
+            cmd += ' && bzt warmup.yml'
         return cmd
 
     def frameOutFileName( self, frameNum ):
@@ -26,9 +33,14 @@ class taurusFrameProcessor(batchRunner.frameProcessor):
 
     def frameCmd( self, frameNum ):
         configFileName = 'test.yml'  # substitute your own file name here (must be in taurusWorker dir)
-        cmd = 'cd taurusWorker && ~/.local/bin/bzt -o settings.artifacts-dir=~/artifacts_%03d %s' % (
-            frameNum, configFileName
-        )
+        if self.usePreinstalled:
+            cmd = 'cd taurusWorker && ~/.local/bin/bzt -o modules.jmeter.path=/opt/apache-jmeter/bin/jmeter.sh -o modules.jmeter.version=5.4.1 -o settings.artifacts-dir=~/artifacts_%03d %s' % (
+                frameNum, configFileName
+            )
+        else:
+            cmd = 'cd taurusWorker && ~/.local/bin/bzt -o settings.artifacts-dir=~/artifacts_%03d %s' % (
+                frameNum, configFileName
+            )
         return cmd
 
 
@@ -53,7 +65,7 @@ try:
         timeLimit = 80*60,
         instTimeLimit = 15*60,
         frameTimeLimit = 14*60,
-        filter = '{"dpr": ">=48", "ram":">=2800000000", "app-version": ">=2.1.11"}',
+        filter = '{ "regions": ["usa", "india"], "dar": "==100", "dpr": ">=48", "ram": ">=3800000000", "storage": ">=2000000000" }',
         outDataDir = outDataDir,
         startFrame = 1,
         endFrame = 6,
