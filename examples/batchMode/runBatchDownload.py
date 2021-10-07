@@ -66,6 +66,9 @@ if __name__ == '__main__':
         outDataDir = 'data/download_' + dateTimeTag
 
     urlFilePath = args.urlListFile  # 'dlUrlList.txt'
+    if not os.path.isfile( urlFilePath ):
+        logger.error( 'could not find the given --urlListFile "%s"', urlFilePath )
+        sys.exit( 1 )
 
     with open( urlFilePath, 'r' ) as urlFile:
         urlList = urlFile.readlines()
