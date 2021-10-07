@@ -124,6 +124,9 @@ def test_runBatchJava():
 def test_runBatchBlender():
     check_batchRunner_example( 'runBatchBlender', 'rendered_frame_*.png' )
 
+def test_runBatchDownload():
+    check_batchRunner_example( 'runBatchDownload', 'frame_*.out' )
+
 def test_runBatchGatling():
     check_batchRunner_example( 'runBatchGatling', 'gatlingResults_*' )
 
