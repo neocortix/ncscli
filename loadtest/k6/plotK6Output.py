@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-plots loadtest results produced by runBatchJMeter
+plots loadtest results produced by k6
 """
 # standard library modules
 import argparse
