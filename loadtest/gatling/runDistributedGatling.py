@@ -2,12 +2,15 @@
 '''runs Gatling on a new batch of instances'''
 import argparse
 import datetime
+import json
 import logging
 import math
 import os
 import subprocess
 import sys
-
+# third-party modules
+import requests
+# neocortix modules
 import ncscli.batchRunner as batchRunner
 
 logger = logging.getLogger(__name__)
@@ -24,6 +27,7 @@ class gatlingFrameProcessor(batchRunner.frameProcessor):
     '''defines details for using gatling for a load test'''
     workerDirPath = None
     scriptFilePath = None
+    simulationClass = None
 
     def installerCmd( self ):
         useScript = False
@@ -40,13 +44,38 @@ class gatlingFrameProcessor(batchRunner.frameProcessor):
         return 'gatlingResults_%03d' % frameNum
 
     def frameCmd( self, frameNum ):
-        dottedPath = self.scriptFilePath.replace( '/', '.' )
-        simulationClass = removeSuffix( dottedPath, '.scala' )
-        #simulationClass = 'ncsSim'
-        cmd = 'JAVA_OPTS="-Dgatling.ssl.useOpenSsl=false -Dgatling.data.console.light=true" ~/gatling-charts-highcharts-bundle-%s/bin/gatling.sh -nr --simulation %s -sf ~/%s -rf ~/gatlingResults_%03d' % (
-            gatlingVersion, simulationClass, self.workerDirPath, frameNum
+        simulationClass = None
+        if self.simulationClass:
+            dottedClass = self.simulationClass.replace( '/', '.' )
+            simulationClass = dottedClass
+        elif self.scriptFilePath:
+            dottedPath = self.scriptFilePath.replace( '/', '.' )
+            simulationClass = removeSuffix( dottedPath, '.scala' )
+        if not simulationClass:
+            raise ValueError( 'no Gatling simulation class was specified' )
+
+        resourcesDirPath = self.workerDirPath + '/resources'
+        if not os.path.isdir( resourcesDirPath ):
+            resourcesDirPath = self.workerDirPath
+        cmd = 'JAVA_OPTS="-Dgatling.ssl.useOpenSsl=false -Dgatling.data.console.light=true" ~/gatling-charts-highcharts-bundle-%s/bin/gatling.sh -nr --simulation %s -sf ~/%s -rsf %s -rf ~/gatlingResults_%03d' % (
+            gatlingVersion, simulationClass, self.workerDirPath, resourcesDirPath, frameNum
         )
         return cmd
+
+def getSupportedVersions():
+    minGVersion = '3.4.0'  # '3.1.2' is the first 3.x version from 2021, but versions below 3.4.0 don't work well
+
+    import packaging.version
+    pvp = packaging.version.parse  # an alias for the long function name
+    minPv = pvp( minGVersion )
+
+    resp = requests.get( 'https://api.github.com/repos/gatling/gatling/tags' )
+    #resp = requests.get( 'https://api.github.com/repos/gatling/gatling/releases' ) # has not worked
+    respJson = resp.json()
+    availableVersions = [rel['name'].lstrip('v') for rel in respJson]
+    logger.debug( 'availableVersions: %s', availableVersions )
+    supportedVersions = [vers for vers in availableVersions if pvp(vers) >= minPv and 'M' not in vers ]
+    return supportedVersions
 
 
 # configure logger formatting
@@ -63,9 +92,10 @@ ap = argparse.ArgumentParser( description=__doc__,
 ap.add_argument( '--authToken', help='the NCS authorization token to use (or none, to use NCS_AUTH_TOKEN env var' )
 ap.add_argument( '--outDataDir', help='a path to the output data dir for this run' )
 ap.add_argument( '--filter', help='json to filter instances for launch',
-    default = '{ "regions": ["usa", "india"], "dar": "==100", "dpr": ">=48", "ram": ">=3800000000", "storage": ">=2000000000" }'
+    default = '{ "regions": ["usa", "india"], "dar": ">= 99", "dpr": ">=48", "ram": ">=3800000000", "storage": ">=2000000000" }'
     )
-ap.add_argument( '--scriptFile', required=True, help='the Gatling test script relative file path (required)' )
+ap.add_argument( '--scriptFile', required=False, help='the Gatling test script relative file path' )
+ap.add_argument( '--simulationClass', help='the name of the gatling simulation class (if different from script file name)' )
 ap.add_argument( '--planDuration', type=float, default=600, help='the expected duration of the test plan, in seconds' )
 ap.add_argument( '--workerDir', help='the directory to upload to workers',
     default='gatlingWorker'
@@ -77,8 +107,21 @@ ap.add_argument( '--nWorkers', type=int, default=6, help='the number of Load-gen
 #ap.add_argument( '--SLOResponseTimeMax', type=float, default=2.5, help='SLO RT threshold, in seconds' )
 # environmental
 ap.add_argument( '--gatlingVersion', help='the version of gatling to run', default='3.6.1' )
+ap.add_argument( '--supportedVersions', action='store_true', help='to list supported versions and exit' )
 ap.add_argument( '--gatlingBinPath', help='path to the local gatling.sh for aggregating results' )
 args = ap.parse_args()
+
+supportedVersions = getSupportedVersions()
+logger.debug( 'supportedVersions: %s', supportedVersions )
+if args.supportedVersions:
+    print( json.dumps( supportedVersions ) )
+    sys.exit( 0 )
+
+gatlingVersion = args.gatlingVersion
+if gatlingVersion not in supportedVersions:
+    logger.error( 'Gatling version %s is not supported', gatlingVersion )
+    logger.info( 'these versions are supported: %s', supportedVersions )
+    sys.exit( 1 )
 
 workerDirPath = args.workerDir.rstrip( '/' )  # trailing slash could cause problems with rsync
 if workerDirPath:
@@ -91,15 +134,23 @@ else:
     sys.exit( 1 )
 logger.debug( 'workerDirPath: %s', workerDirPath )
 
-gatlingVersion = args.gatlingVersion
 
-scriptFilePath = args.scriptFile.replace( '\\', '/' )
-scriptFullerPath = os.path.join( workerDirPath, scriptFilePath )
-if not os.path.isfile( scriptFullerPath ):
-    logger.error( 'the script file "%s" was not found in %s', scriptFilePath, workerDirPath )
-    sys.exit( 1 )
-gatlingFrameProcessor.scriptFilePath = scriptFilePath
-logger.debug( 'using script "%s"', scriptFilePath )
+if not args.scriptFile and not args.simulationClass:
+    logger.error( 'please pass --scriptFile or --simulationClass' )
+    sys.exit(1)
+
+if args.scriptFile:
+    scriptFilePath = args.scriptFile.replace( '\\', '/' )
+    scriptFullerPath = os.path.join( workerDirPath, scriptFilePath )
+    if not os.path.isfile( scriptFullerPath ):
+        logger.error( 'the script file "%s" was not found in %s', scriptFilePath, workerDirPath )
+        sys.exit( 1 )
+    gatlingFrameProcessor.scriptFilePath = scriptFilePath
+    logger.debug( 'using scriptFile "%s"', scriptFilePath )
+
+if args.simulationClass:
+    gatlingFrameProcessor.simulationClass = args.simulationClass
+    logger.debug( 'using simulationClass "%s"', args.simulationClass )
 
 gatlingBinPath = args.gatlingBinPath
 if not gatlingBinPath:
