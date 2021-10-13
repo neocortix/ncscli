@@ -651,7 +651,10 @@ def rsyncFromRemote1( srcFileName, destFilePath, inst, timeLimit ):
 
     destFilePathFull = os.path.realpath(os.path.abspath( destFilePath ))
     timeLimitMinutes = max( 1, int( timeLimit/60 ) )
-    cmd = [ 'rsync', '--time-limit=%d' % timeLimitMinutes, '-a', '-e', 'ssh -p ' + str(port), user+'@'+host+':~/'+srcFileName,
+    sshClause = 'ssh -o ServerAliveInterval=%d -o ServerAliveCountMax=%d -p %d' \
+        % (g_.serverAliveInterval, g_.serverAliveCountMax, port)
+    cmd = [ 'rsync', '--time-limit=%d' % timeLimitMinutes, '-a', '-e', sshClause,
+        user+'@'+host+':~/'+srcFileName,
         destFilePathFull+'/'
     ]
     logger.info( 'retrieving from %s', inst['instanceId'] )
