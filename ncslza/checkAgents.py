@@ -206,7 +206,7 @@ def urlJoin( *parts ):
     return '/'.join( parts )
 
 def apiGetInstances( apiTestId ):
-    baseUrl = 'https://cloud.neocortix.com/cloud-api/lt/tests'
+    baseUrl = ncs.baseUrl + '/cloud-api/lt/tests'
     headers = ncs.ncscReqHeaders( authToken )
     url = urlJoin( baseUrl, apiTestId, 'instances' )
     logger.info( 'getting %s', url )

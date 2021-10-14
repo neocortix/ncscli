@@ -22,6 +22,7 @@ import requests
 __version__ = '1.1.29'
 logger = logging.getLogger(__name__)
 
+baseUrl = 'https://cloud.neocortix.com'
 
 # possible place for globals is this class's attributes
 class g_:
@@ -78,7 +79,7 @@ def queryNcsSc( urlTail, authToken, reqParams=None, maxRetries=30 ):
     timeouts = (30, 120)
     #timeouts = (1, 2)
     headers = ncscReqHeaders( authToken )
-    url = 'https://cloud.neocortix.com/cloud-api/sc/' + urlTail
+    url = baseUrl + '/cloud-api/sc/' + urlTail
     # jsonize the reqParams, but only if it's not a string (to avoid jsonizing if already json)
     if not isinstance( reqParams, str ):
         reqParams = json.dumps( reqParams )
@@ -141,7 +142,7 @@ def getAvailableDeviceCount( authToken, filtersJson=None, encryptFiles=True ):
 
 def listSshClientKeys( authToken ):
     headers = ncscReqHeaders( authToken )
-    url = 'https://cloud.neocortix.com/cloud-api/profile/ssh-keys'
+    url = baseUrl + '/cloud-api/profile/ssh-keys'
     logger.info( 'listing keys' )
     resp = requests.get( url, headers=headers )
     if (resp.status_code < 200) or (resp.status_code >= 300):
@@ -163,7 +164,7 @@ def uploadSshClientKey( authToken, keyName, keyContents, maxRetries=30 ):
         'key': keyContents
         }
     reqDataStr = json.dumps( reqData )
-    url = 'https://cloud.neocortix.com/cloud-api/profile/ssh-keys'
+    url = baseUrl + '/cloud-api/profile/ssh-keys'
     logger.debug( 'uploading key "%s" %s...', keyName, keyContents[0:16] )
     try:
         resp = requests.post( url, headers=headers, data=reqDataStr )
@@ -192,7 +193,7 @@ def deleteSshClientKey( authToken, keyName, maxRetries=30 ):
         'title': keyName,
         }
     reqDataStr = json.dumps( reqData )
-    url = 'https://cloud.neocortix.com/cloud-api/profile/ssh-keys/'
+    url = baseUrl + '/cloud-api/profile/ssh-keys/'
     logger.debug( 'deleting SshClientKey %s', keyName )
     try:
         resp = requests.delete( url, headers=headers, data=reqDataStr )
@@ -266,7 +267,7 @@ def launchScInstancesAsync( authToken, encryptFiles, numReq=1,
     reqDataStr = json.dumps( reqData )
 
     logger.debug( 'reqData: %s', reqDataStr )
-    url = 'https://cloud.neocortix.com/cloud-api/sc/jobs'
+    url = baseUrl + '/cloud-api/sc/jobs'
     #logger.info( 'posting with auth %s', authToken )
     try:
         resp = requests.post( url, headers=headers, data=reqDataStr )
@@ -490,7 +491,7 @@ def purgeKnownHosts( inRecs ):
 
 def terminateNcscInstance( authToken, iid, maxRetries=1000 ):
     headers = ncscReqHeaders( authToken )
-    url = 'https://cloud.neocortix.com/cloud-api/sc/instances/' + iid
+    url = baseUrl + '/cloud-api/sc/instances/' + iid
     #logger.debug( 'deleting instance %s', iid )
     try:
         resp = requests.delete( url, headers=headers )
@@ -516,7 +517,7 @@ def terminateNcscInstance( authToken, iid, maxRetries=1000 ):
 
 def terminateJobInstances( authToken, jobId, maxRetries=1000 ):
     headers = ncscReqHeaders( authToken )
-    url = 'https://cloud.neocortix.com/cloud-api/sc/jobs/' + jobId
+    url = baseUrl + '/cloud-api/sc/jobs/' + jobId
     logger.info( 'deleting instances for job %s', jobId )
     try:
         resp = requests.delete( url, headers=headers )
