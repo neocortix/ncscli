@@ -10,7 +10,15 @@ import subprocess
 import sys
 # third-party modules
 import requests
+# neocortix modules
 import ncscli.batchRunner as batchRunner
+
+logger = logging.getLogger(__name__)
+
+
+def scriptDirPath():
+    '''returns the absolute path to the directory containing this script'''
+    return os.path.dirname(os.path.realpath(__file__))
 
 
 class k6FrameProcessor(batchRunner.frameProcessor):
@@ -46,112 +54,112 @@ def getSupportedVersions():
     return supportedVersions
 
 
-# configure logger formatting
-#logging.basicConfig()
-logger = logging.getLogger(__name__)
-logFmt = '%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s'
-logDateFmt = '%Y/%m/%d %H:%M:%S'
-formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
-logging.basicConfig(format=logFmt, datefmt=logDateFmt)
-logger.setLevel(logging.INFO)
-#batchRunner.logger.setLevel(logging.DEBUG)  # for more verbosity
+if __name__ == "__main__":
+    # configure logger formatting
+    #logging.basicConfig()
+    logFmt = '%(asctime)s %(levelname)s %(module)s %(funcName)s %(message)s'
+    logDateFmt = '%Y/%m/%d %H:%M:%S'
+    formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
+    logging.basicConfig(format=logFmt, datefmt=logDateFmt)
+    logger.setLevel(logging.INFO)
+    #batchRunner.logger.setLevel(logging.DEBUG)  # for more verbosity
 
-ap = argparse.ArgumentParser( description=__doc__,
-    fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
-ap.add_argument( '--authToken', help='the NCS authorization token to use (or none, to use NCS_AUTH_TOKEN env var' )
-ap.add_argument( '--outDataDir', required=False, help='a path to the output data dir for this run (required)' )
-ap.add_argument( '--filter', help='json to filter instances for launch',
-    default = '{ "regions": ["usa", "india"], "dar": "==100", "dpr": ">=48", "ram": ">=3800000000", "storage": ">=2000000000" }'
-    )
-ap.add_argument( '--k6Version', default='0.34.1', help='the version of k6 to run on workers' )
-ap.add_argument( '--planDuration', type=float, default=600, help='the expected duration of the test plan, in seconds' )
-ap.add_argument( '--workerDir', help='the directory to upload to workers',
-    default='simpleWorker'
-    )
-ap.add_argument( '--scriptFile', help='the k6 test script (required)' )
-ap.add_argument( '--nWorkers', type=int, default=6, help='the number of Load-generating workers' )
-ap.add_argument( '--supportedVersions', action='store_true', help='to list supported versions and exit' )
-args = ap.parse_args()
+    ap = argparse.ArgumentParser( description=__doc__,
+        fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
+    ap.add_argument( '--authToken', help='the NCS authorization token to use (or none, to use NCS_AUTH_TOKEN env var' )
+    ap.add_argument( '--outDataDir', required=False, help='a path to the output data dir for this run (required)' )
+    ap.add_argument( '--filter', help='json to filter instances for launch',
+        default = '{ "regions": ["usa", "india"], "dar": ">= 99", "dpr": ">=48", "ram": ">=3800000000", "storage": ">=2000000000" }'
+        )
+    ap.add_argument( '--k6Version', default='0.34.1', help='the version of k6 to run on workers' )
+    ap.add_argument( '--planDuration', type=float, default=600, help='the expected duration of the test plan, in seconds' )
+    ap.add_argument( '--workerDir', help='the directory to upload to workers',
+        default='simpleWorker'
+        )
+    ap.add_argument( '--scriptFile', help='the k6 test script (required)' )
+    ap.add_argument( '--nWorkers', type=int, default=6, help='the number of Load-generating workers' )
+    ap.add_argument( '--supportedVersions', action='store_true', help='to list supported versions and exit' )
+    args = ap.parse_args()
 
-supportedVersions = getSupportedVersions()
-logger.debug( 'supportedVersions: %s', supportedVersions )
-if args.supportedVersions:
-    print( json.dumps( supportedVersions ) )
-    sys.exit( 0 )
+    supportedVersions = getSupportedVersions()
+    logger.debug( 'supportedVersions: %s', supportedVersions )
+    if args.supportedVersions:
+        print( json.dumps( supportedVersions ) )
+        sys.exit( 0 )
 
-k6Version = args.k6Version
-if k6Version not in supportedVersions:
-    logger.error( 'k6 version %s is not supported', k6Version )
-    logger.info( 'these versions are supported: %s', supportedVersions )
-    sys.exit( 1 )
-
-workerDirPath = args.workerDir.rstrip( '/' )  # trailing slash could cause problems with rsync
-if workerDirPath:
-    if not os.path.isdir( workerDirPath ):
-        logger.error( 'the workerDirPath "%s" is not a directory', workerDirPath )
+    k6Version = args.k6Version
+    if k6Version not in supportedVersions:
+        logger.error( 'k6 version %s is not supported', k6Version )
+        logger.info( 'these versions are supported: %s', supportedVersions )
         sys.exit( 1 )
-    k6FrameProcessor.workerDirPath = workerDirPath
-else:
-    logger.error( 'this version requires a workerDirPath' )
-    sys.exit( 1 )
-logger.debug( 'workerDirPath: %s', workerDirPath )
 
-scriptFilePath = args.scriptFile
-if not scriptFilePath:
-    logger.error( 'no --scriptFile was given' )
-    sys.exit( 1 )
+    workerDirPath = args.workerDir.rstrip( '/' )  # trailing slash could cause problems with rsync
+    if workerDirPath:
+        if not os.path.isdir( workerDirPath ):
+            logger.error( 'the workerDirPath "%s" is not a directory', workerDirPath )
+            sys.exit( 1 )
+        k6FrameProcessor.workerDirPath = workerDirPath
+    else:
+        logger.error( 'this version requires a workerDirPath' )
+        sys.exit( 1 )
+    logger.debug( 'workerDirPath: %s', workerDirPath )
 
-scriptFullerPath = os.path.join( workerDirPath, scriptFilePath )
-if not os.path.isfile( scriptFullerPath ):
-    logger.error( 'the script file "%s" was not found in %s', scriptFilePath, workerDirPath )
-    sys.exit( 1 )
-k6FrameProcessor.scriptFilePath = scriptFilePath
-logger.info( 'using script "%s"', scriptFilePath )
+    scriptFilePath = args.scriptFile
+    if not scriptFilePath:
+        logger.error( 'no --scriptFile was given' )
+        sys.exit( 1 )
 
-# compute frameTimeLimit based on planDuration, unless it is not positive, which is an error
-planDuration = args.planDuration
-if planDuration <= 0:
-    logger.error( 'please supply a positive planDuration (not %d)', planDuration )
-    sys.exit( 1 )
-frameTimeLimit = max( round( planDuration * 1.5 ), planDuration+8*60 ) # some slop beyond the planned duration
+    scriptFullerPath = os.path.join( workerDirPath, scriptFilePath )
+    if not os.path.isfile( scriptFullerPath ):
+        logger.error( 'the script file "%s" was not found in %s', scriptFilePath, workerDirPath )
+        sys.exit( 1 )
+    k6FrameProcessor.scriptFilePath = scriptFilePath
+    logger.info( 'using script "%s"', scriptFilePath )
 
-nFrames = args.nWorkers
-nWorkers = math.ceil(nFrames*1.5) if nFrames <=10 \
-    else round( max( nFrames*1.12, nFrames + 5 * math.log10( nFrames ) ) )
+    # compute frameTimeLimit based on planDuration, unless it is not positive, which is an error
+    planDuration = args.planDuration
+    if planDuration <= 0:
+        logger.error( 'please supply a positive planDuration (not %d)', planDuration )
+        sys.exit( 1 )
+    frameTimeLimit = max( round( planDuration * 1.5 ), planDuration+8*60 ) # some slop beyond the planned duration
+
+    nFrames = args.nWorkers
+    nWorkers = math.ceil(nFrames*1.5) if nFrames <=10 \
+        else round( max( nFrames*1.12, nFrames + 5 * math.log10( nFrames ) ) )
 
 
-outDataDir = args.outDataDir
-if not outDataDir:
-    dateTimeTag = datetime.datetime.now().strftime( '%Y-%m-%d_%H%M%S' )
-    outDataDir = 'data/k6_' + dateTimeTag
+    outDataDir = args.outDataDir
+    if not outDataDir:
+        dateTimeTag = datetime.datetime.now().strftime( '%Y-%m-%d_%H%M%S' )
+        outDataDir = 'data/k6_' + dateTimeTag
 
-#sys.exit( 'DEBUGGING' )
-#if not os.path.isfile( workerDirPath + '/k6.tar.gz' ):
-#    logger.error( 'the compressed k6 binary was not found, you may need to build and compress it' )
-#    sys.exit( 1)
-try:
-    rc = batchRunner.runBatch(
-        frameProcessor = k6FrameProcessor(),
-        commonInFilePath = workerDirPath,
-        authToken = os.getenv('NCS_AUTH_TOKEN') or 'YourAuthTokenHere',
-        encryptFiles=False,
-        timeLimit = frameTimeLimit + 40*60,
-        instTimeLimit = 7*60,
-        frameTimeLimit = frameTimeLimit,
-        filter = args.filter,
-        outDataDir = outDataDir,
-        startFrame = 1,
-        endFrame = nFrames,
-        nWorkers = nWorkers,
-        limitOneFramePerWorker = True,
-        autoscaleMax = 1
-    )
-    if os.path.isfile( outDataDir +'/recruitLaunched.json' ):
-        rc2 = subprocess.call( [sys.executable, 'plotK6Output.py', '--dataDirPath', outDataDir],
-            stdout=subprocess.DEVNULL )
-        if rc2:
-            logger.warning( 'plotK6Output.py exited with returnCode %d', rc2 )
+    #sys.exit( 'DEBUGGING' )
+    #if not os.path.isfile( workerDirPath + '/k6.tar.gz' ):
+    #    logger.error( 'the compressed k6 binary was not found, you may need to build and compress it' )
+    #    sys.exit( 1)
+    try:
+        rc = batchRunner.runBatch(
+            frameProcessor = k6FrameProcessor(),
+            commonInFilePath = workerDirPath,
+            authToken = os.getenv('NCS_AUTH_TOKEN') or 'YourAuthTokenHere',
+            encryptFiles=False,
+            timeLimit = frameTimeLimit + 40*60,
+            instTimeLimit = 7*60,
+            frameTimeLimit = frameTimeLimit,
+            filter = args.filter,
+            outDataDir = outDataDir,
+            startFrame = 1,
+            endFrame = nFrames,
+            nWorkers = nWorkers,
+            limitOneFramePerWorker = True,
+            autoscaleMax = 1
+        )
+        if os.path.isfile( outDataDir +'/recruitLaunched.json' ):
+            rc2 = subprocess.call( [sys.executable, scriptDirPath()+'/plotK6Output.py', '--dataDirPath', outDataDir],
+                stdout=subprocess.DEVNULL )
+            if rc2:
+                logger.warning( 'plotK6Output.py exited with returnCode %d', rc2 )
 
-    sys.exit( rc )
-except KeyboardInterrupt:
-    logger.warning( 'an interuption occurred')
+        sys.exit( rc )
+    except KeyboardInterrupt:
+        logger.warning( 'an interuption occurred')
