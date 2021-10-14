@@ -93,6 +93,7 @@ ap.add_argument( '--agentDir', help='the directory to upload to agents',
     default='lzAgent'
     )
 ap.add_argument( '--nAgents', type=int, default=1, help='the number of load-generating agents to launch' )
+ap.add_argument( '--cookie' )
 args = ap.parse_args()
 
 
@@ -127,6 +128,7 @@ try:
         pushDeviceLocs=False,
         commonInFilePath = loadzillaFrameProcessor.agentDirPath,
         authToken = args.authToken or os.getenv('NCS_AUTH_TOKEN'),
+        cookie = args.cookie,
         sshClientKeyName=args.sshClientKeyName,
         encryptFiles=False,
         timeLimit = 12*60,

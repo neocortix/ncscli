@@ -215,6 +215,7 @@ if __name__ == '__main__':
     ap.add_argument( '--portRangeStart', type=int, default=7100,
         help='the beginning of the range of port numbers to forward' )
     ap.add_argument( '--supportedVersions', action='store_true', help='to list supported versions and exit' )
+    ap.add_argument( '--cookie' )
     args = ap.parse_args()
 
     supportedVersions = ['7.6', '7.7', '7.10', '7.10.0', '7.10.1', '7.11.0']
@@ -285,6 +286,7 @@ if __name__ == '__main__':
             pushDeviceLocs=False,
             commonInFilePath = 'nlAgent',
             authToken = authToken,
+            cookie = args.cookie,
             sshClientKeyName=args.sshClientKeyName,
             encryptFiles=False,
             timeLimit = 60*60,

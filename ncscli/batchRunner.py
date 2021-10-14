@@ -1296,6 +1296,9 @@ def runBatch( **kwargs ):
     logger.info( 'args.outDataDir: %s', args.outDataDir )
     os.makedirs( g_.dataDirPath, exist_ok=True )
 
+    if args.cookie:
+        os.environ['NCS_COOKIE'] = args.cookie
+
     signal.signal( signal.SIGTERM, sigtermHandler )
     myPid = os.getpid()
     logger.debug('procID: %s', myPid)

@@ -90,6 +90,7 @@ ap.add_argument( '--SLODuration', type=float, default=240, help='SLO duration, i
 ap.add_argument( '--SLOResponseTimeMax', type=float, default=2.5, help='SLO RT threshold, in seconds' )
 # environmental
 ap.add_argument( '--jmeterBinPath', help='path to the local jmeter.sh for generating html report' )
+ap.add_argument( '--cookie' )
 args = ap.parse_args()
 
 
@@ -139,6 +140,7 @@ try:
         frameProcessor = JMeterFrameProcessor(),
         commonInFilePath = JMeterFrameProcessor.workerDirPath,
         authToken = args.authToken or os.getenv( 'NCS_AUTH_TOKEN' ) or 'YourAuthTokenHere',
+        cookie = args.cookie,
         encryptFiles=False,
         timeLimit = frameTimeLimit + 40*60,
         instTimeLimit = 6*60,

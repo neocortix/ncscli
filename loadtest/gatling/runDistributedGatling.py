@@ -109,6 +109,7 @@ ap.add_argument( '--nWorkers', type=int, default=6, help='the number of Load-gen
 ap.add_argument( '--gatlingVersion', help='the version of gatling to run', default='3.6.1' )
 ap.add_argument( '--supportedVersions', action='store_true', help='to list supported versions and exit' )
 ap.add_argument( '--gatlingBinPath', help='path to the local gatling.sh for aggregating results' )
+ap.add_argument( '--cookie' )
 args = ap.parse_args()
 
 supportedVersions = getSupportedVersions()
@@ -179,6 +180,7 @@ try:
         commonInFilePath = workerDirPath,
         pushDeviceLocs=True,
         authToken = os.getenv('NCS_AUTH_TOKEN') or 'YourAuthTokenHere',
+        cookie = args.cookie,
         encryptFiles=False,
         timeLimit = frameTimeLimit + 40*60,
         instTimeLimit = 7*60,

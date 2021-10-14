@@ -79,6 +79,7 @@ if __name__ == "__main__":
     ap.add_argument( '--scriptFile', help='the k6 test script (required)' )
     ap.add_argument( '--nWorkers', type=int, default=6, help='the number of Load-generating workers' )
     ap.add_argument( '--supportedVersions', action='store_true', help='to list supported versions and exit' )
+    ap.add_argument( '--cookie' )
     args = ap.parse_args()
 
     supportedVersions = getSupportedVersions()
@@ -142,6 +143,7 @@ if __name__ == "__main__":
             frameProcessor = k6FrameProcessor(),
             commonInFilePath = workerDirPath,
             authToken = os.getenv('NCS_AUTH_TOKEN') or 'YourAuthTokenHere',
+            cookie = args.cookie,
             encryptFiles=False,
             timeLimit = frameTimeLimit + 40*60,
             instTimeLimit = 7*60,
