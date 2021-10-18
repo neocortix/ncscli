@@ -12,7 +12,7 @@ class gatlingFrameProcessor(batchRunner.frameProcessor):
     '''defines details for using gatling for a simplistic load test'''
 
     def installerCmd( self ):
-        return 'gatlingWorker/install.sh'
+        return 'gatlingWorker/installGatling.sh %s' % gatlingVersion
 
     def frameOutFileName( self, frameNum ):
         return 'gatlingResults_%03d' % frameNum
@@ -21,8 +21,8 @@ class gatlingFrameProcessor(batchRunner.frameProcessor):
         # substitute your own gatling simulation class, and put the scala file in the gatlingWorker dir
         # -or- modify the provided gatlingWorker/ncsSim.scala file to change details of the test
         simulationClass = 'neocortix.ncsSim'
-        cmd = '~/gatling-charts-highcharts-bundle-3.4.0/bin/gatling.sh -nr --simulation %s -sf ~/gatlingWorker -rf ~/gatlingResults_%03d' % (
-            simulationClass, frameNum
+        cmd = 'JAVA_OPTS="-Dgatling.ssl.useOpenSsl=false -Dgatling.data.console.light=true" ~/gatling-charts-highcharts-bundle-%s/bin/gatling.sh -nr --simulation %s -sf ~/gatlingWorker -rf ~/gatlingResults_%03d' % (
+            gatlingVersion, simulationClass, frameNum
         )
         return cmd
 
@@ -35,6 +35,8 @@ logDateFmt = '%Y/%m/%d %H:%M:%S'
 formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
 logging.basicConfig(format=logFmt, datefmt=logDateFmt)
 #batchRunner.logger.setLevel(logging.DEBUG)  # for more verbosity
+
+gatlingVersion = '3.6.1'
 
 dateTimeTag = datetime.datetime.now().strftime( '%Y-%m-%d_%H%M%S' )
 outDataDir = 'data/gatling_' + dateTimeTag
@@ -49,7 +51,7 @@ try:
         timeLimit = 89*60,
         instTimeLimit = 12*60,
         frameTimeLimit = 15*60,
-        filter = '{"dpr": ">=48", "ram":">=2800000000", "app-version": ">=2.1.11"}',
+        filter = '{ "regions": ["usa", "india"], "dar": ">= 99", "dpr": ">=48", "ram": ">=3800000000", "storage": ">=2000000000" }',
         outDataDir = outDataDir,
         limitOneFramePerWorker = True,
         autoscaleMax = 2,
@@ -64,9 +66,10 @@ try:
         if rc2:
             logger.warning( 'plotGatlingOutput.py exited with returnCode %d', rc2 )
         # report aggregated output (requires gatling)
-        gatlingBinPath = 'gatling-3.4.0/bin/gatling.sh'
+        gatlingBinPath = 'gatling-charts-highcharts-bundle-%s/bin/gatling.sh' % (gatlingVersion)
         if os.path.isfile( gatlingBinPath ):
-            rc2 = subprocess.call( [sys.executable, 'reportGatlingOutput.py', '--dataDirPath', outDataDir],
+            rc2 = subprocess.call( [sys.executable, 'reportGatlingOutput.py',
+                    '--dataDirPath', outDataDir, '--gatlingBinPath', gatlingBinPath],
                 stdout=subprocess.DEVNULL )
             if rc2:
                 logger.warning( 'reportGatlingOutput.py exited with returnCode %d', rc2 )
