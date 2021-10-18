@@ -38,6 +38,11 @@ class gatlingFrameProcessor(batchRunner.frameProcessor):
             cmd += ' && curl -s -S -L -O https://repo1.maven.org/maven2/io/gatling/highcharts/gatling-charts-highcharts-bundle/%s/gatling-charts-highcharts-bundle-%s-bundle.zip' \
                 % (gatlingVersion, gatlingVersion)
             cmd += ' && unzip -q gatling-charts-highcharts-bundle-%s-bundle.zip' % gatlingVersion
+            confFilePath = self.workerDirPath + '/gatling.conf'
+            if os.path.isfile( confFilePath ):
+                confDirPath = '~/gatling-charts-highcharts-bundle-%s/conf' % gatlingVersion
+                cmd += ' && cp -p %s %s' % \
+                    (confFilePath, confDirPath)
         return cmd
 
     def frameOutFileName( self, frameNum ):
