@@ -7,7 +7,7 @@ gx/
 apache-jmeter-5.4.1/
 gatling-3.4.0/
 gatling-charts-highcharts-bundle-3.4.0-bundle.zip
-gatlingWorker
+gatlingWorker/Neocortix_100TPS_CyclicWorkloadDemo.scala
 go/
 helloFrame-bin/
 helloFrame.jar
