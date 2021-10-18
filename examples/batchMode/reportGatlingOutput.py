@@ -26,9 +26,11 @@ if __name__ == "__main__":
 
     ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( '--dataDirPath', required=True, help='the path to to directory for input and output data' )
+    ap.add_argument( '--gatlingBinPath', help='the path to the gatling launch script',
+        default='gatling-charts-highcharts-bundle-3.6.1/bin/gatling.sh' )
     args = ap.parse_args()
 
-    gatlingBinPath = 'gatling-3.4.0/bin/gatling.sh'
+    gatlingBinPath = args.gatlingBinPath
     if not os.path.isfile( gatlingBinPath ):
         sys.exit( 'ERROR the gatling binary was not found at ' +  gatlingBinPath )
 
