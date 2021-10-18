@@ -1508,6 +1508,7 @@ def createArgumentParser():
         fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( '--commonInFilePath', help='a file to upload initially to all instances' )
     ap.add_argument( '--authToken', required=True, help='the NCS authorization token to use (required)' )
+    ap.add_argument( '--cookie', help='for internal use only' )
     ap.add_argument( '--outDataDir', help='output data darectory', default='./data/' )
     ap.add_argument( '--pushDeviceLocs', type=boolArg, default=False, help='whether to store device location on each launched instance' )
     ap.add_argument( '--encryptFiles', type=boolArg, default=True, help='whether to encrypt files on launched instances' )
