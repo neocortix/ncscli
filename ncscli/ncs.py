@@ -249,8 +249,8 @@ def launchScInstancesAsync( authToken, encryptFiles, numReq=1,
         'ssh_key': sshClientKeyName,
         'count': numReq
         }
-    if os.environ['NCS_COOKIE']:
-        reqData['cookie'] = os.environ['NCS_COOKIE']
+    if os.getenv('NCS_COOKIE'):
+        reqData['cookie'] = os.getenv('NCS_COOKIE')
     if jsonFilter:
         try:
             filters = json.loads( jsonFilter )
