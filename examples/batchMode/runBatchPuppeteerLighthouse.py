@@ -14,7 +14,7 @@ class PuppeteerLighthouseFrameProcessor(batchRunner.frameProcessor):
     '''defines details for using Puppeteer and Lighthouse to analyze a web page from multiple devices'''
 
     def installerCmd( self ):
-        return 'apt update && apt install -y chromium nodejs npm && ln -s chromium /usr/bin/chromium-browser && PUPPETEER_SKIP_DOWNLOAD=yes npm install -g puppeteer && npm install -g lighthouse@6.5.0'
+        return 'apt-get -qq update > /dev/null && apt-get -qq install -y chromium nodejs npm > /dev/null && ln -s chromium /usr/bin/chromium-browser && PUPPETEER_SKIP_DOWNLOAD=yes npm install --quiet -g puppeteer && npm install --quiet -g lighthouse@6.5.0'
 
     PuppeteerFilePath = 'Puppeteer.js'
 
@@ -58,7 +58,7 @@ try:
         timeLimit = 80*60,
         instTimeLimit = 24*60,
         frameTimeLimit = 600,
-        filter = '{"dpr": ">=48", "ram":">=2800000000", "app-version": ">=2.1.11"}',
+        filter = '{ "regions": ["usa", "india"], "dar": ">= 99", "dpr": ">=48", "ram": ">=3800000000", "storage": ">=2000000000" }',
         outDataDir = outDataDir,
         startFrame = 1,
         endFrame = 5,
@@ -66,7 +66,7 @@ try:
         limitOneFramePerWorker = True,
         autoscaleMax = 2
     )
-    if os.path.isfile( outDataDir +'/recruitLaunched.json' ):
+    if rc==0 and os.path.isfile( outDataDir +'/recruitLaunched.json' ):
         untarResults( outDataDir )
         rc2 = subprocess.call( [sys.executable, 'processPuppeteerOutput.py', '--dataDirPath', outDataDir],
             stdout=subprocess.DEVNULL )
