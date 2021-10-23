@@ -21,22 +21,6 @@ def scriptDirPath():
     '''returns the absolute path to the directory containing this script'''
     return os.path.dirname(os.path.realpath(__file__))
 
-def plotInstanceMap( inFilePath, outFilePath ):
-    rc = 2
-    # this works on linux but maybe not on windows
-    plotterBinPath = shutil.which( 'plotInstanceMap.py' )
-    if not plotterBinPath:
-        if os.path.isfile( '../ncscli/plotInstanceMap.py' ):
-            plotterBinPath = '../ncscli/plotInstanceMap.py'
-    if plotterBinPath:
-        rc = subprocess.call( [plotterBinPath,
-            inFilePath, outFilePath
-            ],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
-        if rc:
-            logger.warning( 'plotInstanceMap exited with returnCode %d', rc )
-    return rc
-
 
 class FrameProcessor(batchRunner.frameProcessor):
     '''defines details for using Puppeteer and Lighthouse on a device'''
@@ -47,6 +31,7 @@ class FrameProcessor(batchRunner.frameProcessor):
         cmd = 'apt-get -qq update'  # for default debian install
         #cmd = 'curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -'  # for LTS version
         #cmd = 'curl -fsSL https://deb.nodesource.com/setup_12.x | bash -'  # for old but supported version
+        #cmd = 'curl -fsSL https://deb.nodesource.com/setup_17.x | bash -'  # for a non-LTS 2021 version
 
         cmd += ' && apt-get install -y nodejs npm'
         cmd += ' && apt-get -qq update > /dev/null && apt-get install -y chromium && ln -s chromium /usr/bin/chromium-browser && PUPPETEER_SKIP_DOWNLOAD=yes npm install --quiet -g puppeteer && npm install --quiet -g lighthouse@6.5.0'
@@ -60,6 +45,7 @@ class FrameProcessor(batchRunner.frameProcessor):
         outDirName = 'puppeteerOut'
         cmd = 'cd %s' % self.workerDirPath
         cmd += ' && mkdir %s' % outDirName
+        #cmd += ' && export NODE_PATH=/usr/lib/node_modules && export PATH=$PATH:/usr/local/bin && node --unhandled-rejections=strict %s %d %s' % (
         cmd += ' && export NODE_PATH=/usr/local/lib/node_modules && export PATH=$PATH:/usr/local/bin && node --unhandled-rejections=strict %s %d %s' % (
             self.scriptFilePath, frameNum, args.targetUrl
         )
@@ -133,7 +119,7 @@ if __name__ == "__main__":
         logger.error( 'the script file "%s" was not found in %s', scriptFilePath, workerDirPath )
         sys.exit( 1 )
     FrameProcessor.scriptFilePath = scriptFilePath
-    logger.info( 'using script "%s"', scriptFilePath )
+    logger.debug( 'using script "%s"', scriptFilePath )
 
     # compute frameTimeLimit based on planDuration, unless it is not positive, which is an error
     planDuration = args.planDuration
@@ -171,11 +157,9 @@ if __name__ == "__main__":
         )
         if rc==0 and os.path.isfile( outDataDir +'/recruitLaunched.json' ):
             untarResults( outDataDir )
-            rc2_ = plotInstanceMap( os.path.join( outDataDir, 'recruitLaunched.json' ),
-                os.path.join( outDataDir, 'worldMap.png' )
-                )
-            rc2_ = plotInstanceMap( os.path.join( outDataDir, 'recruitLaunched.json' ),
-                os.path.join( outDataDir, 'worldMap.svg' )
+            rc2 = subprocess.call( [sys.executable, scriptDirPath()+'/processPuppeteerOutput.py',
+                '--dataDirPath', outDataDir,
+                ], stdout=subprocess.DEVNULL
                 )
         sys.exit( rc )
     except KeyboardInterrupt:
