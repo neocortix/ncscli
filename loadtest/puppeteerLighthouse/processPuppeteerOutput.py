@@ -148,5 +148,5 @@ if __name__ == "__main__":
 
     logger.info( 'merging data in directory %s', os.path.realpath(args.dataDirPath)  )
     mergeLighthouseOutput( args.dataDirPath, args.mergedCsv, args.reportFilePattern )
-    logger.info( 'plotting instance map' )
+    logger.debug( 'plotting instance map' )
     plotGoodInstances( args.dataDirPath )
