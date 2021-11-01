@@ -51,6 +51,7 @@ class FrameProcessor(batchRunner.frameProcessor):
     '''defines details for installing a squid proxy on a worker'''
 
     def installerCmd( self ):
+        return '%s/installCustomSquid.sh %s' % (workerDirName, squidVersion )
         return '%s/installSquid.sh %s' % (workerDirName, squidVersion )
 
 
@@ -121,7 +122,7 @@ def configureProxy( inst, port, timeLimit=500 ):
     # generate a command to copy config files to the right place on the instance
     configDirPath = '/etc/squid'
     cmd = "cp -p -r %s/conf/* %s" % (workerDirName, configDirPath )
-    logger.info( 'cmd: %s', cmd )
+    logger.debug( 'cmd: %s', cmd )
     rc = commandInstance( inst, cmd, timeLimit=timeLimit )
     return rc
 
@@ -164,7 +165,7 @@ if __name__ == '__main__':
     formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
     logging.basicConfig(format=logFmt, datefmt=logDateFmt)
     #batchRunner.logger.setLevel(logging.DEBUG)  # for more verbosity
-    #startForwarders.logger.setLevel(logging.DEBUG)  # for more verbosity
+    startForwarders.logger.setLevel(logging.DEBUG)  # for more verbosity
     logger.setLevel(logging.INFO)
 
     ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@',
