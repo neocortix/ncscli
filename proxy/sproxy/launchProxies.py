@@ -165,14 +165,14 @@ if __name__ == '__main__':
     formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
     logging.basicConfig(format=logFmt, datefmt=logDateFmt)
     #batchRunner.logger.setLevel(logging.DEBUG)  # for more verbosity
-    startForwarders.logger.setLevel(logging.DEBUG)  # for more verbosity
+    #startForwarders.logger.setLevel(logging.DEBUG)  # for more verbosity
     logger.setLevel(logging.INFO)
 
     ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( '--authToken', help='the NCS authorization token to use (or none, to use NCS_AUTH_TOKEN env var' )
     ap.add_argument( '--filter', help='json to filter instances for launch',
-        default = '{ "regions": ["asia", "europe", "middle-east", "north-america", "oceania"], "dar": ">=99", "dpr": ">=48", "ram": ">=3800000000", "storage": ">=2000000000" }'
+        default = '{ "cpu-arch": "aarch64", "dar": ">=99", "storage": ">=2000000000" }'
     )
     ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use (default is random)' )
     ap.add_argument( '--forwarderHost', help='IP addr (or host name) of the forwarder host',
