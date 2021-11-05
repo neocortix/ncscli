@@ -298,7 +298,7 @@ if __name__ == '__main__':
                 for index, inst in enumerate( startedInstances ):
                     iid = inst['instanceId']
                     portMap[iid] = index + portRangeStart
-                logger.info( 'configuring proxies')
+                logger.info( 'configuring %d proxies', len(startedInstances) )
                 returnCodes = configureProxies( startedInstances, ports, timeLimit=600 )
                 for index, code in enumerate( returnCodes ):
                     if code==0:
@@ -308,6 +308,7 @@ if __name__ == '__main__':
                         logger.info( 'inst %s was not configured properly', iid[0:8] )
 
             # start the proxy on each instance 
+            logger.info( 'starting %d proxies', len(configuredInstances) )
             stepStatuses = tellInstances.tellInstances( configuredInstances, command=starterCmd,
                 resultsLogFilePath=outDataDir +'/startProxies.jlog',
                 timeLimit=30*60,
@@ -325,6 +326,7 @@ if __name__ == '__main__':
             #COULD download logs from all installed instances rather than just good-started instances
             goodInstances = [inst for inst in startedInstances if inst['instanceId'] in goodIids ]
             if goodInstances:
+                logger.info( 'downloading %d proxy logs', len(goodInstances) )
                 time.sleep( 60 )
                 # download the log file from each instance
                 stepStatuses = tellInstances.tellInstances( goodInstances,
@@ -368,8 +370,16 @@ if __name__ == '__main__':
                 if len( forwarders ) < len( goodInstances ):
                     logger.warning( 'some instances could not be forwarded to' )
                 logger.debug( 'forwarders: %s', forwarders )
-                #TODO get iids only for successfully forwarded proxies
-                forwardedIids = [inst['instanceId'] for inst in goodInstances ]
+                # get iids only for successfully forwarded proxies
+                forwardedIids = [fw['instanceId'] for fw in forwarders ]
+                #forwardedIids = [inst['instanceId'] for inst in goodInstances ]
+
+                # save forwarding addresses (host:port) for forwarded instances
+                if forwarders:
+                    proxyListFilePath = os.path.join( outDataDir, 'proxyAddrs.txt' )
+                    with open( proxyListFilePath, 'w' ) as proxyListFile:
+                        for fw in forwarders:
+                            print( fw['mapping'], file=proxyListFile )
 
                 goodInstances = [inst for inst in goodInstances if inst['instanceId'] in forwardedIids ]
                 if goodInstances:
