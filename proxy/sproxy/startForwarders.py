@@ -16,7 +16,7 @@ logger.setLevel(logging.INFO)
 # possible place for globals is this class's attributes
 class g_:
     serverAliveInterval = 30
-    serverAliveCountMax = 6
+    serverAliveCountMax = 12
 
 def startForwarders( agentInstances, forwarderHost='localhost',
     portRangeStart=7100, maxPort = 7199,
@@ -26,7 +26,7 @@ def startForwarders( agentInstances, forwarderHost='localhost',
     forwarders = []
     mappings = []
     with open( forwardingCsvFilePath, 'w' ) as csvOutFile:
-        print( 'forwarding', 'instanceId', 'instHost', 'instSshPort', 'assignedPort',
+        print( 'forwarding', 'instanceId', 'instHost', 'instSshPort', 'assignedPort', 'forwarderHost',
             sep=',', file=csvOutFile
             )
         assignedPort = portRangeStart
@@ -54,7 +54,7 @@ def startForwarders( agentInstances, forwarderHost='localhost',
                 '-L', '*:'+str(assignedPort)+':localhost:'+str(finalPort),
                 '%s@%s' % (user, instHost)
             ]
-            logger.info( 'cmd: %s', cmd )
+            logger.debug( 'cmd: %s', cmd )
             logLevel = logger.getEffectiveLevel()
             # will force ssh process to be quiet unless we are in a debug-like logLevel
             stderr = None if logLevel < logging.INFO else subprocess.DEVNULL
@@ -72,7 +72,7 @@ def startForwarders( agentInstances, forwarderHost='localhost',
                     'port': assignedPort, 'mapping': mapping
                 }
                 forwarders.append( forwarder )
-                print( mapping, iid, instHost, instPort, assignedPort,
+                print( mapping, iid, instHost, instPort, assignedPort, forwarderHost,
                     sep=',', file=csvOutFile
                     )
             assignedPort += 1
