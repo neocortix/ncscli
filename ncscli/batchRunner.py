@@ -1304,7 +1304,7 @@ def runBatch( **kwargs ):
     logger.debug('procID: %s', myPid)
 
     g_.progressFilePath = g_.dataDirPath + '/progress.json'
-    settingsJsonFilePath = g_.dataDirPath + '/settings.json'
+    settingsJsonFilePath = g_.dataDirPath + '/batchRunner_settings.json'
     installerLogFilePath = g_.dataDirPath + '/recruitInstances.jlog'
     resultsLogFilePath = g_.dataDirPath+'/'+ \
         os.path.splitext( os.path.basename( __file__ ) )[0] + '_results.jlog'
