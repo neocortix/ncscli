@@ -14,41 +14,10 @@ import sys
 import psutil
 # neocortix modules
 import ncscli.ncs as ncs
+import sshForwarding  # expected to be in the same directory
+
 
 logger = logging.getLogger(__name__)
-
-
-def findForwarders():
-    mappings = []
-    for proc in psutil.process_iter():
-        try:
-            procInfo = proc.as_dict(attrs=['pid', 'name', 'cmdline'])
-        except psutil.NoSuchProcess:
-            continue
-        if 'ssh' == procInfo['name']:
-            #logger.info( 'procInfo: %s', procInfo )
-            cmdLine = procInfo['cmdline']
-            #logger.info( 'cmdLine: %s', cmdLine )
-            #TODO maybe a better way to identify forwarders
-            if '-fNT' in cmdLine:
-                mapping = {}
-                for arg in cmdLine:
-                    # 'neocortix.com' is expected in the hostname of each NCS instance
-                    if 'neocortix.com' in arg:
-                        host = arg.split('@')[1]
-                        #logger.info( 'forwarding to host %s', host )
-                        mapping['host'] = host
-                        mapping['pid'] = procInfo['pid']
-                    if ':localhost:' in arg:
-                        part = arg.split( ':localhost:')[0].split(':')[1]
-                        assignedPort = int( part )
-                        #logger.info( 'forwarding port %d', assignedPort)
-                        mapping['port'] = assignedPort
-            if mapping:
-                #logger.debug( 'forwarding port %d to %s', mapping['port'], mapping['host'] )
-                mappings.append( mapping )
-    #logger.info( 'mappings: %s', mappings )
-    return mappings
 
 
 if __name__ == "__main__":
@@ -80,7 +49,7 @@ if __name__ == "__main__":
             logger.info( 'no instances found' )
             respCode = 204
         else:
-            forwarders = findForwarders()
+            forwarders = sshForwarding.findForwarders()
             forwardersByHost = { fw['host']: fw for fw in forwarders }
             for inst in instances:
                 iid = inst['instanceId']
