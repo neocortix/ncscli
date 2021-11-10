@@ -19,6 +19,7 @@ import requests
 # neocortix modules
 import ncscli.ncs as ncs
 import ncscli.tellInstances as tellInstances
+import sshForwarding  # expected to be in the same directory
 
 
 logger = logging.getLogger(__name__)
@@ -138,37 +139,6 @@ def checkLogs( liveInstances, dataDirPath ):
     '''
     return errorsByIid
 
-def findForwarders():
-    mappings = []
-    for proc in psutil.process_iter():
-        try:
-            procInfo = proc.as_dict(attrs=['pid', 'name', 'cmdline'])
-        except psutil.NoSuchProcess:
-            continue
-        if 'ssh' == procInfo['name']:
-            #logger.info( 'procInfo: %s', procInfo )
-            cmdLine = procInfo['cmdline']
-            #TODO maybe a better way to identify forwarders
-            if '-fNT' in cmdLine:
-                logger.debug( 'cmdLine: %s', cmdLine )
-                mapping = {}
-                for arg in cmdLine:
-                    # 'neocortix.com' is expected in the hostname of each NCS instance
-                    if 'neocortix.com' in arg:
-                        host = arg.split('@')[1]
-                        #logger.info( 'forwarding to host %s', host )
-                        mapping['host'] = host
-                    if ':localhost:' in arg:
-                        part = arg.split( ':localhost:')[0].split(':')[1]
-                        assignedPort = int( part )
-                        #logger.info( 'forwarding port %d', assignedPort)
-                        mapping['port'] = assignedPort
-            if mapping:
-                #logger.debug( 'forwarding port %d to %s', mapping['port'], mapping['host'] )
-                mappings.append( mapping )
-    logger.debug( 'mappings: %s', mappings )
-    return mappings
-
 def checkForwarders( liveInstances,  forwarders ):
     badIids = []
     forwardedHosts = set( [fw['host'] for fw in forwarders] )
@@ -209,7 +179,7 @@ def checkRequests( instances,  forwarders, forwarderHost ):
 
 def purgeHostKeys( instanceRecs ):
     '''try to purgeKnownHosts; warn if any exception'''
-    logger.info( 'purgeKnownHosts for %d instances', len(instanceRecs) )
+    logger.info( 'purgeKnownHosts for %d instance(s)', len(instanceRecs) )
     try:
         ncs.purgeKnownHosts( instanceRecs )
     except Exception as exc:
@@ -307,7 +277,7 @@ if __name__ == "__main__":
         else:
             iidsToTerminate.extend( badIids )
 
-    forwarders = findForwarders()
+    forwarders = sshForwarding.findForwarders()
     forwardersByPort = { fw['port']: fw for fw in forwarders }
     for port in sorted( forwardersByPort.keys() ):
         forwarder = forwardersByPort[port]
