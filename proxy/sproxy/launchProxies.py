@@ -16,7 +16,7 @@ import ncscli.ncs as ncs
 import ncscli.batchRunner as batchRunner
 import ncscli.plotInstanceMap as plotInstanceMap
 import ncscli.tellInstances as tellInstances
-import startForwarders  # expected to be in the same directory
+import sshForwarding  # expected to be in the same directory
 
 
 # squid 4.6 has been installed by apt; 4.13 is newer
@@ -165,7 +165,7 @@ if __name__ == '__main__':
     formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
     logging.basicConfig(format=logFmt, datefmt=logDateFmt)
     #batchRunner.logger.setLevel(logging.DEBUG)  # for more verbosity
-    #startForwarders.logger.setLevel(logging.DEBUG)  # for more verbosity
+    #sshForwarding.logger.setLevel(logging.DEBUG)  # for more verbosity
     logger.setLevel(logging.INFO)
 
     ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@',
@@ -183,6 +183,8 @@ if __name__ == '__main__':
     ap.add_argument( '--outDataDir', required=False, help='a path to the output data dir for this run' )
     ap.add_argument( '--portRangeStart', type=int, default=7100,
         help='the beginning of the range of port numbers to forward' )
+    ap.add_argument( '--maxPort', type=int, help='maximum port number to forward',
+        default=7199 )
     ap.add_argument( '--supportedVersions', action='store_true', help='to list supported versions and exit' )
     ap.add_argument( '--cookie' )
     args = ap.parse_args()
@@ -214,8 +216,22 @@ if __name__ == '__main__':
             logger.warning( 'could not get public ip addr of this host')
     if not forwarderHost:
         logger.error( 'forwarderHost not set')
-        exit(1)
-    
+        sys.exit(1)
+
+    # check that enough ports are likely available for forwarding
+    forwarders = sshForwarding.findForwarders()
+    logger.debug( 'forwarders: %s', forwarders )
+    portsInUse = [ fw['port'] for fw in forwarders ]
+    logger.info( 'portsInUse: %s', portsInUse )
+    portsInRange = list( range( args.portRangeStart, args.maxPort+1 ) )
+    availPorts = [port for port in portsInRange if port not in portsInUse]
+    logger.debug( 'availPorts: %s', availPorts )
+
+    if args.nWorkers > len(availPorts):
+        logger.error( 'not enough in-range ports available (%d) for that number of workers (%d)',
+            len(availPorts), args.nWorkers )
+        sys.exit(1)
+
     authToken = args.authToken or os.getenv('NCS_AUTH_TOKEN')
     instTimeLimit = 11*60
 
@@ -290,22 +306,36 @@ if __name__ == '__main__':
             proxyLogFilePath = '/var/log/squid/*.log'
             starterCmd = 'squid'
 
-            configuredInstances = []
+            # assign a forwarding port for each instance
+            forwarders = sshForwarding.findForwarders()
+            logger.debug( 'forwarders: %s', forwarders )
+            portsInUse = [ fw['port'] for fw in forwarders ]
+            logger.info( 'portsInUse: %s', portsInUse )
+
             portMap = {}
-            if True:
-                # configure the proxy properties on each instance
-                ports = list( range( portRangeStart, portRangeStart+len(startedInstances) ) )
-                for index, inst in enumerate( startedInstances ):
-                    iid = inst['instanceId']
-                    portMap[iid] = index + portRangeStart
-                logger.info( 'configuring %d proxies', len(startedInstances) )
-                returnCodes = configureProxies( startedInstances, ports, timeLimit=600 )
-                for index, code in enumerate( returnCodes ):
-                    if code==0:
-                        configuredInstances.append( startedInstances[index] )
-                    else:
-                        iid = startedInstances[index].get('instanceId')
-                        logger.info( 'inst %s was not configured properly', iid[0:8] )
+            ports = []
+            index = 0
+            for inst in startedInstances:
+                while (index + portRangeStart) in portsInUse:
+                    index +=1
+                port = index + portRangeStart
+                ports.append( port )
+                iid = inst['instanceId']
+                portMap[iid] = port
+                index += 1
+            logger.info( 'ports: %s', ports )
+            logger.info( 'portMap: %s', portMap )
+
+            # configure the proxy properties on each instance
+            configuredInstances = []
+            logger.info( 'configuring %d proxies', len(startedInstances) )
+            returnCodes = configureProxies( startedInstances, ports, timeLimit=600 )
+            for index, code in enumerate( returnCodes ):
+                if code==0:
+                    configuredInstances.append( startedInstances[index] )
+                else:
+                    iid = startedInstances[index].get('instanceId')
+                    logger.info( 'inst %s was not configured properly', iid[0:8] )
 
             # start the proxy on each instance 
             logger.info( 'starting %d proxies', len(configuredInstances) )
@@ -361,10 +391,10 @@ if __name__ == '__main__':
 
                 # start the ssh port-forwarding
                 logger.info( 'would forward ports for %d instances', len(goodInstances) )
-                forwarders = startForwarders.startForwarders( goodInstances,
+                forwarders = sshForwarding.startForwarders( goodInstances,
                     forwarderHost=forwarderHost,
                     portMap=portMap, targetPort=3128,
-                    portRangeStart=portRangeStart, maxPort=portRangeStart+100,
+                    portRangeStart=portRangeStart, maxPort=args.maxPort,
                     forwardingCsvFilePath=outDataDir+'/sshForwarding.csv'
                     )
                 if len( forwarders ) < len( goodInstances ):
