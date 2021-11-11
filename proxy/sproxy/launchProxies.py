@@ -227,6 +227,16 @@ if __name__ == '__main__':
     availPorts = [port for port in portsInRange if port not in portsInUse]
     logger.debug( 'availPorts: %s', availPorts )
 
+    preopened = sshForwarding.preopenPorts( args.portRangeStart, 
+        args.maxPort, args.nWorkers, ipAddr='0.0.0.0'
+        )
+    preopenedPorts = preopened.get('ports', [])
+    logger.info( 'preopened ports: %s', preopenedPorts )
+    if len( preopenedPorts ) < args.nWorkers:
+        logger.error( 'not enough ports available (%d not %d)', len( preopenedPorts ), args.nWorkers )
+        sys.exit( 1 )
+
+    # this test is redundant at best
     if args.nWorkers > len(availPorts):
         logger.error( 'not enough in-range ports available (%d) for that number of workers (%d)',
             len(availPorts), args.nWorkers )
@@ -307,18 +317,23 @@ if __name__ == '__main__':
             starterCmd = 'squid'
 
             # assign a forwarding port for each instance
+            '''
             forwarders = sshForwarding.findForwarders()
             logger.debug( 'forwarders: %s', forwarders )
             portsInUse = [ fw['port'] for fw in forwarders ]
             logger.info( 'portsInUse: %s', portsInUse )
+            '''
 
             portMap = {}
             ports = []
             index = 0
             for inst in startedInstances:
+                '''
                 while (index + portRangeStart) in portsInUse:
                     index +=1
                 port = index + portRangeStart
+                '''
+                port = preopenedPorts[index]
                 ports.append( port )
                 iid = inst['instanceId']
                 portMap[iid] = port
@@ -335,7 +350,7 @@ if __name__ == '__main__':
                     configuredInstances.append( startedInstances[index] )
                 else:
                     iid = startedInstances[index].get('instanceId')
-                    logger.info( 'inst %s was not configured properly', iid[0:8] )
+                    logger.info( 'inst %s was not configured properly (RC %d)', iid[0:8], code )
 
             # start the proxy on each instance 
             logger.info( 'starting %d proxies', len(configuredInstances) )
@@ -388,6 +403,9 @@ if __name__ == '__main__':
                 goodInstances = [inst for inst in goodInstances if inst['instanceId'] in goodIids ]
                 with open( outDataDir + '/startedWorkers.json','w' ) as outFile:
                     json.dump( goodInstances, outFile, indent=2 )
+
+                for sock in preopened.get('sockets', [] ):
+                    sshForwarding.preclose( sock )
 
                 # start the ssh port-forwarding
                 logger.info( 'would forward ports for %d instances', len(goodInstances) )
