@@ -179,7 +179,7 @@ def checkRequests( instances,  forwarders, forwarderHost ):
 
 def purgeHostKeys( instanceRecs ):
     '''try to purgeKnownHosts; warn if any exception'''
-    logger.info( 'purgeKnownHosts for %d instance(s)', len(instanceRecs) )
+    logger.debug( 'purgeKnownHosts for %d instance(s)', len(instanceRecs) )
     try:
         ncs.purgeKnownHosts( instanceRecs )
     except Exception as exc:
@@ -322,7 +322,7 @@ if __name__ == "__main__":
                 #logger.info( 'forwarded host %s matched a live instance', fw['host'])
                 logger.info( 'forwarding %s:%s', forwarderHost, fw['port'])
             else:
-                logger.warning( 'forwarded host %s did not match a live instance', fw['host'])
+                logger.info( 'forwarded host %s did not match a live instance', fw['host'])
 
     iidsToTerminate = set( iidsToTerminate )
     terminatedIids = []
