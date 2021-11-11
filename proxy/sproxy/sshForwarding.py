@@ -5,8 +5,10 @@ start ssh port-forwarding processes for NCS workers
 
 # standard library modules
 import argparse
+import contextlib
 import json
 import logging
+import socket
 import subprocess
 # third-party modules
 import psutil
@@ -19,6 +21,73 @@ logger.setLevel(logging.INFO)
 class g_:
     serverAliveInterval = 30
     serverAliveCountMax = 12
+
+
+# some port-reservation code adapted from https://github.com/Yelp/ephemeral-port-reserve
+
+def preopen(ip, port):
+    ''' open socket with SO_REUSEADDR and listen on it'''
+    port = int(port)
+    s = socket.socket()
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    logger.debug( 'binding ip %s port %d', ip, port )
+    s.bind((ip, port))
+
+    # the connect below deadlocks on kernel >= 4.4.0 unless this arg is greater than zero
+    s.listen(1)
+    return s
+
+def preclose(s):
+    sockname = s.getsockname()
+    # get the port into a TIME_WAIT state
+    with contextlib.closing(socket.socket()) as s2:
+        s2.connect(sockname)
+        s.accept()
+    s.close()
+    # return sockname[1]
+
+def preopenPorts( startPort, maxPort, nPortsReq, ipAddr='0.0.0.0' ):
+    results = {}
+    sockets = []
+    ports = []
+    '''
+    gotPorts = False
+    while not gotPorts:
+        try:
+            for port in range( startPort, startPort+nPorts ):
+                logger.info( 'preopening port %d', port )
+                sock = preopen( ipAddr, port )
+                sockets.append( sock )
+            gotPorts = True
+        except OSError as exc:
+            logger.warning( 'got exception (%s) %s', type(exc), exc, exc_info=False )
+            startPort += nPorts
+            sockets = []
+            if startPort >= maxPort:
+                break
+    if not gotPorts:
+        logger.error( 'search for available ports exceeded maxPort (%d)', maxPort )
+        return results
+    '''
+    for port in range( startPort, maxPort+1 ):
+        #logger.info( 'would preopen port %d', port )
+        try:
+            sock = preopen( ipAddr, port )
+        except OSError as exc:
+            if exc.errno == 98:
+                logger.info( 'port %d already in use', port )
+            else:
+                logger.info( 'got exception (%s) %s', type(exc), exc, exc_info=False )
+        else:
+            ports.append( port )
+            sockets.append( sock )
+        if len( ports ) >= nPortsReq:
+            logger.info( 'success')
+            break
+    if ports:
+        results['ports'] = ports
+        results['sockets'] = sockets
+    return results
 
 def findForwarders():
     mappings = []
