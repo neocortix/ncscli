@@ -218,7 +218,7 @@ if __name__ == '__main__':
         logger.error( 'forwarderHost not set')
         sys.exit(1)
 
-    # check that enough ports are likely available for forwarding
+    # for diagnostics, find which ports are already in use
     forwarders = sshForwarding.findForwarders()
     logger.debug( 'forwarders: %s', forwarders )
     portsInUse = [ fw['port'] for fw in forwarders ]
@@ -235,14 +235,19 @@ if __name__ == '__main__':
     if len( preopenedPorts ) < args.nWorkers:
         logger.error( 'not enough ports available (%d not %d)', len( preopenedPorts ), args.nWorkers )
         sys.exit( 1 )
-
+    '''
     # this test is redundant at best
     if args.nWorkers > len(availPorts):
         logger.error( 'not enough in-range ports available (%d) for that number of workers (%d)',
             len(availPorts), args.nWorkers )
         sys.exit(1)
+    '''
 
     authToken = args.authToken or os.getenv('NCS_AUTH_TOKEN')
+    if not authToken:
+        logger.error( 'please provide --authToken or set env var NCS_AUTH_TOKEN')
+        sys.exit( 1 )
+
     instTimeLimit = 11*60
 
     # may create a symlink to a worker dir, if the specified workerDir is not a directory
@@ -317,29 +322,17 @@ if __name__ == '__main__':
             starterCmd = 'squid'
 
             # assign a forwarding port for each instance
-            '''
-            forwarders = sshForwarding.findForwarders()
-            logger.debug( 'forwarders: %s', forwarders )
-            portsInUse = [ fw['port'] for fw in forwarders ]
-            logger.info( 'portsInUse: %s', portsInUse )
-            '''
-
             portMap = {}
             ports = []
             index = 0
             for inst in startedInstances:
-                '''
-                while (index + portRangeStart) in portsInUse:
-                    index +=1
-                port = index + portRangeStart
-                '''
                 port = preopenedPorts[index]
                 ports.append( port )
                 iid = inst['instanceId']
                 portMap[iid] = port
                 index += 1
-            logger.info( 'ports: %s', ports )
-            logger.info( 'portMap: %s', portMap )
+            logger.debug( 'ports: %s', ports )
+            logger.debug( 'portMap: %s', portMap )
 
             # configure the proxy properties on each instance
             configuredInstances = []
