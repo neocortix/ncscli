@@ -25,9 +25,38 @@ class ExtracttitlesSpider(CrawlSpider):
             self.logger.info( 'using defualt start_urls (and domain): %s', self.start_urls )
 
     rules = [
-        scrapy.spiders.Rule(LinkExtractor(allow=(), deny=()), callback='parse_item', follow=True)
+        scrapy.spiders.Rule( LinkExtractor(allow=(), deny=()),  # 'raw.githubusercontent.com'
+            callback='parse_item', follow=True
+            )
     ]
 
     def parse_item(self, response):
-        title = response.css('title::text').get()
-        yield { 'url': response.url, 'title': title }
+        #self.logger.debug( 'response type: %s', type(response) )
+        #self.logger.debug( 'response: %s', dir(response) )
+        respheaders = response.headers  # .to_unicode_dict()
+        #self.logger.debug( 'response.headers type: %s', type(respheaders) )
+        #self.logger.debug( 'response.headers: %s', respheaders )
+        contentType = respheaders.get( 'Content-Type' )
+        #self.logger.debug( 'contentType: %s', contentType )
+        isHtml = False
+        #if contentType==b'text/html' or contentType=='text/html':
+        if b'text/html' in contentType:  # or 'text/html' in contentType:
+            #self.logger.debug( 'response is HTML')
+            isHtml = True
+        elif b'application/xml' in contentType:
+            isXml = True
+            if 'feedformat=atom' in response.url or 'feed=atom' in response.url:
+                self.logger.info( 'ATOM feed: %s', response.url )
+            else:
+                self.logger.info( 'XML response: %s', response )
+        else:
+            if b'text/plain' not in contentType:
+                self.logger.info( 'response is NOT HTML; content-type: %s, response type: %s',
+                    contentType, type(response)
+                    )
+                self.logger.info( 'offending response: %s', response )
+        if isHtml:
+            title = response.css('title::text').get()
+            yield { 'url': response.url, 'title': title }
+        else:
+            return []
