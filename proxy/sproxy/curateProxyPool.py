@@ -24,6 +24,7 @@ import uuid
 
 # third-party module(s)
 import dateutil.parser
+from ncscli.tellInstances import anyFound
 import pymongo
 import requests
 
@@ -421,6 +422,14 @@ def getLiveInstances( startedIids, authToken ):
             #    deadInstances.append( inst )
     return liveInstances
 
+def exportProxyAddrs( dataDirPath, forwarders, forwarderHost ):
+    '''save forwarding addresses (host:port) for forwarded instances'''
+    proxyListFilePath = os.path.join( dataDirPath, 'proxyAddrs.txt' )
+    if forwarders:
+        with open( proxyListFilePath, 'w' ) as proxyListFile:
+            for fw in forwarders:
+                print( '%s:%s' % (forwarderHost, fw['port']), file=proxyListFile )
+
 def launchProxies( dataDirPath, db, args ):
     '''recruits proxy nodes, starts forwarders, updates database; may raise raise ValueError'''
     startDateTime = datetime.datetime.now( datetime.timezone.utc )
@@ -441,7 +450,7 @@ def launchProxies( dataDirPath, db, args ):
         mQuery =  {'state': 'checked' }
         nExisting = db['checkedInstances'].count_documents( mQuery )
         logger.info( '%d workers checked', nExisting )
-        nToLaunch = int( (args.target - nExisting) * 3 )
+        nToLaunch = int( (args.target - nExisting) * 1.0 )
         nToLaunch = max( nToLaunch, 0 )
 
         nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
@@ -517,8 +526,13 @@ def launchProxies( dataDirPath, db, args ):
             statusRec['_id' ] = statusRec['instanceId']
             db['badInstalls'].insert_one( statusRec )
     if nRecruited and sigtermNotSignaled():
+        logger.info( 'preclosing ports')
         for sock in preopened.get('sockets', [] ):
-            sshForwarding.preclose( sock )
+            try:
+                sshForwarding.preclose( sock )
+            except Exception as exc:
+               logger.warning( 'exception (%s) preclosing %s', type(exc), sock, exc_info=not False )
+
         # start the ssh port-forwarding
         logger.info( 'would forward ports for %d instances', len(goodInstances) )
         forwarders = sshForwarding.startForwarders( goodInstances,
@@ -557,6 +571,11 @@ def saveErrorsByIid( errorsByIid, db, operation=None ):
             checkedColl.update_one( {'_id': iid}, { "$inc": { "nFailures": 1 } } )
             record.update( { 'status': 'badClock', 'returnCode': discrep } )
             errorsColl.insert_one( record )
+        elif 'notForwarded' in err:
+            returnCode = err['notForwarded']
+            checkedColl.update_one( {'_id': iid}, { "$inc": { "nFailures": 1 } } )
+            record.update( { 'status': 'notForwarded', 'returnCode': returnCode } )
+            errorsColl.insert_one( record )
         elif 'status' in err:
             status = err['status']
             if isinstance( status, Exception ):
@@ -570,7 +589,7 @@ def saveErrorsByIid( errorsByIid, db, operation=None ):
                 record.update({ 'status': 'error', 'returnCode': status })
                 errorsColl.insert_one( record )
         else:
-            logger.warning( 'checkInstanceClocks instance %s gave status (%s) "%s"', iid[0:8], type(err), err )
+            logger.warning( 'instance %s gave status (%s) "%s"', iid[0:8], type(err), err )
             record.update({ 'status': 'misc', 'msg': str(err) })
             errorsColl.insert_one( record )
         # change (or omit) this if wanting to allow more than one failure before marking it failed
@@ -581,14 +600,62 @@ def saveErrorsByIid( errorsByIid, db, operation=None ):
             state = 'failed'
         checkedColl.update_one( {'_id': iid}, { "$set": { "state": state } } )
 
-def checkGethProcesses( instances, dataDirPath ):
+def checkForwarders( liveInstances,  forwarders ):
+    errorsByIid = {}
+    forwardedHosts = set( [fw['host'] for fw in forwarders] )
+    #logger.info( 'forwardedHosts: %s', forwardedHosts )
+
+    portsUsed = {}
+    for fw in forwarders:
+        fwPort = fw['port']
+        if fwPort in portsUsed:
+            logger.warning( 'non-unique port %d for host %s in use by %s',
+                fwPort, fw['host'], portsUsed[ fwPort ] )
+        else:
+            portsUsed[fwPort] = fw['host']
+
+    for inst in liveInstances:
+        iid = inst['instanceId']
+        instHost = inst['ssh']['host']
+        if instHost not in forwardedHosts:
+            logger.warning( 'NOT forwarding port for %s', iid[0:8] )
+            errorsByIid[ iid ] = {'notForwarded': 1 }
+    return errorsByIid
+
+def checkRequests( instances,  forwarders, forwarderHost ):
+    targetUrl = 'https://loadtest-target.neocortix.com'
+    logger.info( 'checking %d instance(s)', len(instances) )
+    errorsByIid = {}
+    timeouts = (10, 30)
+    forwardersByHost = { fw['host']: fw for fw in forwarders }
+    for inst in instances:
+        instHost = inst['ssh']['host']
+        fw = forwardersByHost[ instHost ]
+        proxyAddr = '%s:%s' % (forwarderHost, fw['port'])
+        proxyUrl = 'http://' + proxyAddr
+        proxyDict = {'http': proxyUrl, 'https': proxyUrl, 'ftp': proxyUrl }
+        iid = inst['instanceId']
+        logger.debug( 'checking %s; iid: %s', fw, iid )
+        try:
+            resp = requests.get( targetUrl, proxies=proxyDict, verify=False, timeout=timeouts )
+            if resp.status_code in range( 200, 400 ):
+                logger.debug( 'good response %d for %s (inst %s)', resp.status_code, proxyAddr, iid[0:8] )
+            else:
+                logger.warning( 'bad response %d for %s (instance %s)', resp.status_code, proxyAddr, iid )
+                errorsByIid[ iid ] = {'status': resp.status_code}
+        except Exception as exc:
+            logger.warning( 'exception (%s) for iid %s "%s"', type(exc), iid, exc )
+            errorsByIid[ iid ] = {'exception': exc }
+    return errorsByIid
+
+def checkWorkerProcesses( instances, dataDirPath, procName ):
+    '''check for a running process with the given (partial) process name on each instance'''
     logger.info( 'checking %d instance(s)', len(instances) )
 
-    cmd = "ps -ef | grep -v grep | grep 'geth' > /dev/null"
-    # check for a running geth process on each instance
+    cmd = "ps -ef | grep -v grep | grep '%s' > /dev/null" % procName
     stepStatuses = tellInstances.tellInstances( instances, cmd,
         timeLimit=15*60,
-        resultsLogFilePath = dataDirPath + '/checkGethProcesses.jlog',
+        resultsLogFilePath = dataDirPath + '/checkWorkerProcesses.jlog',
         knownHostsOnly=True, stopOnSigterm=True
         )
     #logger.info( 'proc statuses: %s', stepStatuses )
@@ -630,7 +697,7 @@ def checkInstanceClocks( liveInstances, dataDirPath ):
                     discrep =delta.total_seconds()
                     logger.debug( 'discrep: %.1f seconds on inst %s',
                         discrep, iid )
-                    if discrep > 4 or discrep < -1:
+                    if discrep > 4 or discrep < -2:
                         #logger.warning( 'bad time discrep: %.1f', discrep )
                         errorsByIid[ iid ] = {'discrep': discrep }
     if unfoundIids:
@@ -641,15 +708,15 @@ def checkInstanceClocks( liveInstances, dataDirPath ):
     logger.info( '%d errorsByIid: %s', len(errorsByIid), errorsByIid )
     return errorsByIid
 
-def retrieveLogs( goodInstances, dataDirPath, poolDirPath ):
-    '''retrieve logs from nodes, storing them in dataDirPath/nodeLogs subdirectories'''
+def retrieveLogs( goodInstances, dataDirPath, logParentDirPath=None ):
+    '''retrieve logs from nodes, storing them in dataDirPath/workerLogs subdirectories'''
     logger.info( 'retrieving logs for %d instance(s)', len(goodInstances) )
 
-    nodeLogFilePath = poolDirPath + '/geth.*log'
+    nodeLogFilePath = '/var/log/squid/*.log'
 
     # download the log file from each instance
     stepStatuses = tellInstances.tellInstances( goodInstances,
-        download=nodeLogFilePath, downloadDestDir=dataDirPath +'/nodeLogs',
+        download=nodeLogFilePath, downloadDestDir=dataDirPath +'/workerLogs',
         timeLimit=15*60,
         knownHostsOnly=True, stopOnSigterm=True
         )
@@ -659,7 +726,7 @@ def retrieveLogs( goodInstances, dataDirPath, poolDirPath ):
 
 def checkLogs( liveInstances, dataDirPath ):
     '''check contents of logs from nodes, save errorSummary.csv, return errorsByIid'''
-    logsDirPath = os.path.join( dataDirPath, 'nodeLogs' )
+    logsDirPath = os.path.join( dataDirPath, 'workerLogs' )
     logDirs = os.listdir( logsDirPath )
     logger.info( '%d logDirs found', len(logDirs ) )
 
@@ -667,53 +734,37 @@ def checkLogs( liveInstances, dataDirPath ):
 
     errorsByIid = {}
 
+    logFileName = 'cache.log'
     for logDir in logDirs:
         iid = logDir
         iidAbbrev = iid[0:8]
         if iid not in liveIids:
             logger.debug( 'not checking non-live instance %s', iidAbbrev )
             continue
-        logFilePath = os.path.join( logsDirPath, logDir, 'geth.log' )
+        logFilePath = os.path.join( logsDirPath, logDir, logFileName )
         if not os.path.isfile( logFilePath ):
             logger.warning( 'no log file %s', logFilePath )
         elif os.path.getsize( logFilePath ) <= 0:
             logger.warning( 'empty log file "%s"', logFilePath )
         else:
-            connected = False
-            sealed = False
-            latestSealLine = None
+            ready = False
             with open( logFilePath ) as logFile:
                 try:
                     for line in logFile:
                         line = line.rstrip()
                         if not line:
                             continue
-                        if 'ERROR' in line:
-                            if 'Ethereum peer removal failed' in line:
-                                logger.debug( 'ignoring "peer removal failed" for %s', iidAbbrev )
-                                continue
-                            #logger.info( '%s: %s', iidAbbrev, line )
+                        if anyFound( ['FATAL', 'ERROR', 'SECURITY' ], line ):
+                            logger.info( '%s: %s', iidAbbrev, line )
                             theseErrors = errorsByIid.get( iid, [] )
                             theseErrors.append( line )
                             errorsByIid[iid] = theseErrors
-                        elif 'Started P2P networking' in line:
-                            connected = True
-                        elif 'Successfully sealed' in line:
-                            sealed = True
-                            latestSealLine = line
-                    if not connected:
-                        logger.warning( 'instance %s did not initialize fully', iidAbbrev )
-                    if sealed:
-                        #logger.info( 'instance %s has successfully sealed', iidAbbrev )
-                        logger.debug( '%s latestSealLine: %s', iidAbbrev, latestSealLine )
-                        pat = r'\[(.*\|.*)\]'
-                        dateStr = re.search( pat, latestSealLine ).group(1)
-                        if dateStr:
-                            dateStr = dateStr.replace( '|', ' ' )
-                            latestSealDateTime = dateutil.parser.parse( dateStr )
-                            logger.debug( 'latestSealDateTime: %s for %s', latestSealDateTime.isoformat(), iid[0:8] )
+                        elif 'Accepting ' in line:
+                            ready = True
                 except Exception as exc:
                     logger.warning( 'caught exception (%s) %s', type(exc), exc )
+            if not ready:
+                logger.warning( 'instance %s did not say "Accepting"', iidAbbrev )
     logger.info( 'found errors for %d instance(s)', len(errorsByIid) )
     #print( 'errorsByIid', errorsByIid  )
     summaryCsvFilePath = os.path.join( dataDirPath, 'errorSummary.csv' )
@@ -732,7 +783,7 @@ def checkLogs( liveInstances, dataDirPath ):
                 )
     return errorsByIid
 
-def collectGethLogEntries( db, inFilePath, collName ):
+def collectSquidLogEntries( db, inFilePath, collName ):
     '''ingest records from a geth node log into a new or existing mongo collection'''
     collection = db[ collName ]
     nPreexisting = collection.count_documents( {} )
@@ -756,9 +807,9 @@ def collectGethLogEntries( db, inFilePath, collName ):
         allLatest = list( found )
         latestMsgs = [rec['msg'] for rec in allLatest]
         if len( allLatest ) > 1:
-            logger.info( '%d records match latest dateTime in %s', len(allLatest), collName )
+            logger.debug( '%d records match latest dateTime in %s', len(allLatest), collName )
             logger.debug( 'latestMsgs: %s', latestMsgs )
-    datePat = r'\[(.*\|.*)\]'
+    #datePat = r'\[(.*\|.*)\]'
     lineDateTime = datetime.datetime.fromtimestamp( 0, datetime.timezone.utc )
     lineLevel = None
     recs = []
@@ -769,18 +820,19 @@ def collectGethLogEntries( db, inFilePath, collName ):
                 line = line.rstrip()
                 if not line:
                     continue
-                levelPart = line.split()[0]
-                if levelPart in ['INFO', 'WARN', 'ERROR']:
-                    lineLevel = levelPart
-        
-                #lineDateTime = None
-                dateMatch = re.search( datePat, line )
-                dateStr = dateMatch.group(1) if dateMatch else None
+                if anyFound( ['FATAL', 'ERROR', 'SECURITY' ], line ):
+                    lineLevel = 'ERROR'
+                elif 'WARNING' in line:
+                    lineLevel = 'ERROR'
+                else:
+                    lineLevel = 'INFO'
+                # tricky parsing of squid date stamp
+                dateStr = ' '.join( line.split('|')[0].split(' ')[0:2])
                 if dateStr:
-                    dateStr = dateStr.replace( '|', ' ' )
-                    lineDateTime = universalizeDateTime( dateutil.parser.parse( dateStr ) )
+                    dt = dateutil.parser.parse( dateStr )
+                    lineDateTime = universalizeDateTime( dt )
                 if lineDateTime < lastExistingDateTime:
-                    #logger.info( 'skipping old' )
+                    logger.debug( 'skipping old (%s < %s)', lineDateTime, lastExistingDateTime )
                     continue
                 msg = line
                 if lineDateTime == lastExistingDateTime and msg in latestMsgs:
@@ -802,38 +854,6 @@ def collectGethLogEntries( db, inFilePath, collName ):
             if not nPreexisting:
                 collection.create_index( 'dateTime' )
                 collection.create_index( 'level' )
-
-def ingestGethLog( logFile, coll ):
-    '''ingest records from a geth node log into a mongo collection'''
-    logger.debug( 'would ingest %s into %s', logFile.name, coll.name )
-    datePat = r'\[(.*\|.*)\]'
-    lineDateTime = datetime.datetime.fromtimestamp( 0, datetime.timezone.utc )
-    lineLevel = None
-    recs = []
-    for line in logFile:
-        line = line.rstrip()
-        if not line:
-            continue
-        levelPart = line.split()[0]
-        if levelPart in ['INFO', 'WARN', 'ERROR']:
-            lineLevel = levelPart
-
-        #lineDateTime = None
-        dateMatch = re.search( datePat, line )
-        dateStr = dateMatch.group(1) if dateMatch else None
-        if dateStr:
-            dateStr = dateStr.replace( '|', ' ' )
-            lineDateTime = dateutil.parser.parse( dateStr )
-        msg = line
-        recs.append( {
-            'dateTime': lineDateTime.isoformat(),
-            'level': lineLevel,
-            'msg': msg,
-            } )
-    if len(recs):
-        coll.insert_many( recs, ordered=True )
-        coll.create_index( 'dateTime' )
-        coll.create_index( 'level' )
 
 def collectGethJLogEntries( db, inFilePath, collName ):
     collection = db[ collName ]
@@ -858,8 +878,8 @@ def collectGethJLogEntries( db, inFilePath, collName ):
         allLatest = list( found )
         latestMsgs = [rec['msg'] for rec in allLatest]
         if len( allLatest ) > 1:
-            logger.info( '%d records match latest dateTime', len(allLatest) )
-            logger.info( 'latestMsgs: %s', latestMsgs )
+            logger.debug( '%d records match latest dateTime', len(allLatest) )
+            logger.debug( 'latestMsgs: %s', latestMsgs )
     recs = []
 
     with open( inFilePath, 'r' ) as logFile:
@@ -892,9 +912,9 @@ def collectGethJLogEntries( db, inFilePath, collName ):
                 collection.create_index( 'dateTime' )
                 collection.create_index( 'level' )
 
-def processNodeLogFiles( dataDirPath ):
+def processWorkerLogFiles( dataDirPath ):
     '''ingest all new or updated node logs; delete very old log files'''
-    logsDirPath = os.path.join( dataDirPath, 'nodeLogs' )
+    logsDirPath = os.path.join( dataDirPath, 'workerLogs' )
     logDirs = os.listdir( logsDirPath )
     logger.debug( '%d logDirs found', len(logDirs ) )
     # but first, delete very old log files
@@ -905,10 +925,11 @@ def processNodeLogFiles( dataDirPath ):
     #newerThresholdDateTime = datetime.datetime.now( datetime.timezone.utc ) \
     #    - datetime.timedelta( hours=lookBackHours )
 
+    # delete very old log files
     for logDir in logDirs:
-        inFilePath = os.path.join( logsDirPath, logDir, 'geth.jlog' )
+        inFilePath = os.path.join( logsDirPath, logDir, 'cache.jlog' )
         if not os.path.isfile( inFilePath ):
-            inFilePath = os.path.join( logsDirPath, logDir, 'geth.log' )
+            inFilePath = os.path.join( logsDirPath, logDir, 'cache.log' )
         if os.path.isfile( inFilePath ):
             fileModDateTime = datetime.datetime.fromtimestamp( os.path.getmtime( inFilePath ) )
             fileModDateTime = universalizeDateTime( fileModDateTime )
@@ -924,47 +945,49 @@ def processNodeLogFiles( dataDirPath ):
     
     # ingest all new or updated node logs
     loggedCollNames = db.list_collection_names(
-        filter={ 'name': {'$regex': r'^nodeLog_.*'} } )
+        filter={ 'name': {'$regex': r'^workerLog_.*'} } )
     iStartTime = time.time()
     nIngested = 0
+    jlogFileName = 'cache.jlog'  # not really useful for squid
+    logFileName = 'cache.log'
     for logDir in logDirs:
         # logDir is also the instanceId
-        # read geth.jlog, if present, otherwise geth.log
-        inFilePath = os.path.join( logsDirPath, logDir, 'geth.jlog' )
+        # read jlog file, if present, otherwise log file
+        inFilePath = os.path.join( logsDirPath, logDir, jlogFileName )
         if not os.path.isfile( inFilePath ):
-            inFilePath = os.path.join( logsDirPath, logDir, 'geth.log' )
+            inFilePath = os.path.join( logsDirPath, logDir, logFileName )
         if not os.path.isfile( inFilePath ):
             logger.info( 'no file "%s"', inFilePath )
             continue
         elif os.path.getsize( inFilePath ) <= 0:
-            logger.warning( 'empty log file "%s"', inFilePath )
+            logger.info( 'empty log file "%s"', inFilePath )
             continue
-        collName = 'nodeLog_' + logDir
+        collName = 'workerLog_' + logDir
         if collName in loggedCollNames:
             existingGenTime = lastGenDateTime( db[collName] ) - datetime.timedelta(minutes=1)
             fileModDateTime = datetime.datetime.fromtimestamp( os.path.getmtime( inFilePath ) )
             fileModDateTime = universalizeDateTime( fileModDateTime )
             if existingGenTime >= fileModDateTime:
-                #logger.info( 'already posted %s %s %s',
-                #    logDir[0:8], fmtDt( existingGenTime ), fmtDt( fileModDateTime )  )
+                logger.debug( 'already ingested %s (%s >= %s)',
+                    logDir[0:8], existingGenTime, fileModDateTime  )
                 continue
         logger.debug( 'ingesting log for %s', logDir[0:16] )
         try:
             if inFilePath.endswith( '.jlog' ):
                 collectGethJLogEntries( db, inFilePath, collName )
             else:
-                collectGethLogEntries( db, inFilePath, collName )
+                collectSquidLogEntries( db, inFilePath, collName )
             nIngested += 1
         except Exception as exc:
             logger.warning( 'exception (%s) ingesting %s', type(exc), inFilePath, exc_info=not False )
     logger.info( 'ingesting %d logs took %.1f seconds', nIngested, time.time()-iStartTime)
 
-def checkEdgeNodes( dataDirPath, db, args ):
-    '''checks status of edge nodes, updates database'''
+def checkWorkers( dataDirPath, db, forwarderHost, args ):
+    '''checks status of worker instances, updates database'''
     if not db.list_collection_names():
         logger.warning( 'no collections found for db %s', dbName )
         return
-    checkerTimeLimit = args.timeLimit
+    #checkerTimeLimit = args.timeLimit
     startedInstances = getStartedInstances( db )
 
     instancesByIid = {inst['instanceId']: inst for inst in startedInstances }
@@ -985,8 +1008,8 @@ def checkEdgeNodes( dataDirPath, db, args ):
     logger.info( '%d instances checkable', len(checkables) )
     checkedDateTime = datetime.datetime.now( datetime.timezone.utc )
     checkedDateTimeStr = checkedDateTime.isoformat()
-    dateTimeTagFormat = '%Y-%m-%d_%H%M%S'  # cant use iso format dates in filenames because colons
-    dateTimeTag = checkedDateTime.strftime( dateTimeTagFormat )
+    #dateTimeTagFormat = '%Y-%m-%d_%H%M%S'  # cant use iso format dates in filenames because colons
+    #dateTimeTag = checkedDateTime.strftime( dateTimeTagFormat )
     
     # find out which checkable instances are live
     checkableIids = [inst['instanceId'] for inst in checkables ]
@@ -1033,19 +1056,34 @@ def checkEdgeNodes( dataDirPath, db, args ):
 
     checkables = [inst for inst in checkables if inst['instanceId'] not in errorsByIid]
     logger.info( '%d instances checkable', len(checkables) )
-    errorsByIid = checkGethProcesses( checkables, dataDirPath )
-    saveErrorsByIid( errorsByIid, db, operation='checkGethProcesses' )
+    errorsByIid = checkWorkerProcesses( checkables, dataDirPath, 'squid' )
+    saveErrorsByIid( errorsByIid, db, operation='checkWorkerProcesses' )
 
     checkables = [inst for inst in checkables if inst['instanceId'] not in errorsByIid]
     logger.info( '%d instances checkable', len(checkables) )
 
-    #saveErrorsByIid( errorsByIid, db, operation='collectPrimaryAccounts' )
+    errorsByIid = retrieveLogs( checkables, dataDirPath )
+    errorsByIid = checkLogs( checkables, dataDirPath )
+    saveErrorsByIid( errorsByIid, db, operation='checkLogs' )
+    processWorkerLogFiles( dataDirPath )
 
-    nodeDataDirPath = 'ether/%s' % args.configName
-    errorsByIid = retrieveLogs( checkables, dataDirPath, nodeDataDirPath )
-    #checkLogs( checkables, dataDirPath )
-    processNodeLogFiles( dataDirPath )
-    return
+    forwarders = sshForwarding.findForwarders()
+    errorsByIid = checkForwarders( checkables,  forwarders )
+    logger.info( 'checkForwarders errorsByIid: %s', errorsByIid )
+    saveErrorsByIid( errorsByIid, db, operation='checkForwarders' )
+    checkables = [inst for inst in checkables if inst['instanceId'] not in errorsByIid]
+
+    # suppress warnings that would occur for untrusted https certs
+    logging.getLogger('py.warnings').setLevel( logging.ERROR )
+    errorsByIid = checkRequests( checkables,  forwarders, forwarderHost )
+    # set warnings back to normal
+    logging.getLogger('py.warnings').setLevel( logging.WARNING )
+    saveErrorsByIid( errorsByIid, db, operation='checkRequests' )
+    checkables = [inst for inst in checkables if inst['instanceId'] not in errorsByIid]
+
+    checkedHosts = [inst['ssh']['host'] for inst in checkables]
+    goodForwarders = [fw for fw in forwarders if fw['host'] in checkedHosts ]
+    exportProxyAddrs( dataDirPath, goodForwarders, forwarderHost )
 
 
 if __name__ == "__main__":
@@ -1055,6 +1093,7 @@ if __name__ == "__main__":
     logDateFmt = '%Y/%m/%d %H:%M:%S'
     formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
     logging.basicConfig(format=logFmt, datefmt=logDateFmt)
+    logging.captureWarnings( True )
     ncs.logger.setLevel(logging.INFO)
     #runDistributedBlender.logger.setLevel(logging.INFO)
     logger.setLevel(logging.INFO)
@@ -1065,7 +1104,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser( description=__doc__,
         fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( 'action', help='the action to perform', 
-        choices=['launch'
+        choices=[ 'launch', 'check', 'terminateBad', 'maintain',
             ]
         )
     '''
@@ -1084,7 +1123,7 @@ if __name__ == "__main__":
     ap.add_argument( '--filter', help='json to filter instances for launch',
         default = '{ "cpu-arch": "aarch64", "dar": ">=99", "storage": ">=2000000000" }' )
     ap.add_argument( '--installerFileName', help='a script to run on new instances',
-        default='netconfig/installAndStartGeth.sh' )
+        default='squidWorker/installCustomSquid.sh' )
     ap.add_argument( '--instanceId', help='id of instance (for authorize or deauthorize)' )
     ap.add_argument( '--forwarderHost', help='IP addr (or host name) of the forwarder host',
         default='localhost' )
@@ -1098,7 +1137,7 @@ if __name__ == "__main__":
     ap.add_argument( '--sshAgent', type=boolArg, default=False, help='whether or not to use ssh agent' )
     ap.add_argument( '--sshClientKeyName', help='the name of the uploaded ssh client key to use (advanced)' )
     ap.add_argument( '--timeLimit', type=int, help='time limit (in seconds) for the whole job',
-        default=20*60 )
+        default=11*60 )
     args = ap.parse_args()
 
     logger.info( 'performing action "%s" for pool "%s"', args.action, args.pool )
@@ -1110,10 +1149,20 @@ if __name__ == "__main__":
     dbName = 'sproxy_' + args.pool
     db = mclient[dbName]
 
+    forwarderHost = args.forwarderHost
+    if not forwarderHost:
+        try:
+            forwarderHost = requests.get( 'https://api.ipify.org' ).text
+        except forwarderHost:
+            logger.warning( 'could not get public ip addr of this host')
+
     if args.action == 'launch':
         launchProxies( dataDirPath, db, args )
     elif args.action == 'check':
-        checkEdgeNodes( dataDirPath, db, args )
+        if not forwarderHost:
+            logger.error( 'forwarderHost not set')
+            sys.exit( 'forwarderHost not set' )
+        checkWorkers( dataDirPath, db, forwarderHost, args )
     elif args.action == 'maintain':
         myPid = os.getpid()
         logger.info( 'process id %d', myPid )
@@ -1145,11 +1194,9 @@ if __name__ == "__main__":
         if not args.authToken:
             sys.exit( 'error: can not terminate because no authToken was passed')
         terminatedDateTimeStr = datetime.datetime.now( datetime.timezone.utc ).isoformat()
-        # retrieve list of signers so we can deauthorize each before terminating
-        allSigners = list( db['allSigners'].find() )
-        logger.info( 'len(allSigners): %d', len(allSigners) )
-        signersByIid = {signer['instanceId']: signer for signer in allSigners }
-        logger.debug( 'signer iids: %s', signersByIid.keys() )
+        # get list of forwarders so we can terminate those for dying instances
+        forwarders = sshForwarding.findForwarders()
+        forwardersByHost = { fw['host']: fw for fw in forwarders }
 
         coll = db['checkedInstances']
         wereChecked = list( coll.find() ) # fully iterates the cursor, getting all records
@@ -1158,13 +1205,17 @@ if __name__ == "__main__":
         for checkedInst in wereChecked:
             state = checkedInst.get( 'state')
             #logger.info( 'checked state %s', state )
-            if state in ['failed', 'excepted', 'stopped' ]:
+            if state in ['failed', 'excepted', 'stopped', 'notForwarded' ]:
                 iid = checkedInst['_id']
-                if iid in signersByIid:
-                    logger.info( 'terminateBad not deauthorizing %s', iid )
-                    #authorizeSigner( db, args.configName, iid, False )
                 abbrevIid = iid[0:16]
                 logger.warning( 'would terminate %s', abbrevIid )
+                instHost = checkedInst['ssh']['host']
+                if instHost in forwardersByHost:
+                    pid = forwardersByHost[instHost].get('pid')
+                    if pid:
+                        logger.info( 'canceling forwarding (pid %d) for %s', pid, iid[0:8] )
+                        os.kill( pid, signal.SIGTERM )
+
                 toTerminate.append( iid )
                 if 'instanceId' not in checkedInst:
                     checkedInst['instanceId'] = iid
