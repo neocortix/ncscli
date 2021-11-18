@@ -120,7 +120,7 @@ def checkLogs( liveInstances, dataDirPath ):
                     elif 'Accepting ' in line:
                         ready = True
             if not ready:
-                logger.warning( 'instance %s did say "Accepting"', iidAbbrev )
+                logger.warning( 'instance %s did not say "Accepting"', iidAbbrev )
     logger.info( 'found errors for %d instance(s)', len(errorsByIid) )
     #print( 'errorsByIid', errorsByIid  )
     '''
