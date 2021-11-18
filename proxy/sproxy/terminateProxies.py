@@ -57,7 +57,7 @@ if __name__ == "__main__":
                 if instHost in forwardersByHost:
                     pid = forwardersByHost[instHost].get('pid')
                     if pid:
-                        logger.debug( 'cancelling forwarding (pid %d) for %s', pid, iid[0:8] )
+                        logger.debug( 'canceling forwarding (pid %d) for %s', pid, iid[0:8] )
                         os.kill( pid, signal.SIGTERM )
 
             jobId = instances[0].get('job')
