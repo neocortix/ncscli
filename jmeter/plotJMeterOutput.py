@@ -1152,10 +1152,10 @@ if __name__ == "__main__":
         axes[0,0].plot(startRelTimesAndMSPRsOther[0],startRelTimesAndMSPRsOtherMS, linestyle='', color=(0.0, 0.9, 0.0),marker='o',markersize=plotMarkerSize, label="Other")
         axes[0,0].set(ylim=(0,4000))
         xticks = axes[0,0].get_xticks()
-        lgnd = axes[0,0].legend(fontsize='medium',loc="upper right")
-        lgnd.legendHandles[0]._legmarker.set_markersize(8)
-        lgnd.legendHandles[1]._legmarker.set_markersize(8)
-        lgnd.legendHandles[2]._legmarker.set_markersize(8)
+        lgnd = axes[0,0].legend(fontsize='medium',loc="upper right",markerscale=6)
+        #lgnd.legendHandles[0]._legmarker.set_markersize(8)
+        #lgnd.legendHandles[1]._legmarker.set_markersize(8)
+        #lgnd.legendHandles[2]._legmarker.set_markersize(8)
 
         axes[0,0].set_title('Response Time Over Time')
         axes[0,0].set_xlabel('Time (s)')
@@ -1256,10 +1256,10 @@ if __name__ == "__main__":
         axes[2,0].plot(startRelTimesAndCodesOther[0],startRelTimesAndCodesOther[1], linestyle='', color=(0.0, 0.9, 0.0),marker='o',markersize=plotMarkerSize, label="Other")
         axes[2,0].set(ylim=(0,700))
         xticks = axes[2,0].get_xticks()
-        lgnd = axes[2,0].legend(fontsize='medium',loc="upper right")
-        lgnd.legendHandles[0]._legmarker.set_markersize(8)
-        lgnd.legendHandles[1]._legmarker.set_markersize(8)
-        lgnd.legendHandles[2]._legmarker.set_markersize(8)
+        lgnd = axes[2,0].legend(fontsize='medium',loc="upper right",markerscale=6)
+        #lgnd.legendHandles[0]._legmarker.set_markersize(8)
+        #lgnd.legendHandles[1]._legmarker.set_markersize(8)
+        #lgnd.legendHandles[2]._legmarker.set_markersize(8)
 
         axes[2,0].set_title('Response Code Over Time')
         axes[2,0].set_xlabel('Time (s)')
@@ -1368,10 +1368,10 @@ if __name__ == "__main__":
         axes[1,0].plot(startRelTimesAndMSPRsOther[0],startRelTimesAndMSPRsOtherMS, linestyle='', color=(0.0, 0.9, 0.0),marker='o',markersize=plotMarkerSize, label="Other")
         axes[1,0].set(ylim=(0,4000))
         xticks = axes[1,0].get_xticks()
-        lgnd = axes[1,0].legend(fontsize='medium',loc="upper right")
-        lgnd.legendHandles[0]._legmarker.set_markersize(8)
-        lgnd.legendHandles[1]._legmarker.set_markersize(8)
-        lgnd.legendHandles[2]._legmarker.set_markersize(8)
+        lgnd = axes[1,0].legend(fontsize='medium',loc="upper right",markerscale=6)
+        #lgnd.legendHandles[0]._legmarker.set_markersize(8)
+        #lgnd.legendHandles[1]._legmarker.set_markersize(8)
+        #lgnd.legendHandles[2]._legmarker.set_markersize(8)
 
         axes[1,0].set_title('Response Time Over Time')
         axes[1,0].set_xlabel('Time (s)')
@@ -1527,6 +1527,9 @@ if __name__ == "__main__":
     print("</center>",file=outputFile)
     print("</TD></TR></TABLE>",file=outputFile)
 
+    totalReceivedKBytesPerSecondByDevice = []
+    totalSentKBytesPerSecondByDevice = []
+
     if len(numberedReducedLabels)>0:
         # create another page for ResponseTimesByLabel plots
         print("<BR><BR>",file=outputFile)
@@ -1595,7 +1598,7 @@ if __name__ == "__main__":
         totalNumSamples = numberBadCodes # total = bad + good
         for i in range(0,len(badCodesByLabel)):
             totalNumSamples += len(startRelTimesAndMSPRsByNumberedLabel[i][0])
-        totalBadCodePercentage = numberBadCodes/totalNumSamples*100.0
+        totalBadCodePercentage = numberBadCodes/totalNumSamples*100.0 if totalNumSamples > 0 else 0
         # numSamples = len(startRelTimesAndMSPRsAll[0])
         # print("totalNumSamples = %d    numSamples = %d"%(totalNumSamples,numSamples))
         averageMs = 1000.0*np.mean(startRelTimesAndMSPRsAll[1])
@@ -1612,8 +1615,6 @@ if __name__ == "__main__":
         totalReceivedKBytesPerSecond = totalReceivedBytes/testDuration/1000.0
         totalSentKBytesPerSecond = totalSentBytes/testDuration/1000.0
 
-        totalReceivedKBytesPerSecondByDevice = []
-        totalSentKBytesPerSecondByDevice = []
         for i in range(0,len(totalReceivedBytesByDevice)):
           totalReceivedKBytesPerSecondByDevice.append(totalReceivedBytesByDevice[i]/testDuration/1000.0)
           totalSentKBytesPerSecondByDevice.append(totalSentBytesByDevice[i]/testDuration/1000.0)
@@ -1865,7 +1866,7 @@ if __name__ == "__main__":
         totalNumSamples = numberBadCodesByDevice[i] # total = bad + good
         for ii in range(0,len(badCodesByLabelByDevice[i])):
             totalNumSamples += len(startRelTimesAndMSPRsByNumberedLabelByDevice[i][ii][0])
-        totalBadCodePercentage = numberBadCodesByDevice[i]/totalNumSamples*100.0
+        totalBadCodePercentage = numberBadCodesByDevice[i]/totalNumSamples*100.0 if totalNumSamples > 0 else 0
         averageMs = 1000.0*np.mean(culledRelativeResponseData[i][2])
         minMs = 1000.0*np.min(culledRelativeResponseData[i][2])
         maxMs = 1000.0*np.max(culledRelativeResponseData[i][2])
@@ -1894,8 +1895,14 @@ if __name__ == "__main__":
         print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%percentile95ms,file=outputFile)
         print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%percentile99ms,file=outputFile)
         print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%transactionsPerSecond,file=outputFile)
-        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%totalReceivedKBytesPerSecondByDevice[i],file=outputFile)
-        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%totalSentKBytesPerSecondByDevice[i],file=outputFile)
+        if i < len(totalReceivedKBytesPerSecondByDevice):
+            print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%totalReceivedKBytesPerSecondByDevice[i],file=outputFile)
+        else:
+            print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%0,file=outputFile)
+        if i < len(totalSentKBytesPerSecondByDevice):
+            print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%totalSentKBytesPerSecondByDevice[i],file=outputFile)
+        else:
+            print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%0,file=outputFile)
         print("</TR>",file=outputFile)
 
         
