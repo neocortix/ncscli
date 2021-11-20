@@ -38,6 +38,33 @@ def parseJmxFile( jmxFilePath ):
     tree = ET.parse( jmxFilePath )
     return tree
 
+def findJtlFileNames( tree ):
+    def findInTree(  tree, path ):
+        found = []
+        collectors = tree.findall(path)
+        for collector in collectors:
+            props = collector.findall( 'stringProp')
+            for prop in props:
+                if prop != None:
+                    #print( 'collector stringProp', prop)
+                    if prop.attrib.get( 'name' ) == 'filename':
+                        fileName = prop.text
+                        if fileName:
+                            #print( 'found fileName', fileName )
+                            found.append( fileName )
+        return found
+
+    root = tree
+    # works just as well with a tree as with the root element of a tree
+    #root = tree.getroot()
+    # must consider ResultCollector elements as well as ones from plugins
+    found = findInTree( root, "./hashTree/hashTree/hashTree/ResultCollector")
+    found += findInTree( root, "./hashTree/hashTree/hashTree/kg.apc.jmeter.vizualizers.CorrectedResultCollector")
+    #print( 'all found:', found)
+
+    # return a de-duplicated list
+    return list( set( found  ) )
+
 def getDuration( tree ):
     root = tree
     # works just as well with a tree as with the root element of a tree
@@ -95,6 +122,14 @@ if __name__ == "__main__":
     tree = parseJmxFile( jmxFilePath )
 
     print( 'EXTRACTED duration', getDuration( tree ) )
+
+    #print( 'looking for jtl fileNames')
+    jtlFileNames = findJtlFileNames( tree )
+    if jtlFileNames:
+        print( 'EXTRACTED jtl fileNames', jtlFileNames )
+    else:
+        print( 'no jtl fileNames found')
+
     root = tree.getroot()
     if False:  # enable this for debugging
         totDur = 0
