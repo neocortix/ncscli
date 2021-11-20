@@ -379,6 +379,7 @@ if __name__ == "__main__":
             for j in range (0,len(mappedFrameNumLocation)):
                 if frameNum == mappedFrameNumLocation[j][0]:
                     jIndex = j
+            # print("len(codes) = %d  len(labelsAllCodes) = %d" % (len(codes),len(labelsAllCodes)))
             responseData.append([frameNum,minStartTimeForDevice,startTimes,elapsedTimes,mappedFrameNumLocation[jIndex],labels,startTimesAllCodes,codes,startTimesNumberedReduced,elapsedTimesNumberedReduced,labelsNumberedReduced,labelsAllCodes,threads,receivedBytes,sentBytes,receivedBytesNumberedReduced,sentBytesNumberedReduced])
 
     if not responseData:
@@ -447,6 +448,7 @@ if __name__ == "__main__":
                 for j in range (0,len(mappedFrameNumLocation)):
                     if frameNum == mappedFrameNumLocation[j][0]:
                         jIndex = j
+                # print("len(codes) = %d  len(labelsAllCodes) = %d" % (len(codes),len(labelsAllCodes)))
                 responseData.append([frameNum,minStartTimeForDevice,startTimes,elapsedTimes,mappedFrameNumLocation[jIndex],labels,startTimesAllCodes,codes,startTimesNumberedReduced,elapsedTimesNumberedReduced,labelsNumberedReduced,labelsAllCodes,threads,receivedBytes,sentBytes,receivedBytesNumberedReduced,sentBytesNumberedReduced])
 
 
@@ -536,16 +538,20 @@ if __name__ == "__main__":
     # compute total receivedBytes and total sentBytes
     totalReceivedBytes = 0
     totalSentBytes = 0
+    totalReceivedBytesByDevice = []
+    totalSentBytesByDevice = []
     for i in range(0,len(culledRelativeResponseData)):
         totalReceivedBytes += sum(culledRelativeResponseData[i][13])
         totalSentBytes += sum(culledRelativeResponseData[i][14])
-    print("totalReceivedBytes = %d" % totalReceivedBytes)
-    print("totalSentBytes = %d" % totalSentBytes)
+        totalReceivedBytesByDevice.append(sum(culledRelativeResponseData[i][13]))
+        totalSentBytesByDevice.append(sum(culledRelativeResponseData[i][14]))
 
     # split out receivedBytes and sentBytes by Label
     numberBadCodes = 0
     receivedBytesByLabel = [[0,numberedReducedLabels[i]] for i in range(0,len(numberedReducedLabels))]
     sentBytesByLabel = [[0,numberedReducedLabels[i]] for i in range(0,len(numberedReducedLabels))]
+    receivedBytesByLabelByDevice = [[[0,numberedReducedLabels[i]] for i in range(0,len(numberedReducedLabels))] for j in range(0,len(culledRelativeResponseData))]
+    sentBytesByLabelByDevice = [[[0,numberedReducedLabels[i]] for i in range(0,len(numberedReducedLabels))] for j in range(0,len(culledRelativeResponseData))]
     for i in range(0,len(culledRelativeResponseData)):
         for j in range(0,len(culledRelativeResponseData[i][15])):
             label = culledRelativeResponseData[i][10][j]
@@ -553,6 +559,8 @@ if __name__ == "__main__":
                 index = numberedReducedLabels.index(label)
                 receivedBytesByLabel[index][0] += culledRelativeResponseData[i][15][j]
                 sentBytesByLabel[index][0] += culledRelativeResponseData[i][16][j]
+                receivedBytesByLabelByDevice[i][index][0] += culledRelativeResponseData[i][15][j]
+                sentBytesByLabelByDevice[i][index][0] += culledRelativeResponseData[i][16][j]
 
     # for i in range(0,len(numberedReducedLabels)): 
         # print("%-50s   rx = %.2f   tx=%.2f" % (numberedReducedLabels[i],receivedBytesByLabel[i][0],sentBytesByLabel[i][0]))
@@ -609,6 +617,8 @@ if __name__ == "__main__":
     # identify labels on all the error codes (non-200)
     numberBadCodes = 0
     badCodesByLabel = [[[],numberedReducedLabels[i]] for i in range(0,len(numberedReducedLabels))]
+    numberBadCodesByDevice = [0 for i in range(0,len(culledRelativeResponseData))]
+    badCodesByLabelByDevice = [[[[],numberedReducedLabels[i]] for i in range(0,len(numberedReducedLabels))] for j in range(0,len(culledRelativeResponseData))]
     for i in range(0,len(startRelTimesAndCodesAll[0])):
         if startRelTimesAndCodesAll[1][i] != 200:
             code = startRelTimesAndCodesAll[1][i]
@@ -618,16 +628,17 @@ if __name__ == "__main__":
                 numberBadCodes += 1
                 index = numberedReducedLabels.index(label)
                 badCodesByLabel[index][0].append(code)
-    # print("numberBadCodes = %d"%(numberBadCodes))
-    # print("badCodesByLabel = %s"%(badCodesByLabel))
+    for i in range(0,len(culledRelativeResponseData)):
 
-    # print(len(startRelTimesAndMSPRsUnitedStates[0]))
-    # print(len(startRelTimesAndMSPRsRussia[0]))
-    # print(len(startRelTimesAndMSPRsOther[0]))
-    # print(len(startRelTimesAndMSPRsAll[0]))
-    # print(len(startRelTimesAndCodesUnitedStates[0]))
-    # print(len(startRelTimesAndCodesRussia[0]))
-    # print(len(startRelTimesAndCodesOther[0]))
+        for ii in range(0,len(culledRelativeResponseData[i][7])):
+            if culledRelativeResponseData[i][7][ii] != 200:
+                code = culledRelativeResponseData[i][7][ii]
+                label = culledRelativeResponseData[i][11][ii]
+                if label in numberedReducedLabels:
+                    # print("code = %d    label = %s"%(code, label))
+                    numberBadCodesByDevice[i] += 1
+                    index = numberedReducedLabels.index(label)
+                    badCodesByLabelByDevice[i][index][0].append(code)
 
     # now split out the response data by label
     startRelTimesAndMSPRsUnitedStatesByLabel = [[[],[],reducedLabels[i]] for i in range(0,len(reducedLabels))] 
@@ -661,6 +672,7 @@ if __name__ == "__main__":
 
     # now we want to aggregate all of the numbered Label responses
     startRelTimesAndMSPRsByNumberedLabel = [[[],[],numberedReducedLabels[i]] for i in range(0,len(numberedReducedLabels))] 
+    startRelTimesAndMSPRsByNumberedLabelByDevice = [[[[],[],numberedReducedLabels[i]] for i in range(0,len(numberedReducedLabels))] for j in range(0,len(culledRelativeResponseData))]
 
     for i in range(0,len(culledRelativeResponseData)):
         for j in range(0,len(culledRelativeResponseData[i][10])):
@@ -669,6 +681,10 @@ if __name__ == "__main__":
             startRelTimesAndMSPRsByNumberedLabel[index][0].append(
                 culledRelativeResponseData[i][8][j])
             startRelTimesAndMSPRsByNumberedLabel[index][1].append(
+                culledRelativeResponseData[i][9][j])
+            startRelTimesAndMSPRsByNumberedLabelByDevice[i][index][0].append(
+                culledRelativeResponseData[i][8][j])
+            startRelTimesAndMSPRsByNumberedLabelByDevice[i][index][1].append(
                 culledRelativeResponseData[i][9][j])
                     
     # for i in range(0,2): 
@@ -1593,14 +1609,14 @@ if __name__ == "__main__":
         testEndTime = np.max(startRelTimesAndMSPRsAll[0])
         testDuration = testEndTime - testStartTime
         transactionsPerSecond = totalNumSamples/testDuration
-        # print("testDuration = %f seconds"%testDuration)
-        # print("totalNumSamples = %d"%(totalNumSamples))
-        # print("transactionsPerSecond = %f"%(transactionsPerSecond))
         totalReceivedKBytesPerSecond = totalReceivedBytes/testDuration/1000.0
         totalSentKBytesPerSecond = totalSentBytes/testDuration/1000.0
-        # print("totalReceivedKBytesPerSecond = %f"%(totalReceivedKBytesPerSecond))
-        # print("totalSentKBytesPerSecond = %f"%(totalSentKBytesPerSecond))
 
+        totalReceivedKBytesPerSecondByDevice = []
+        totalSentKBytesPerSecondByDevice = []
+        for i in range(0,len(totalReceivedBytesByDevice)):
+          totalReceivedKBytesPerSecondByDevice.append(totalReceivedBytesByDevice[i]/testDuration/1000.0)
+          totalSentKBytesPerSecondByDevice.append(totalSentBytesByDevice[i]/testDuration/1000.0)
 
         print("<TR>",file=outputFile)
         print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">Total</TD>",file=outputFile)
@@ -1674,9 +1690,6 @@ if __name__ == "__main__":
             else:
                 badCodePercentage = 0
 
-            # print("testDuration = %f seconds"%testDuration)
-            # print("numSamples = %d"%(numSamples))
-            # print("transactionsPerSecond = %f"%(transactionsPerSecond))
 
             print("<TR>",file=outputFile)
             print("<TD style=\"background-color:%s\">%s</TD>"%(bgColorString,label),file=outputFile)
@@ -1766,5 +1779,209 @@ if __name__ == "__main__":
     table2File.close()  
     table3File.close()  
     print("Writing Output to %s" % outputFileName)
+
+
+    # Generate TestResultsBreakout.html
+
+    # datetime object containing current date and time
+    primaryDateString1 = datetime.now().strftime("%B %d, %Y  %H:%M:%S")
+
+    outputFileName = outputDir + "/TestResultsBreakout.html"
+    outputFile = open(outputFileName, "w",encoding='utf-8')
+
+    print("<HTML>",file=outputFile)
+    print("<HEAD>",file=outputFile)
+    print("<TITLE>%s</TITLE>" % (primaryDateString1 + "_SecuritySummary.html"),file=outputFile)
+    print("<META HTTP-EQUIV=\"Content-Type\" CONTENT=\"text/html; charset=iso-8859-1\">",file=outputFile)
+    print("<style> table, th, td { border: 2px solid #444444; border-collapse:collapse; }\n th, td { padding: 5px; }</style>",file=outputFile) 
+    print("</HEAD>",file=outputFile)
+    print("<Body style=\"background-color:#eeeeee;\">",file=outputFile)
+    print("<center>",file=outputFile)
+
+
+    # white page wrapper
+    print("<TABLE style=\"border:3px solid #888888;background-color:White \"><TR><TD>",file=outputFile)
+
+    print("<center>",file=outputFile)
+
+    print("<img src=\"./LoadTestHeader_005.jpg\" width=1000>",file=outputFile)
+
+
+    # for each location
+    for i in range(0,len(mappedFrameNumLocation)):
+        print("<TABLE style=\"border:1px solid #888888;background-color:White;font-family:'Arial';color:Black;font-size:9pt;width:900px \">",file=outputFile)
+
+        # here is the device location part
+        print("<TR>",file=outputFile)
+        print("<TH colspan=\"14\" style=\"background-color:#8bc0e6\">Device Location and Instance ID</TH>",file=outputFile)
+        print("</TR>",file=outputFile)
+        print("<TR>",file=outputFile)
+        print("<TH colspan=\"1\" style=\"background-color:#8bc0e6\">Location</TH>",file=outputFile)
+        print("<TH colspan=\"2\" style=\"background-color:#8bc0e6\">Latitude</TH>",file=outputFile)
+        print("<TH colspan=\"2\" style=\"background-color:#8bc0e6\">Longitude</TH>",file=outputFile)
+        print("<TH colspan=\"1\" style=\"background-color:#8bc0e6\">File</TH>",file=outputFile)
+        print("<TH colspan=\"8\" style=\"background-color:#8bc0e6\">Instance ID</TH>",file=outputFile)
+        print("</TR>",file=outputFile)
+
+        print("<TR>",file=outputFile)
+        print("<TD  colspan=\"1\" style=\"background-color:%s\">%s</TD>"%(bgColorString,mappedFrameNumLocationSorted[i][3]),file=outputFile)
+        print("<TD  colspan=\"2\" style=\"background-color:%s\">%s</TD>"%(bgColorString,mappedFrameNumLocationSorted[i][1]),file=outputFile)
+        print("<TD  colspan=\"2\" style=\"background-color:%s\">%s</TD>"%(bgColorString,mappedFrameNumLocationSorted[i][2]),file=outputFile)
+        print("<TD  colspan=\"1\" style=\"background-color:%s\">%s</TD>"%(bgColorString,mappedFrameNumLocationSorted[i][0]),file=outputFile)
+        print("<TD  colspan=\"8\" style=\"background-color:%s\">%s</TD>"%(bgColorString,mappedFrameNumLocationSorted[i][5]),file=outputFile)
+        print("</TR>",file=outputFile)
+            
+        # Here is the Response Time Table part, Split By Transaction
+        print("<TR>",file=outputFile)
+        print("<TH colspan=\"14\" style=\"background-color:#8bc0e6\">Response Times By Task</TH>",file=outputFile)
+        print("</TR>",file=outputFile)
+        print("<TR>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">Requests</TH>",file=outputFile)
+        print("<TH colspan=\"3\" style=\"background-color:#8bc0e6\">Executions</TH>",file=outputFile)
+        print("<TH colspan=\"7\" style=\"background-color:#8bc0e6\">Response Times (ms)</TH>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">Throughput</TH>",file=outputFile)
+        print("<TH colspan=\"2\" style=\"background-color:#8bc0e6\">Network (KB/sec)</TH>",file=outputFile)
+        print("</TR>",file=outputFile)
+
+
+        print("<TR>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">Label</TH>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\"># Samples</TH>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">FAIL</TH>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">Error %</TH>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">Average</TH>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">Min</TH>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">Max</TH>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">Median</TH>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">90th pct</TH>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">95th pct</TH>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">99th pct</TH>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">Transactions/s</TH>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">Received</TH>",file=outputFile)
+        print("<TH style=\"background-color:#8bc0e6\">Sent</TH>",file=outputFile)
+        print("</TR>",file=outputFile)
+
+
+        totalNumSamples = numberBadCodesByDevice[i] # total = bad + good
+        for ii in range(0,len(badCodesByLabelByDevice[i])):
+            totalNumSamples += len(startRelTimesAndMSPRsByNumberedLabelByDevice[i][ii][0])
+        totalBadCodePercentage = numberBadCodesByDevice[i]/totalNumSamples*100.0
+        averageMs = 1000.0*np.mean(culledRelativeResponseData[i][2])
+        minMs = 1000.0*np.min(culledRelativeResponseData[i][2])
+        maxMs = 1000.0*np.max(culledRelativeResponseData[i][2])
+        medianMs = 1000.0*np.median(culledRelativeResponseData[i][2]) 
+        percentile90ms = 1000.0*np.percentile(culledRelativeResponseData[i][2],90)
+        percentile95ms = 1000.0*np.percentile(culledRelativeResponseData[i][2],95)
+        percentile99ms = 1000.0*np.percentile(culledRelativeResponseData[i][2],99)
+        testStartTime = np.min(startRelTimesAndMSPRsAll[0])
+        testEndTime = np.max(startRelTimesAndMSPRsAll[0])
+        testDuration = testEndTime - testStartTime
+        transactionsPerSecond = totalNumSamples/testDuration
+        totalReceivedKBytesPerSecond = totalReceivedBytes/testDuration/1000.0
+        totalSentKBytesPerSecond = totalSentBytes/testDuration/1000.0
+
+
+        print("<TR>",file=outputFile)
+        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">Total</TD>",file=outputFile)
+        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%d</TD>"%totalNumSamples,file=outputFile)
+        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%d</TD>"%numberBadCodesByDevice[i],file=outputFile)
+        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f%%</TD>"%totalBadCodePercentage,file=outputFile)
+        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%averageMs,file=outputFile)
+        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%minMs,file=outputFile)
+        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%maxMs,file=outputFile)
+        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%medianMs,file=outputFile)
+        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%percentile90ms,file=outputFile)
+        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%percentile95ms,file=outputFile)
+        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%percentile99ms,file=outputFile)
+        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%transactionsPerSecond,file=outputFile)
+        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%totalReceivedKBytesPerSecondByDevice[i],file=outputFile)
+        print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">%.2f</TD>"%totalSentKBytesPerSecondByDevice[i],file=outputFile)
+        print("</TR>",file=outputFile)
+
+        
+        # alternating color rows
+        for ii in range(0,len(numberedReducedLabels)):
+            if ii%2==0:
+                bgColorString = "#e9f2fa"
+            else:
+                bgColorString = "#ffffff"
+
+            label = numberedReducedLabels[ii]
+            index = getColumn(startRelTimesAndMSPRsByNumberedLabelByDevice[i],2).index(label)
+            numSamples = len(startRelTimesAndMSPRsByNumberedLabelByDevice[i][index][0])
+            if numSamples>0:
+                averageMs = 1000.0*np.mean(startRelTimesAndMSPRsByNumberedLabelByDevice[i][index][1])
+                minMs = 1000.0*np.min(startRelTimesAndMSPRsByNumberedLabelByDevice[i][index][1])
+                maxMs = 1000.0*np.max(startRelTimesAndMSPRsByNumberedLabelByDevice[i][index][1])
+                medianMs = 1000.0*np.median(startRelTimesAndMSPRsByNumberedLabelByDevice[i][index][1])
+                percentile90ms = 1000.0*np.percentile(startRelTimesAndMSPRsByNumberedLabelByDevice[i][index][1],90)
+                percentile95ms = 1000.0*np.percentile(startRelTimesAndMSPRsByNumberedLabelByDevice[i][index][1],95)
+                percentile99ms = 1000.0*np.percentile(startRelTimesAndMSPRsByNumberedLabelByDevice[i][index][1],99)
+            else:
+                averageMs = 0
+                minMs = 0
+                maxMs = 0
+                medianMs = 0
+                percentile90ms = 0
+                percentile95ms = 0
+                percentile99ms = 0
+    
+            index = getColumn(badCodesByLabelByDevice[i],1).index(label)
+            badCodeCount = len(badCodesByLabelByDevice[i][index][0])
+            totalNumSamples = numSamples + badCodeCount
+   
+            if numSamples>0:
+                testStartTime = np.min(startRelTimesAndMSPRsByNumberedLabelByDevice[i][index][0])
+                testEndTime = np.max(startRelTimesAndMSPRsByNumberedLabelByDevice[i][index][0])
+                testDuration = testEndTime - testStartTime
+                transactionsPerSecond = totalNumSamples/testDuration
+                receivedKBytesPerSecond = receivedBytesByLabelByDevice[i][ii][0]/testDuration/1000.0
+                sentKBytesPerSecond = sentBytesByLabelByDevice[i][ii][0]/testDuration/1000.0
+            else:
+                testStartTime = 0
+                testEndTime = 0
+                testDuration = 0
+                transactionsPerSecond = 0
+                receivedKBytesPerSecond = 0
+                sentKBytesPerSecond = 0
+  
+            if totalNumSamples>0:
+                badCodePercentage = badCodeCount/totalNumSamples*100.0
+            else:
+                badCodePercentage = 0
+ 
+
+            print("<TR>",file=outputFile)
+            print("<TD style=\"background-color:%s\">%s</TD>"%(bgColorString,label),file=outputFile)
+            print("<TD style=\"background-color:%s\">%d</TD>"%(bgColorString,totalNumSamples),file=outputFile)
+            print("<TD style=\"background-color:%s\">%d</TD>"%(bgColorString,badCodeCount),file=outputFile)
+            print("<TD style=\"background-color:%s\">%.2f%%</TD>"%(bgColorString,badCodePercentage),file=outputFile)
+            print("<TD style=\"background-color:%s\">%.2f</TD>"%(bgColorString,averageMs),file=outputFile)
+            print("<TD style=\"background-color:%s\">%.2f</TD>"%(bgColorString,minMs),file=outputFile)
+            print("<TD style=\"background-color:%s\">%.2f</TD>"%(bgColorString,maxMs),file=outputFile)
+            print("<TD style=\"background-color:%s\">%.2f</TD>"%(bgColorString,medianMs),file=outputFile)
+            print("<TD style=\"background-color:%s\">%.2f</TD>"%(bgColorString,percentile90ms),file=outputFile)
+            print("<TD style=\"background-color:%s\">%.2f</TD>"%(bgColorString,percentile95ms),file=outputFile)
+            print("<TD style=\"background-color:%s\">%.2f</TD>"%(bgColorString,percentile99ms),file=outputFile)
+            print("<TD style=\"background-color:%s\">%.2f</TD>"%(bgColorString,transactionsPerSecond),file=outputFile)
+            print("<TD style=\"background-color:%s\">%.2f</TD>"%(bgColorString,receivedKBytesPerSecond),file=outputFile)
+            print("<TD style=\"background-color:%s\">%.2f</TD>"%(bgColorString,sentKBytesPerSecond),file=outputFile)
+            print("</TR>",file=outputFile)
+
+        print("</TABLE>",file=outputFile)
+        print("<BR><BR><BR>",file=outputFile)
+
+
+    print("</center>",file=outputFile)
+    print("</TD></TR></TABLE>",file=outputFile)
+    print("<BR><BR><BR>",file=outputFile)
+
+
+    print("</center>",file=outputFile)
+    print("</Body>",file=outputFile)
+    print("</HTML>",file=outputFile)
+    outputFile.close()  
+    print("Writing Output to %s" % outputFileName)
+
     print("Done.")
 
