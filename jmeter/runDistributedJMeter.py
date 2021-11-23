@@ -28,6 +28,7 @@ class JMeterFrameProcessor(batchRunner.frameProcessor):
     workerDirPath = 'jmeterWorker'
     #JMeterFilePath = workerDirPath+'/TestPlan.jmx'
     JMeterFilePath = workerDirPath+'/XXX.jmx'
+    jtlFileName = None
     JVM_ARGS ='-Xms30m -XX:MaxMetaspaceSize=64m -Dnashorn.args=--no-deprecation-warning'
     # a shell command that uses python psutil to get a recommended java heap size
     # computes available ram minus some number for safety, but not less than some minimum
@@ -56,6 +57,8 @@ class JMeterFrameProcessor(batchRunner.frameProcessor):
         cmd = '''cd %s && mkdir -p jmeterOut && JVM_ARGS="%s -Xmx$(%s)" /opt/apache-jmeter/bin/jmeter.sh -n -t %s/%s/%s -l jmeterOut/TestPlan_results.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true''' % (
             self.workerDirPath, self.JVM_ARGS, self.clause, self.homeDirPath, self.workerDirPath, self.JMeterFilePath
         )
+        if self.jtlFileName:
+            cmd += ' && cp %s jmeterOut/ 1>/dev/null || true' % self.jtlFileName
         cmd += ' && mv jmeterOut ~/%s' % (self.frameOutFileName( frameNum ))
         return cmd
 
@@ -77,7 +80,7 @@ ap.add_argument( '--filter', help='json to filter instances for launch',
     )
 ap.add_argument( '--jmxFile', required=True, help='the JMeter test plan file path (required)' )
 ap.add_argument( '--jtlFile', help='the file name of the jtl file produced by the test plan (if any)',
-    default='TestPlan_results.csv'
+    default=None
     )
 ap.add_argument( '--planDuration', type=float, default=0, help='the expected duration of the test plan, in seconds' )
 ap.add_argument( '--workerDir', help='the directory to upload to workers',
@@ -118,15 +121,59 @@ if not jmeterBinPath:
     jmeterVersion = '5.4.1'  # 5.3 and 5.4.1 have been tested, others may work as well
     jmeterBinPath = scriptDirPath()+'/apache-jmeter-%s/bin/jmeter.sh' % jmeterVersion
 
+# parse the jmx file so we can find duration and jtl file references
+jmxTree = jmxTool.parseJmxFile( jmxFullerPath )
+
 # use given planDuration unless it is not positive, in which case extract from the jmx
 planDuration = args.planDuration
 if planDuration <= 0:
-    jmxTree = jmxTool.parseJmxFile( jmxFullerPath )
     planDuration = jmxTool.getDuration( jmxTree )
     logger.debug( 'jmxDur: %s seconds', planDuration )
 frameTimeLimit = max( round( planDuration * 1.5 ), planDuration+8*60 ) # some slop beyond the planned duration
 
 JMeterFrameProcessor.JMeterFilePath = jmxFilePath
+
+jtlFilePath = None
+if args.jtlFile:
+    jtlFilePath = args.jtlFile
+    if ':' in jtlFilePath:
+        logger.error( 'a colon was found in the jtlFile path' )
+        sys.exit( 1 )
+    # for now, reject any backslashes because they do not work on linux
+    if '\\' in jtlFilePath:
+        logger.error( 'backslashes are not allowed in the jtlFile path' )
+        sys.exit( 1 )
+    # replace backslash with slash, even though backslash is technically legal in posix
+    jtlFilePath = jtlFilePath.replace( '\\', '/' )
+    # normalize it (removes redundant slashes and other weirdness)
+    jtlFilePath = os.path.normpath( jtlFilePath )
+    # make sure it is not an absolute path
+    if jtlFilePath == os.path.abspath( jtlFilePath ):
+        logger.error( 'absolute paths are not supported for jtlFile path' )
+        sys.exit( 1 )
+    if '../' in jtlFilePath:
+        logger.error( '"../" is not supported for jtlFile path' )
+        sys.exit( 1 )
+
+    planJtlFiles = jmxTool.findJtlFileNames( jmxTree )
+    logger.info( 'planJtlFiles: %s', planJtlFiles )
+    normalizedJtlFiles = planJtlFiles
+    # don't replace backslashes for now
+    #normalizedJtlFiles = [path.replace( '\\', '/' ) for path in planJtlFiles]
+    normalizedJtlFiles = [os.path.normpath(path) for path in normalizedJtlFiles]
+    if jtlFilePath not in normalizedJtlFiles:
+        prepended = os.path.join( 'jmeterOut', jtlFilePath )
+        if prepended in normalizedJtlFiles:
+            # a hack to make old examples work
+            jtlFilePath = prepended
+        else:
+            logger.error( 'the given jtlFile was not found in the test plan' )
+            sys.exit( 1 )
+
+    JMeterFrameProcessor.jtlFileName = jtlFilePath
+if not jtlFilePath:
+    jtlFilePath = 'TestPlan_results.csv'
+logger.info( 'jtlFilePath: %s', jtlFilePath )
 
 nFrames = args.nWorkers
 #nWorkers = round( nFrames * 1.5 )  # old formula
@@ -169,7 +216,7 @@ try:
         if rc2:
             logger.warning( 'plotJMeterOutput exited with returnCode %d', rc2 )
  
-        jtlFileName = args.jtlFile  # make this match output file name from the .jmx (or empty if none)
+        jtlFileName = os.path.basename( jtlFilePath )
         if jtlFileName:
             nameParts = os.path.splitext(jtlFileName)
             mergedJtlFileName = nameParts[0]+'_merged_' + dateTimeTag + nameParts[1]
