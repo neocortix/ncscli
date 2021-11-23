@@ -127,11 +127,14 @@ if __name__ == "__main__":
 
     timeStampBounds = findTimeStampBounds()
     logger.debug( 'timeStampBounds %s', timeStampBounds )
+    if not timeStampBounds:
+        logger.warning( 'no timestamps found in any files')
+        sys.exit( 1 )
     minTimeStamps = [bounds['min'] for bounds in timeStampBounds]
     maxTimeStamps = [bounds['max'] for bounds in timeStampBounds]
 
-    minMinTimeStamp = int( min( minTimeStamps ) )
-    maxMaxTimeStamp = max( maxTimeStamps )
+    minMinTimeStamp = int( min( minTimeStamps ) ) if minTimeStamps else 0
+    maxMaxTimeStamp = max( maxTimeStamps ) if maxTimeStamps else minMinTimeStamp + 1
     logger.debug( 'minMinTimeStamp %d', minMinTimeStamp )
 
     effDurs = [(bounds['max']-minMinTimeStamp)/args.timeDiv for bounds in timeStampBounds]
