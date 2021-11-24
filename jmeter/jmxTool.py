@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 '''parses a JMeter .jmx file, gives information about the TestPlan'''
 import argparse
+import copy
 import logging
+import ntpath
 import sys
 
 logger = logging.getLogger(__name__)
@@ -64,6 +66,47 @@ def findJtlFileNames( tree ):
 
     # return a de-duplicated list
     return list( set( found  ) )
+
+def fixJtlFileNames( tree ):
+    def fixInTree(  tree, path ):
+        anyFixed = False
+        collectors = tree.findall(path)
+        for collector in collectors:
+            props = collector.findall( 'stringProp')
+            for prop in props:
+                if prop != None:
+                    #print( 'collector stringProp', prop)
+                    if prop.attrib.get( 'name' ) == 'filename':
+                        fileName = prop.text
+                        if fileName:
+                            betterName = None
+                            if '\\' in fileName:  # detect windows paths
+                                if ':' in fileName:
+                                    print( 'WAS ABSOLUTE:', fileName )
+                                    betterName = ntpath.basename( fileName )
+                                elif '..\\' in fileName:
+                                    print( 'HAD ..\\:', fileName )
+                                    betterName = ntpath.basename( fileName )
+                                else:
+                                    print( 'BACKSLASH:', fileName )
+                                    betterName = fileName.replace( '\\', '/')
+                                if betterName:
+                                    anyFixed = True
+                                    print( 'changing %s to %s'% (fileName, betterName) )
+                                    prop.text = betterName
+        return anyFixed
+
+    copied = copy.deepcopy( tree )
+    root = copied
+    # works just as well with a tree as with the root element of a tree
+    #root = tree.getroot()
+    # must consider ResultCollector elements as well as ones from plugins
+    fixInTree( root, "./hashTree/hashTree/hashTree/ResultCollector")
+    fixInTree( root, "./hashTree/hashTree/hashTree/kg.apc.jmeter.vizualizers.CorrectedResultCollector")
+    #print( 'all found:', found)
+
+    # return the modified element tree
+    return root
 
 def getDuration( tree ):
     root = tree
@@ -129,6 +172,12 @@ if __name__ == "__main__":
         print( 'EXTRACTED jtl fileNames', jtlFileNames )
     else:
         print( 'no jtl fileNames found')
+    
+    '''
+    fixed = fixJtlFileNames( tree )
+    if fixed:
+        fixed.write( 'fixed.jmx')
+    '''
 
     root = tree.getroot()
     if False:  # enable this for debugging
