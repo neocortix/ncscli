@@ -60,7 +60,9 @@ def findJtlFileNames( tree ):
     # works just as well with a tree as with the root element of a tree
     #root = tree.getroot()
     # must consider ResultCollector elements as well as ones from plugins
-    found = findInTree( root, "./hashTree/hashTree/hashTree/ResultCollector")
+    found = findInTree( root, "./hashTree/hashTree/ResultCollector")
+    found += findInTree( root, "./hashTree/hashTree/hashTree/ResultCollector")
+    found += findInTree( root, "./hashTree/hashTree/kg.apc.jmeter.vizualizers.CorrectedResultCollector")
     found += findInTree( root, "./hashTree/hashTree/hashTree/kg.apc.jmeter.vizualizers.CorrectedResultCollector")
     #print( 'all found:', found)
 
@@ -101,7 +103,9 @@ def fixJtlFileNames( tree ):
     # works just as well with a tree as with the root element of a tree
     #root = tree.getroot()
     # must consider ResultCollector elements as well as ones from plugins
+    fixInTree( root, "./hashTree/hashTree/ResultCollector")
     fixInTree( root, "./hashTree/hashTree/hashTree/ResultCollector")
+    fixInTree( root, "./hashTree/hashTree/kg.apc.jmeter.vizualizers.CorrectedResultCollector")
     fixInTree( root, "./hashTree/hashTree/hashTree/kg.apc.jmeter.vizualizers.CorrectedResultCollector")
     #print( 'all found:', found)
 
