@@ -1510,7 +1510,7 @@ def createArgumentParser():
     ap.add_argument( '--authToken', required=True, help='the NCS authorization token to use (required)' )
     ap.add_argument( '--cookie', help='for internal use only' )
     ap.add_argument( '--outDataDir', help='output data darectory', default='./data/' )
-    ap.add_argument( '--pushDeviceLocs', type=boolArg, default=False, help='whether to store device location on each launched instance' )
+    ap.add_argument( '--pushDeviceLocs', type=boolArg, default=True, help='whether to store device location on each launched instance' )
     ap.add_argument( '--encryptFiles', type=boolArg, default=True, help='whether to encrypt files on launched instances' )
     ap.add_argument( '--filter', help='json to filter instances for launch' )
     ap.add_argument( '--frameTimeLimit', type=int, default=8*60*60, help='amount of time (in seconds) allowed for each frame' )
