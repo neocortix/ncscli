@@ -1622,13 +1622,22 @@ if __name__ == "__main__":
         testStartTime = np.min(startRelTimesAndMSPRsAll[0])
         testEndTime = np.max(startRelTimesAndMSPRsAll[0])
         testDuration = testEndTime - testStartTime
-        transactionsPerSecond = totalNumSamples/testDuration
-        totalReceivedKBytesPerSecond = totalReceivedBytes/testDuration/1000.0
-        totalSentKBytesPerSecond = totalSentBytes/testDuration/1000.0
+        if testDuration==0:
+            transactionsPerSecond = 0
+            totalReceivedKBytesPerSecond = 0
+            totalSentKBytesPerSecond = 0
 
-        for i in range(0,len(totalReceivedBytesByDevice)):
-          totalReceivedKBytesPerSecondByDevice.append(totalReceivedBytesByDevice[i]/testDuration/1000.0)
-          totalSentKBytesPerSecondByDevice.append(totalSentBytesByDevice[i]/testDuration/1000.0)
+            for i in range(0,len(totalReceivedBytesByDevice)):
+                totalReceivedKBytesPerSecondByDevice.append(0)
+                totalSentKBytesPerSecondByDevice.append(0)
+        else:
+            transactionsPerSecond = totalNumSamples/testDuration
+            totalReceivedKBytesPerSecond = totalReceivedBytes/testDuration/1000.0
+            totalSentKBytesPerSecond = totalSentBytes/testDuration/1000.0
+
+            for i in range(0,len(totalReceivedBytesByDevice)):
+                totalReceivedKBytesPerSecondByDevice.append(totalReceivedBytesByDevice[i]/testDuration/1000.0)
+                totalSentKBytesPerSecondByDevice.append(totalSentBytesByDevice[i]/testDuration/1000.0)
 
         print("<TR>",file=outputFile)
         print("<TD style=\"background-color:#d9d9d9;font-weight:bold\">Total</TD>",file=outputFile)
@@ -1706,9 +1715,14 @@ if __name__ == "__main__":
                 testStartTime = np.min(startRelTimesAndMSPRsByNumberedLabel[index][0])
                 testEndTime = np.max(startRelTimesAndMSPRsByNumberedLabel[index][0])
                 testDuration = testEndTime - testStartTime
-                transactionsPerSecond = totalNumSamples/testDuration
-                receivedKBytesPerSecond = receivedBytesByLabel[i][0]/testDuration/1000.0
-                sentKBytesPerSecond = sentBytesByLabel[i][0]/testDuration/1000.0
+                if testDuration==0:
+                    transactionsPerSecond = 0
+                    receivedKBytesPerSecond = 0
+                    sentKBytesPerSecond = 0
+                else:
+                    transactionsPerSecond = totalNumSamples/testDuration
+                    receivedKBytesPerSecond = receivedBytesByLabel[i][0]/testDuration/1000.0
+                    sentKBytesPerSecond = sentBytesByLabel[i][0]/testDuration/1000.0
             else:
                 testStartTime = 0
                 testEndTime = 0
@@ -1933,9 +1947,14 @@ if __name__ == "__main__":
             testStartTime = np.min(startRelTimesAndMSPRsAll[0])
             testEndTime = np.max(startRelTimesAndMSPRsAll[0])
             testDuration = testEndTime - testStartTime
-            transactionsPerSecond = totalNumSamples/testDuration
-            totalReceivedKBytesPerSecond = totalReceivedBytes/testDuration/1000.0
-            totalSentKBytesPerSecond = totalSentBytes/testDuration/1000.0
+            if testDuration==0:
+                transactionsPerSecond = 0
+                totalReceivedKBytesPerSecond = 0
+                totalSentKBytesPerSecond = 0
+            else:
+                transactionsPerSecond = totalNumSamples/testDuration
+                totalReceivedKBytesPerSecond = totalReceivedBytes/testDuration/1000.0
+                totalSentKBytesPerSecond = totalSentBytes/testDuration/1000.0
     
     
             print("<TR>",file=outputFile)
@@ -2018,9 +2037,14 @@ if __name__ == "__main__":
                     testStartTime = np.min(startRelTimesAndMSPRsByNumberedLabelByDevice[i][index][0])
                     testEndTime = np.max(startRelTimesAndMSPRsByNumberedLabelByDevice[i][index][0])
                     testDuration = testEndTime - testStartTime
-                    transactionsPerSecond = totalNumSamples/testDuration
-                    receivedKBytesPerSecond = receivedBytesByLabelByDevice[i][ii][0]/testDuration/1000.0
-                    sentKBytesPerSecond = sentBytesByLabelByDevice[i][ii][0]/testDuration/1000.0
+                    if testDuration==0:
+                        transactionsPerSecond = 0
+                        receivedKBytesPerSecond = 0
+                        sentKBytesPerSecond = 0
+                    else:
+                        transactionsPerSecond = totalNumSamples/testDuration
+                        receivedKBytesPerSecond = receivedBytesByLabelByDevice[i][ii][0]/testDuration/1000.0
+                        sentKBytesPerSecond = sentBytesByLabelByDevice[i][ii][0]/testDuration/1000.0
                 else:
                     testStartTime = 0
                     testEndTime = 0
