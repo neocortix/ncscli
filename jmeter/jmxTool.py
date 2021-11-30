@@ -60,10 +60,15 @@ def findJtlFileNames( tree ):
     # works just as well with a tree as with the root element of a tree
     #root = tree.getroot()
     # must consider ResultCollector elements as well as ones from plugins
+    found = []
+    found += findInTree( root, ".//ResultCollector")
+    found += findInTree( root, ".//kg.apc.jmeter.vizualizers.CorrectedResultCollector")
+    '''
     found = findInTree( root, "./hashTree/hashTree/ResultCollector")
     found += findInTree( root, "./hashTree/hashTree/hashTree/ResultCollector")
     found += findInTree( root, "./hashTree/hashTree/kg.apc.jmeter.vizualizers.CorrectedResultCollector")
     found += findInTree( root, "./hashTree/hashTree/hashTree/kg.apc.jmeter.vizualizers.CorrectedResultCollector")
+    '''
     #print( 'all found:', found)
 
     # return a de-duplicated list
