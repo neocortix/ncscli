@@ -37,9 +37,8 @@ class JMeterFrameProcessor(batchRunner.frameProcessor):
 
     def installerCmd( self ):
         cmd = 'free --mega -t 1>&2'  # to show amount of free ram
-        # some new code not yet officially enabled
         #cmd += ' && cat ~/.neocortix/device-location.properties'
-        #cmd += ' && cat ~/.neocortix/device-location.properties >> /opt/apache-jmeter/bin/jmeter.properties'
+        cmd += ' && cat ~/.neocortix/device-location.properties >> /opt/apache-jmeter/bin/jmeter.properties'
         if glob.glob( os.path.join( self.workerDirPath, '*.jar' ) ):
             cmd += ' && cp -p %s/*.jar /opt/apache-jmeter/lib/ext' % self.workerDirPath  # for plugins
         cmd += " && JVM_ARGS='%s -Xmx$(%s)' /opt/apache-jmeter/bin/jmeter.sh --version" % (self.JVM_ARGS, self.clause)
