@@ -1186,6 +1186,18 @@ def checkInstanceClocks( instances, timeLimit ):
         logger.debug( 'returnCodes: %s', returnCodes )
     return returnCodes
 
+def deviceLocToProps( deviceLoc ):
+    ''' returns a multiline string that can be written to a java-standard properties file'''
+    # deviceLoc is assumed to be a dict that was converted from json
+    outStr = ''
+    for key, val in deviceLoc.items():
+        if isinstance( val, dict ):
+            for xx, yy in val.items():
+                outStr += 'neocortix.device-location.'+key + '.' + xx + '=' + str(yy) + '\n'
+        else:
+            outStr += 'neocortix.device-location.'+key + '=' + str(val) + '\n'
+    return outStr
+
 def pushDeviceLoc( inst, timeLimit=30 ):
     iid = inst['instanceId']
     logger.debug( 'would push deviceLoc to instance %s', iid[0:16] )
@@ -1196,10 +1208,13 @@ def pushDeviceLoc( inst, timeLimit=30 ):
         logFrameState( -1, 'pushDeviceLocStarting', iid )
         deviceLoc = inst['device-location']
         deviceLocJson = json.dumps( deviceLoc )
-        # trickily enquote and embedded apostrophes (single-quotes) for bash compatibility
+        deviceLocProps = deviceLocToProps( deviceLoc )
+        # trickily escape any embedded apostrophes (single-quotes) for bash compatibility
         deviceLocJson = deviceLocJson.replace( "'", r"'\''")
-        # generate a command to create the json file on the instance
+        deviceLocProps = deviceLocProps.replace( "'", r"'\''")
+        # generate a command to create the json file and props file on the instance
         cmd = "mkdir ~/.neocortix && echo '%s' > ~/.neocortix/device-location.json" % deviceLocJson
+        cmd += " && echo '%s' > ~/.neocortix/device-location.properties" % deviceLocProps
         logger.debug( 'cmd: %s', cmd )
         rc = commandInstance( inst, cmd, timeLimit=timeLimit )
         logFrameState( -1, 'pushDeviceLocDone', iid, rc )
