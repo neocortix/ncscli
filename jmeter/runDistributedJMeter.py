@@ -37,6 +37,9 @@ class JMeterFrameProcessor(batchRunner.frameProcessor):
 
     def installerCmd( self ):
         cmd = 'free --mega -t 1>&2'  # to show amount of free ram
+        # some new code not yet officially enabled
+        #cmd += ' && cat ~/.neocortix/device-location.properties'
+        #cmd += ' && cat ~/.neocortix/device-location.properties >> /opt/apache-jmeter/bin/jmeter.properties'
         if glob.glob( os.path.join( self.workerDirPath, '*.jar' ) ):
             cmd += ' && cp -p %s/*.jar /opt/apache-jmeter/lib/ext' % self.workerDirPath  # for plugins
         cmd += " && JVM_ARGS='%s -Xmx$(%s)' /opt/apache-jmeter/bin/jmeter.sh --version" % (self.JVM_ARGS, self.clause)
@@ -54,11 +57,11 @@ class JMeterFrameProcessor(batchRunner.frameProcessor):
         #return 'TestPlan_results_%03d.csv' % frameNum
 
     def frameCmd( self, frameNum ):
-        cmd = '''cd %s && mkdir -p jmeterOut && JVM_ARGS="%s -Xmx$(%s)" /opt/apache-jmeter/bin/jmeter.sh -n -t %s/%s/%s -l jmeterOut/TestPlan_results.csv -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true''' % (
+        cmd = '''cd %s && mkdir -p jmeterOut && JVM_ARGS="%s -Xmx$(%s)" /opt/apache-jmeter/bin/jmeter.sh -n -t %s/%s/%s -l jmeterOut/TestPlan_results.csv -D jmeter.save.saveservice.error_count=true -D jmeter.save.saveservice.sample_count=true -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true''' % (
             self.workerDirPath, self.JVM_ARGS, self.clause, self.homeDirPath, self.workerDirPath, self.JMeterFilePath
         )
         if self.jtlFileName:
-            cmd += ' && cp %s jmeterOut/ 1>/dev/null || true' % self.jtlFileName
+            cmd += ' && cp %s jmeterOut/ 2>/dev/null || true' % self.jtlFileName
         cmd += ' && mv jmeterOut ~/%s' % (self.frameOutFileName( frameNum ))
         return cmd
 
@@ -181,6 +184,12 @@ nWorkers = math.ceil(nFrames*1.5) if nFrames <=10 else round( max( nFrames*1.12,
 
 dateTimeTag = datetime.datetime.now().strftime( '%Y-%m-%d_%H%M%S' )
 outDataDir = args.outDataDir
+
+# abort if outDataDir is not empty enough
+if os.path.isfile( outDataDir+'/batchRunner_results.jlog') \
+    or os.path.isfile( outDataDir+'/recruitLaunched.json'):
+    logger.error( 'please use a different outDataDir for each run' )
+    sys.exit( 1 )
 
 try:
     rc = batchRunner.runBatch(
