@@ -56,8 +56,9 @@ class JMeterFrameProcessor(batchRunner.frameProcessor):
         #return 'TestPlan_results_%03d.csv' % frameNum
 
     def frameCmd( self, frameNum ):
-        cmd = '''cd %s && mkdir -p jmeterOut && JVM_ARGS="%s -Xmx$(%s)" /opt/apache-jmeter/bin/jmeter.sh -n -t %s/%s/%s -l jmeterOut/TestPlan_results.csv -D jmeter.save.saveservice.error_count=true -D jmeter.save.saveservice.sample_count=true -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true''' % (
-            self.workerDirPath, self.JVM_ARGS, self.clause, self.homeDirPath, self.workerDirPath, self.JMeterFilePath
+        propsClause = '-D neocortix.instanceNum=%d' % frameNum
+        cmd = '''cd %s && mkdir -p jmeterOut && JVM_ARGS="%s -Xmx$(%s)" /opt/apache-jmeter/bin/jmeter.sh -n -t %s/%s/%s -l jmeterOut/TestPlan_results.csv %s -D jmeter.save.saveservice.error_count=true -D jmeter.save.saveservice.sample_count=true -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true''' % (
+            self.workerDirPath, self.JVM_ARGS, self.clause, self.homeDirPath, self.workerDirPath, self.JMeterFilePath, propsClause
         )
         if self.jtlFileName:
             cmd += ' && cp %s jmeterOut/ 2>/dev/null || true' % self.jtlFileName
