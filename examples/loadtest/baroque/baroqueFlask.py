@@ -19,6 +19,7 @@ app.config['MAX_CONTENT_LENGTH'] = 10 * 1000 * 1000
 @app.route('/')
 @app.route('/baroque')  # new line for https
 def root():
+    logger.debug( 'hello from baroque' )
     #return 'Hello, World!'
     # get the incoming query params, using defaults for any that are not provided
 
@@ -123,3 +124,10 @@ def download_file(name):
 app.add_url_rule(
     "/baroque/uploads/<name>", endpoint="download_file", build_only=True
     )
+
+@app.route('/baroque/location')
+def locationHandler():
+    logger.debug( 'hello from baroque/location' )
+    args = flask.request.args
+    logger.info( 'args: %s', args )
+    return jsonify( args ), 200
