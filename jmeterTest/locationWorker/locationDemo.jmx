@@ -31,24 +31,31 @@
             <collectionProp name="Arguments.arguments">
               <elementProp name="country-code" elementType="HTTPArgument">
                 <boolProp name="HTTPArgument.always_encode">true</boolProp>
-                <stringProp name="Argument.value">${__P(neocortix.device-location.country-code,notFound)}</stringProp>
+                <stringProp name="Argument.value">${__P(neocortix.device-location.country-code,null)}</stringProp>
                 <stringProp name="Argument.metadata">=</stringProp>
                 <boolProp name="HTTPArgument.use_equals">true</boolProp>
                 <stringProp name="Argument.name">country-code</stringProp>
               </elementProp>
               <elementProp name="area" elementType="HTTPArgument">
                 <boolProp name="HTTPArgument.always_encode">true</boolProp>
-                <stringProp name="Argument.value">${__P(neocortix.device-location.area,notFound)}</stringProp>
+                <stringProp name="Argument.value">${__P(neocortix.device-location.area,null)}</stringProp>
                 <stringProp name="Argument.metadata">=</stringProp>
                 <boolProp name="HTTPArgument.use_equals">true</boolProp>
                 <stringProp name="Argument.name">area</stringProp>
               </elementProp>
               <elementProp name="locality" elementType="HTTPArgument">
                 <boolProp name="HTTPArgument.always_encode">true</boolProp>
-                <stringProp name="Argument.value">${__P(neocortix.device-location.locality,notFound)}</stringProp>
+                <stringProp name="Argument.value">${__P(neocortix.device-location.locality,null)}</stringProp>
                 <stringProp name="Argument.metadata">=</stringProp>
                 <boolProp name="HTTPArgument.use_equals">true</boolProp>
                 <stringProp name="Argument.name">locality</stringProp>
+              </elementProp>
+              <elementProp name="instanceNum" elementType="HTTPArgument">
+                <boolProp name="HTTPArgument.always_encode">true</boolProp>
+                <stringProp name="Argument.value">${__P(neocortix.instanceNum,0)}</stringProp>
+                <stringProp name="Argument.metadata">=</stringProp>
+                <boolProp name="HTTPArgument.use_equals">true</boolProp>
+                <stringProp name="Argument.name">instanceNum</stringProp>
               </elementProp>
             </collectionProp>
           </elementProp>
