@@ -72,6 +72,22 @@ def boolArg( v ):
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
+def logLevelArg( arg ):
+    '''return a logging level (int) for the given case-insensitive level name'''
+    arg = arg.lower()
+    map = {
+        'critical': logging.CRITICAL,
+        'error': logging.ERROR,
+        'warning': logging.WARNING,
+        'info': logging.INFO,
+        'debug': logging.DEBUG
+        }
+    if arg not in map:
+        logger.warning( 'the given logLevel "%s" is not recognized (try INFO, DEBUG, WARNING,, DEBUG, etc)', arg )
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+    setting = map.get( arg, logging.INFO )
+    return setting
+
 def datetimeIsAware( dt ):
     if not dt: return None
     return (dt.tzinfo is not None) and (dt.tzinfo.utcoffset( dt ) is not None)
@@ -207,7 +223,7 @@ def purgeHostKeys( instanceRecs ):
     else:
         return 0
 
-def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted,
+def recruitInstances( nWorkersWanted, launchedJsonFilePath, authToken,
     resultsLogFilePath, installerFileName, preopenedPorts ):
     '''launch instances and install client on them;
         terminate those that could not install; return list of good instances'''
@@ -215,8 +231,8 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted,
     workerDirPath = args.configName
     goodInstances = []
     portMap = {}
-    if launchWanted:
-        nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
+    if True:
+        nAvail = ncs.getAvailableDeviceCount( authToken, filtersJson=args.filter )
         if nWorkersWanted > (nAvail + 0):
             logger.error( 'not enough devices available (%d requested, %d avail)', nWorkersWanted, nAvail )
             raise ValueError( 'not enough devices available')
@@ -228,12 +244,12 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted,
             randomPart = str( uuid.uuid4() )[0:13]
             #keyContents += ' #' + randomPart
             sshClientKeyName = 'sproxy_%s' % (randomPart)
-            respCode = ncs.uploadSshClientKey( args.authToken, sshClientKeyName, keyContents )
+            respCode = ncs.uploadSshClientKey( authToken, sshClientKeyName, keyContents )
             if respCode < 200 or respCode >= 300:
                 logger.warning( 'ncs.uploadSshClientKey returned %s', respCode )
                 sys.exit( 'could not upload SSH client key')
         #launch
-        rc = launchInstances( args.authToken, nWorkersWanted,
+        rc = launchInstances( authToken, nWorkersWanted,
             sshClientKeyName, launchedJsonFilePath, filtersJson=args.filter,
             encryptFiles = args.encryptFiles
             )
@@ -242,7 +258,7 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted,
         # delete sshClientKey only if we just uploaded it
         if sshClientKeyName != args.sshClientKeyName:
             logger.info( 'deleting sshClientKey %s', sshClientKeyName)
-            ncs.deleteSshClientKey( args.authToken, sshClientKeyName )
+            ncs.deleteSshClientKey( authToken, sshClientKeyName )
     launchedInstances = []
     # get instances from the launched json file
     with open( launchedJsonFilePath, 'r') as jsonInFile:
@@ -256,7 +272,7 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted,
     nonstartedIids = [inst['instanceId'] for inst in launchedInstances if inst['state'] != 'started' ]
     if nonstartedIids:
         logger.warning( 'terminating non-started instances %s', nonstartedIids )
-        terminateNcsScInstances( args.authToken, nonstartedIids )
+        terminateNcsScInstances( authToken, nonstartedIids )
         logger.info( 'done terminating non-started instances' )
     # proceed with instances that were actually started
     startedInstances = [inst for inst in launchedInstances if inst['state'] == 'started' ]
@@ -281,7 +297,7 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted,
             logger.warning( 'no statuses returned from installer')
             startedIids = [inst['instanceId'] for inst in startedInstances]
             #logOperation( 'terminateBad', startedIids, '<recruitInstances>' )
-            terminateNcsScInstances( args.authToken, startedIids )
+            terminateNcsScInstances( authToken, startedIids )
             return ([], [], {})
         # separate good tellInstances statuses from bad ones
         goodIids = []
@@ -302,7 +318,7 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted,
             badIids.append( status['instanceId'] )
         if badIids:
             #logOperation( 'terminateBad', badIids, '<recruitInstances>' )
-            terminateNcsScInstances( args.authToken, badIids )
+            terminateNcsScInstances( authToken, badIids )
     if goodInstances and sigtermNotSignaled():
         # assign a forwarding port for each instance
         portMap = {}
@@ -344,7 +360,7 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted,
             badIids.append( status['instanceId'] )
         if badIids:
             #logOperation( 'terminateBad', badIids, '<recruitInstances>' )
-            terminateNcsScInstances( args.authToken, badIids )
+            terminateNcsScInstances( authToken, badIids )
 
     if goodInstances and not sigtermSignaled():
         # start squid on the good instances
@@ -373,8 +389,7 @@ def recruitInstances( nWorkersWanted, launchedJsonFilePath, launchWanted,
             badIids.append( status['instanceId'] )
         if badIids:
             #logOperation( 'terminateBad', badIids, '<recruitInstances>' )
-            terminateNcsScInstances( args.authToken, badIids )
-
+            terminateNcsScInstances( authToken, badIids )
 
     return goodInstances, badStatuses, portMap
 
@@ -430,7 +445,7 @@ def exportProxyAddrs( dataDirPath, forwarders, forwarderHost ):
             for fw in forwarders:
                 print( '%s:%s' % (forwarderHost, fw['port']), file=proxyListFile )
 
-def launchProxies( dataDirPath, db, args ):
+def launchProxies( dataDirPath, db, authToken, args ):
     '''recruits proxy nodes, starts forwarders, updates database; may raise raise ValueError'''
     startDateTime = datetime.datetime.now( datetime.timezone.utc )
     dateTimeTagFormat = '%Y-%m-%d_%H%M%S'  # cant use iso format dates in filenames because colons
@@ -438,7 +453,7 @@ def launchProxies( dataDirPath, db, args ):
 
     launchedJsonFilePath = os.path.join( dataDirPath, 'launched_%s.json' % dateTimeTag )
     resultsLogFilePath = os.path.join( dataDirPath, 'installProxy_%s.jlog' % dateTimeTag )
-    forwardingFilePath = os.path.join( dataDirPath, 'sshForwarding_%s.jlog' % dateTimeTag )
+    forwardingFilePath = os.path.join( dataDirPath, 'sshForwarding_%s.csv' % dateTimeTag )
     proxyListFilePath = os.path.join( dataDirPath, 'proxyAddrs.txt' )
 
     logger.info( 'the launch filter is %s', args.filter )
@@ -453,7 +468,7 @@ def launchProxies( dataDirPath, db, args ):
         nToLaunch = int( (args.target - nExisting) * 1.0 )
         nToLaunch = max( nToLaunch, 0 )
 
-        nAvail = ncs.getAvailableDeviceCount( args.authToken, filtersJson=args.filter )
+        nAvail = ncs.getAvailableDeviceCount( authToken, filtersJson=args.filter )
         logger.info( '%d devices available', nAvail )
 
         nToLaunch = min( nToLaunch, nAvail )
@@ -493,7 +508,8 @@ def launchProxies( dataDirPath, db, args ):
         raise RuntimeError( 'not enough ports available' )
 
     # launch and install, passing name of installer script to upload and run
-    (goodInstances, badStatuses, portMap) = recruitInstances( nToLaunch, launchedJsonFilePath, True,
+    (goodInstances, badStatuses, portMap) = recruitInstances( nToLaunch,
+        launchedJsonFilePath, authToken,
         resultsLogFilePath, args.installerFileName, preopenedPorts )
     if not goodInstances:
         logger.warning( 'no instances recruited' )
@@ -510,13 +526,13 @@ def launchProxies( dataDirPath, db, args ):
         logger.info( 'ingesting into %s', collName )
         ingestJson( launchedJsonFilePath, dbName, collName, append=True )
         # remove the launchedJsonFile to avoid local accumulation of data
-        #os.remove( launchedJsonFilePath )
+        os.remove( launchedJsonFilePath )
         if not os.path.isfile( resultsLogFilePath ):
             logger.warning( 'no results file %s', resultsLogFilePath )
         else:
             ingestJson( resultsLogFilePath, dbName, 'installProxy_'+dateTimeTag, append=False )
             # remove the resultsLogFile to avoid local accumulation of data
-            #os.remove( resultsLogFilePath )
+            os.remove( resultsLogFilePath )
         for statusRec in badStatuses:
             # carefully convert the status (which may be an exception) into a string
             # (using repr() only when str() returns empty)
@@ -527,11 +543,7 @@ def launchProxies( dataDirPath, db, args ):
             db['badInstalls'].insert_one( statusRec )
     if nRecruited and sigtermNotSignaled():
         logger.info( 'preclosing ports')
-        for sock in preopened.get('sockets', [] ):
-            try:
-                sshForwarding.preclose( sock )
-            except Exception as exc:
-               logger.warning( 'exception (%s) preclosing %s', type(exc), sock, exc_info=not False )
+        preclosedPorts = sshForwarding.preclosePorts( preopened )
 
         # start the ssh port-forwarding
         logger.info( 'would forward ports for %d instances', len(goodInstances) )
@@ -554,7 +566,7 @@ def launchProxies( dataDirPath, db, args ):
 
         goodInstances = [inst for inst in goodInstances if inst['instanceId'] in forwardedIids ]
         unusableIids = list( set(recruitedIids) - set( forwardedIids) )
-        terminateNcsScInstances( args.authToken, unusableIids )
+        terminateNcsScInstances( authToken, unusableIids )
 
 def saveErrorsByIid( errorsByIid, db, operation=None ):
     checkedColl = db.checkedInstances
@@ -563,7 +575,17 @@ def saveErrorsByIid( errorsByIid, db, operation=None ):
     checkedDateTimeStr = checkedDateTime.isoformat()
 
     for iid, err in errorsByIid.items():
+
         record = { 'instanceId': iid, 'checkedDateTime': checkedDateTimeStr, 'operation': operation }
+        # COULD do this test:
+        '''
+        try:
+            iterator = iter(err)
+        except TypeError:
+            # not iterable
+        else:
+            # iterable
+        '''
         if 'discrep' in err:
             discrep = err['discrep']
             logger.debug( 'updating clockOffset %.1f for inst %s', discrep, iid[0:8] )
@@ -650,7 +672,7 @@ def checkRequests( instances,  forwarders, forwarderHost ):
 
 def checkWorkerProcesses( instances, dataDirPath, procName ):
     '''check for a running process with the given (partial) process name on each instance'''
-    logger.info( 'checking %d instance(s)', len(instances) )
+    logger.debug( 'checking %d instance(s)', len(instances) )
 
     cmd = "ps -ef | grep -v grep | grep '%s' > /dev/null" % procName
     stepStatuses = tellInstances.tellInstances( instances, cmd,
@@ -660,7 +682,7 @@ def checkWorkerProcesses( instances, dataDirPath, procName ):
         )
     #logger.info( 'proc statuses: %s', stepStatuses )
     errorsByIid = {status['instanceId']: status for status in stepStatuses if status['status'] }
-    logger.info( 'errorsByIid: %s', errorsByIid )
+    logger.debug( 'errorsByIid: %s', errorsByIid )
     return errorsByIid
 
 def checkInstanceClocks( liveInstances, dataDirPath ):
@@ -705,7 +727,7 @@ def checkInstanceClocks( liveInstances, dataDirPath ):
         for iid in list( unfoundIids ):
             if iid not in errorsByIid:
                 errorsByIid[ iid ] = {'found': False }
-    logger.info( '%d errorsByIid: %s', len(errorsByIid), errorsByIid )
+    logger.debug( '%d errorsByIid: %s', len(errorsByIid), errorsByIid )
     return errorsByIid
 
 def retrieveLogs( goodInstances, dataDirPath, logParentDirPath=None ):
@@ -765,8 +787,7 @@ def checkLogs( liveInstances, dataDirPath ):
                     logger.warning( 'caught exception (%s) %s', type(exc), exc )
             if not ready:
                 logger.warning( 'instance %s did not say "Accepting"', iidAbbrev )
-    logger.info( 'found errors for %d instance(s)', len(errorsByIid) )
-    #print( 'errorsByIid', errorsByIid  )
+    logger.debug( 'found errors for %d instance(s)', len(errorsByIid) )
     summaryCsvFilePath = os.path.join( dataDirPath, 'errorSummary.csv' )
     fileExisted = os.path.isfile( summaryCsvFilePath )
     with open( summaryCsvFilePath, 'a' ) as csvOutFile:
@@ -982,7 +1003,22 @@ def processWorkerLogFiles( dataDirPath ):
             logger.warning( 'exception (%s) ingesting %s', type(exc), inFilePath, exc_info=not False )
     logger.info( 'ingesting %d logs took %.1f seconds', nIngested, time.time()-iStartTime)
 
-def checkWorkers( dataDirPath, db, forwarderHost, args ):
+def killForwarders( instances ):
+    # get list of forwarders so we can terminate those for dying instances
+    forwarders = sshForwarding.findForwarders()
+    forwardersByHost = { fw['host']: fw for fw in forwarders }
+
+    for inst in instances:
+        iid = inst.get('instanceId') or inst.get('_id')
+        instHost = inst['ssh']['host']
+        if instHost in forwardersByHost:
+            pid = forwardersByHost[instHost].get('pid')
+            if pid:
+                abbrevIid = iid[0:8]
+                logger.info( 'canceling forwarding (pid %d) for %s', pid, abbrevIid )
+                os.kill( pid, signal.SIGTERM )
+
+def checkWorkers( dataDirPath, db, authToken, forwarderHost, args ):
     '''checks status of worker instances, updates database'''
     if not db.list_collection_names():
         logger.warning( 'no collections found for db %s', dbName )
@@ -1013,7 +1049,7 @@ def checkWorkers( dataDirPath, db, forwarderHost, args ):
     
     # find out which checkable instances are live
     checkableIids = [inst['instanceId'] for inst in checkables ]
-    liveInstances = getLiveInstances( checkableIids, args.authToken )
+    liveInstances = getLiveInstances( checkableIids, authToken )
     liveIidSet = set( [inst['instanceId'] for inst in liveInstances ] )
 
     coll = db['checkedInstances']
@@ -1055,12 +1091,12 @@ def checkWorkers( dataDirPath, db, forwarderHost, args ):
     saveErrorsByIid( errorsByIid, db, operation='checkInstanceClocks' )
 
     checkables = [inst for inst in checkables if inst['instanceId'] not in errorsByIid]
-    logger.info( '%d instances checkable', len(checkables) )
+    logger.debug( '%d instances checkable', len(checkables) )
     errorsByIid = checkWorkerProcesses( checkables, dataDirPath, 'squid' )
     saveErrorsByIid( errorsByIid, db, operation='checkWorkerProcesses' )
 
     checkables = [inst for inst in checkables if inst['instanceId'] not in errorsByIid]
-    logger.info( '%d instances checkable', len(checkables) )
+    logger.debug( '%d instances checkable', len(checkables) )
 
     errorsByIid = retrieveLogs( checkables, dataDirPath )
     errorsByIid = checkLogs( checkables, dataDirPath )
@@ -1069,7 +1105,8 @@ def checkWorkers( dataDirPath, db, forwarderHost, args ):
 
     forwarders = sshForwarding.findForwarders()
     errorsByIid = checkForwarders( checkables,  forwarders )
-    logger.info( 'checkForwarders errorsByIid: %s', errorsByIid )
+    if errorsByIid:
+        logger.info( 'checkForwarders errorsByIid: %s', errorsByIid )
     saveErrorsByIid( errorsByIid, db, operation='checkForwarders' )
     checkables = [inst for inst in checkables if inst['instanceId'] not in errorsByIid]
 
@@ -1094,31 +1131,22 @@ if __name__ == "__main__":
     formatter = logging.Formatter(fmt=logFmt, datefmt=logDateFmt )
     logging.basicConfig(format=logFmt, datefmt=logDateFmt)
     logging.captureWarnings( True )
-    ncs.logger.setLevel(logging.INFO)
-    #runDistributedBlender.logger.setLevel(logging.INFO)
-    logger.setLevel(logging.INFO)
-    tellInstances.logger.setLevel(logging.WARNING)
-    logger.debug('the logger is configured')
 
 
     ap = argparse.ArgumentParser( description=__doc__,
         fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( 'action', help='the action to perform', 
-        choices=[ 'launch', 'check', 'terminateBad', 'maintain',
+        choices=[ 'launch', 'check', 'maintain', 'terminateBad', 'terminateAll', 'reterminate'
             ]
         )
-    '''
-        choices=['launch'
-            'check', 'maintain',
-            'terminateBad', 'terminateAll', 'reterminate']
-    '''
+    ap.add_argument( '--logLevel', type=logLevelArg, default=logging.INFO, help='verbosity of log (e.g. debug, info, warning, error)' )
     ap.add_argument( '--authToken', help='the NCS authorization token to use (required for launch or terminate)' )
     ap.add_argument( '--count', type=int, help='the number of instances (for launch)' )
     ap.add_argument( '--target', type=int, help='target number of working instances (for launch)',
         default=2 )
     ap.add_argument( '--configName', help='the name of the squid config', default='squidWorker' )
     ap.add_argument( '--dataDir', help='data directory', default='./pools/' )
-    ap.add_argument( '--encryptFiles', type=boolArg, default=False, help='whether to encrypt files on launched instances' )
+    ap.add_argument( '--encryptFiles', type=ncs.boolArg, default=False, help='whether to encrypt files on launched instances' )
     ap.add_argument( '--pool', required=True, help='the name of the proxy pool (required)' )
     ap.add_argument( '--filter', help='json to filter instances for launch',
         default = '{ "cpu-arch": "aarch64", "dar": ">=99", "storage": ">=2000000000" }' )
@@ -1140,6 +1168,12 @@ if __name__ == "__main__":
         default=11*60 )
     args = ap.parse_args()
 
+    logger.setLevel( args.logLevel )
+    ncs.logger.setLevel(args.logLevel)
+    logger.setLevel(args.logLevel)
+    tellInstances.logger.setLevel(logging.WARNING)
+    logger.debug('the logger is configured')
+
     logger.info( 'performing action "%s" for pool "%s"', args.action, args.pool )
 
     dataDirPath = os.path.join( args.dataDir, args.pool )
@@ -1155,14 +1189,31 @@ if __name__ == "__main__":
             forwarderHost = requests.get( 'https://api.ipify.org' ).text
         except forwarderHost:
             logger.warning( 'could not get public ip addr of this host')
+    
+    authToken = args.authToken or os.getenv( 'NCS_AUTH_TOKEN' )
+    if not authToken:
+        logger.error( 'no authToken was given as argument or $NCS_AUTH_TOKEN' )
+        sys.exit( 1 )
+    if not ncs.validAuthToken( authToken ):
+        logger.error( 'the given authToken was not an alphanumeric ascii string' )
+        sys.exit( 1 )
+    # do a query to check whether the authToken is actually authorized
+    resp = ncs.queryNcsSc( 'instances', authToken )
+    if resp['statusCode'] == 403:
+        logger.error( 'the given authToken was not accepted' )
+        sys.exit( 1 )
+    elif resp['statusCode'] not in range( 200, 300 ):
+        logger.error( 'service error (%d) while validating authToken' )
+        sys.exit( 1 )
+    logger.info( 'authToken ok (%s)', resp['statusCode'])
 
     if args.action == 'launch':
-        launchProxies( dataDirPath, db, args )
+        launchProxies( dataDirPath, db, authToken, args )
     elif args.action == 'check':
         if not forwarderHost:
             logger.error( 'forwarderHost not set')
             sys.exit( 'forwarderHost not set' )
-        checkWorkers( dataDirPath, db, forwarderHost, args )
+        checkWorkers( dataDirPath, db, authToken, forwarderHost, args )
     elif args.action == 'maintain':
         myPid = os.getpid()
         logger.info( 'process id %d', myPid )
@@ -1173,7 +1224,7 @@ if __name__ == "__main__":
             sys.exit(1)
         if mclient:
             mclient.close()
-        logger.info( 'argv: %s', sys.argv )
+        #logger.debug( 'argv: %s', sys.argv )
         cmd = sys.argv.copy()
         while sigtermNotSignaled():
             cmd[1] = 'check'
@@ -1191,7 +1242,7 @@ if __name__ == "__main__":
             if sigtermNotSignaled():
                 time.sleep( 30 )
     elif args.action == 'terminateBad':
-        if not args.authToken:
+        if not authToken:
             sys.exit( 'error: can not terminate because no authToken was passed')
         terminatedDateTimeStr = datetime.datetime.now( datetime.timezone.utc ).isoformat()
         # get list of forwarders so we can terminate those for dying instances
@@ -1222,7 +1273,7 @@ if __name__ == "__main__":
                 toPurge.append( checkedInst )
                 coll.update_one( {'_id': iid}, { "$set": { 'reasonTerminated': state } } )
         logger.info( 'terminating %d instances', len( toTerminate ))
-        terminated=terminateNcsScInstances( args.authToken, toTerminate )
+        terminated=terminateNcsScInstances( authToken, toTerminate )
         logger.info( 'actually terminated %d instances', len( terminated ))
         purgeHostKeys( toPurge )
         # update states in checkedInstances
@@ -1231,33 +1282,20 @@ if __name__ == "__main__":
                 { "$set": { "state": "terminated",
                     'terminatedDateTime': terminatedDateTimeStr } } )
     elif args.action == 'terminateAll':
-        if not args.authToken:
+        if not authToken:
             sys.exit( 'error: can not terminate because no authToken was passed')
         logger.info( 'checking for instances to terminate')
         # will terminate all instances and update checkedInstances accordingly
-        startedInstances = getStartedInstances( db )  # expensive, could just query for iids
+        startedInstances = getStartedInstances( db )
         startedIids = [inst['instanceId'] for inst in startedInstances]
-
-        logger.info( 'checking for instances to deauthorize')
-        # retrieve list of signers so we can deauthorize each before terminating
-        allSigners = list( db['allSigners'].find() )
-        logger.info( 'len(allSigners): %d', len(allSigners) )
-        signersByIid = {signer['instanceId']: signer for signer in allSigners }
-        logger.debug( 'signer iids: %s', signersByIid.keys() )
-
-        nToDeauth = 0
-        for iid in startedIids:
-            if iid in signersByIid and signersByIid[iid].get('auth'):
-                nToDeauth += 1
-                logger.info( 'terminateAll not deauthorizing %s', iid )
-                #authorizeSigner( db, args.configName, iid, False )
-                time.sleep( 30 )
-        logger.info( 'deauthorized %d nodes', nToDeauth )
+        
+        killForwarders( startedInstances )
+        #sys.exit( 'DEBUGGING' )
 
         terminatedDateTimeStr = datetime.datetime.now( datetime.timezone.utc ).isoformat()
         toTerminate = startedIids
         logger.info( 'terminating %d instances', len( toTerminate ))
-        terminated=terminateNcsScInstances( args.authToken, toTerminate )
+        terminated=terminateNcsScInstances( authToken, toTerminate )
         purgeHostKeys( startedInstances )
 
         # update states in checkedInstances
@@ -1275,21 +1313,28 @@ if __name__ == "__main__":
                             } )
     elif args.action == 'reterminate':
         '''redundantly terminate instances that are listed as already terminated'''
-        if not args.authToken:
+        if not authToken:
             sys.exit( 'error: can not terminate because no authToken was passed')
         # get list of terminated instance IDs
         coll = db['checkedInstances']
         wereChecked = list( coll.find({'state': 'terminated'},
-            {'_id': 1, 'terminatedDateTime': 1 }) )
+            {'_id': 1, 'ssh': 1, 'terminatedDateTime': 1 }) )
         toTerminate = []
+        terminalInstances = []
         for checkedInst in wereChecked:
             iid = checkedInst['_id']
-            abbrevIid = iid[0:16]
-            if checkedInst['terminatedDateTime'] >= '2020-07-24':
-                logger.info( 'would reterminate %s from %s', abbrevIid, checkedInst['terminatedDateTime'] )
-                toTerminate.append( iid )
+            abbrevIid = iid[0:8]
+            tdt = checkedInst.get( 'terminatedDateTime', '(no terminatedDateTime)' )
+            logger.info( 'would reterminate %s from %s', abbrevIid, tdt )
+
+            toTerminate.append( iid )
+            terminalInstances.append( checkedInst )
+        
+        toUnforward = [inst for inst in terminalInstances if 'ssh' in inst ]
+        logger.info( 'unforwarding up to %d instances', len( toUnforward ))
+        killForwarders( toUnforward )
         logger.info( 'reterminating %d instances', len( toTerminate ))
-        terminated = terminateNcsScInstances( args.authToken, toTerminate )
+        terminated = terminateNcsScInstances( authToken, toTerminate )
         logger.info( 'reterminated %d instances', len( terminated ) )
         #TODO purgeHostKeys
     else:
