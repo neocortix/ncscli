@@ -89,6 +89,24 @@ def preopenPorts( startPort, maxPort, nPortsReq, ipAddr='0.0.0.0' ):
         results['sockets'] = sockets
     return results
 
+def preclosePorts( preopened ):
+    '''preclose ports pereopened by preopenPorts'''
+    if not preopened: return []
+    if not preopened.get('ports'): return []
+    if not preopened.get('sockets'): return []
+    if len( preopened['ports']) != len(preopened['sockets'] ):
+        logger.warning( 'mismatched length of ports and sockets lists' )
+        return []
+    preclosedPorts = []
+    for index, sock in enumerate( preopened['sockets'] ):
+        try:
+            preclose( sock )
+        except Exception as exc:
+            logger.warning( 'exception (%s) preclosing %s', type(exc), sock, exc_info=False )
+        else:
+            preclosedPorts.append( preopened['ports'][index] )
+    return preclosedPorts
+
 def findForwarders():
     mappings = []
     for proc in psutil.process_iter():
