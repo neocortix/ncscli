@@ -6,6 +6,7 @@ import glob
 import logging
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -64,6 +65,46 @@ class JMeterFrameProcessor(batchRunner.frameProcessor):
             cmd += ' && cp %s jmeterOut/ 2>/dev/null || true' % self.jtlFileName
         cmd += ' && mv jmeterOut ~/%s' % (self.frameOutFileName( frameNum ))
         return cmd
+
+    def interpretStdoutProgress( self, stdoutLine, **kwargs ):
+        def hhMmSsToSeconds( hhMmSs ):
+            h, m, s = hhMmSs.split(':')
+            return int(h) * 3600 + int(m) * 60 + int(s)
+
+        if 'summary +' in stdoutLine:
+            # a recent metrics line
+            pat = r'summary \+\s*([0-9]+) in\s*([0-9]+:[0-9]+:[0-9]+) =\s*([0-9]*\.[0-9]*)/s\s*Avg:\s*([0-9]*)\s*Min:\s*([0-9]*)\s*Max:\s*([0-9]*)\s*Err:\s*([0-9]*).*Active:\s([0-9]*)\s*Started:\s*([0-9]*)\s*Finished:\s*([0-9]*)'
+            match = re.search( pat, stdoutLine )
+            if match:
+                metrics = {
+                    'nReqs': int( match.group(1) ),
+                    'dur': hhMmSsToSeconds( match.group(2) ),
+                    'rps': float( match.group(3) ),
+                    'meanRt': int( match.group(4) ),
+                    'minRt': int( match.group(5) ),
+                    'maxRt': int( match.group(6) ),
+                    'nErrs': int( match.group(7) ),
+                    'threadsActive': int( match.group(8) ),
+                    'threadsStarted': int( match.group(9) ),
+                    'threadsFinished': int( match.group(10) ),
+                }
+                return {'recent': metrics }
+        elif 'summary =' in stdoutLine:
+            # a cumulative metrics line
+            pat = r'summary =\s*([0-9]+) in\s*([0-9]+:[0-9]+:[0-9]+) =\s*([0-9]*\.[0-9]*)/s\s*Avg:\s*([0-9]*)\s*Min:\s*([0-9]*)\s*Max:\s*([0-9]*)\s*Err:\s*([0-9]*)'
+            match = re.search( pat, stdoutLine )
+            if match:
+                metrics = {
+                    'nReqs': int( match.group(1) ),
+                    'dur': hhMmSsToSeconds( match.group(2) ),
+                    'rps': float( match.group(3) ),
+                    'meanRt': int(match.group(4) ),
+                    'minRt': int(match.group(5) ),
+                    'maxRt': int(match.group(6) ),
+                    'nErrs': int(match.group(7) ),
+                }
+                return {'cumulative': metrics }
+        return None
 
 
 # configure logger formatting
