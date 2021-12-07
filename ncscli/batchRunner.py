@@ -59,6 +59,7 @@ class g_:
     resultsLogFile = None
     resultsLogFilePath = None
     progressFilePath = None
+    progressLogFile = None
     deadline = None
     interrupted = False
     serverAliveInterval = 30
@@ -80,6 +81,9 @@ class frameProcessor(object):
 
     def frameCmd( self, frameNum ):
         return 'hostname > %s' % (self.frameOutFileName(frameNum))
+
+    def interpretStdoutProgress( self, stdoutLine, **kwargs ):
+        return None
 
 g_.frameProcessor = frameProcessor()
 
@@ -185,6 +189,13 @@ def logInstallerEvent( key, value, instanceId ):
 def logInstallerOperation( instanceId, opArgs ):
     # opArgs is a list containing the name of the op and its parameters
     logInstallerEvent( 'operation', opArgs, instanceId )
+
+def logProgress( instanceId, frameNum, reportedProgress ):
+    toLog = {'instanceId': instanceId, 'frameNum': frameNum,
+        'dateTime': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        'progress': reportedProgress }
+    print( json.dumps( toLog, sort_keys=True ), file=g_.progressLogFile )
+    g_.progressLogFile.flush()
 
 
 def boolArg( v ):
@@ -865,22 +876,17 @@ def renderFramesOnInstance( inst ):
             logStderr( line.rstrip(), iid )
 
     def trackStdout( proc ):
-        nonlocal frameProgress
         for line in proc.stdout:
             #print( '<stdout>', abbrevIid, line.strip(), file=sys.stderr )
-            # these progress-tracking details are specific for blender #TODO generalize
-            if 'Path Tracing Tile' in line:
-                pass
-                # yes, this progress-parsing code does work
-                pat = r'Path Tracing Tile ([0-9]+)/([0-9]+)'
-                match = re.search( pat, line )
-                if match:
-                    frameProgress = float( match.group(1) ) / float( match.group(2) )
-            elif '| Updating ' in line:
-                pass
-            elif '| Synchronizing object |' in line:
-                pass
-            elif line.strip():
+            # ask the frameProcessor to scan this stdout line for progress indicators
+            reportedProgress = None
+            try:
+                reportedProgress = g_.frameProcessor.interpretStdoutProgress( line )
+            except Exception as exc:
+                logger.warning( 'exception from interpretStdoutProgress (%s) %s ', type(exc), exc, exc_info=True )
+            if reportedProgress:
+                logProgress( iid, frameNum, reportedProgress )
+            if line.strip():
                 logStdout( line.rstrip(), iid )
                 if logLevel <= logging.INFO:
                     print( '<stdout>', abbrevIid, line.strip(), file=sys.stderr )
@@ -1319,6 +1325,7 @@ def runBatch( **kwargs ):
     logger.debug('procID: %s', myPid)
 
     g_.progressFilePath = g_.dataDirPath + '/progress.json'
+    progressLogPath = g_.dataDirPath + '/progress.jlog'
     settingsJsonFilePath = g_.dataDirPath + '/batchRunner_settings.json'
     installerLogFilePath = g_.dataDirPath + '/recruitInstances.jlog'
     resultsLogFilePath = g_.dataDirPath+'/'+ \
@@ -1327,6 +1334,11 @@ def runBatch( **kwargs ):
         g_.resultsLogFile = open( resultsLogFilePath, "w", encoding="utf8" )
     else:
         g_.resultsLogFile = None
+    if progressLogPath:
+        g_.progressLogFile = open( progressLogPath, "w", encoding="utf8" )
+    else:
+        g_.progressLogFile = None
+
     argsToSave = vars(args).copy()
     del argsToSave['authToken']
     #del argsToSave['frameProcessor']
