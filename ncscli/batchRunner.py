@@ -890,6 +890,7 @@ def renderFramesOnInstance( inst ):
                 logStdout( line.rstrip(), iid )
                 if logLevel <= logging.INFO:
                     print( '<stdout>', abbrevIid, line.strip(), file=sys.stderr )
+                    sys.stderr.flush()
     nFailures = 0    
     while len( g_.framesFinished) < g_.nFramesWanted:
         if sigtermSignaled():
