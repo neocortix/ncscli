@@ -19,7 +19,7 @@ import uuid
 # third-party modules
 import requests
 
-__version__ = '1.2.1'
+__version__ = '1.2.2'
 logger = logging.getLogger(__name__)
 
 baseUrl = 'https://cloud.neocortix.com'
