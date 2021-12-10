@@ -32,6 +32,8 @@ def runJMeterBatch( batch, outDataDir ):
     binPath = scriptDirPath()+'/runDistributedJMeter.py'
     filter = batch['filter']
     regionsStr = '+'.join( filter.get('regions', []) )
+    if not regionsStr:
+        regionsStr = 'any'
     filtersJson = json.dumps( filter )
 
     randomPart = str( uuid.uuid4() )[0:18]
@@ -46,11 +48,13 @@ def runJMeterBatch( batch, outDataDir ):
         '--outDataDir', subDirPath,
         '--nWorkers', str(batch['nWorkers'])
     ]
+    if batch.get( 'jtlFile' ):
+        cmd.extend( ['--jtlFile', batch['jtlFile']] )
     logger.info( 'cmd: %s', cmd )
-    if True:
-        proc = subprocess.run( cmd )
-        rc = proc.returncode
-        logger.info( 'returnCode %d from runDistributedJMeter for %s', rc, subDir )
+    proc = subprocess.run( cmd )
+    rc = proc.returncode
+    logger.info( 'returnCode %d from runDistributedJMeter for %s', rc, subDir )
+    return rc
 
 if __name__ == '__main__':
     # configure logger formatting
@@ -100,16 +104,25 @@ if __name__ == '__main__':
     jobPlan = {
         'defaults': {
             'filter': { "dar": ">=99", "storage": ">=2000000000" },
-            'workerDir': 'locationWorker',
-            'jmxFile': 'locationDemo.jmx',
+            'workerDir': 'mbProj_00',
+            #'workerDir': 'locationWorker',
+            'jmxFile': 'multibatchDemo.jmx',
+            #'jmxFile': 'locationDemo.jmx',
             'planDuration': 300,
             'nWorkers': 3
         },
         'batches': [
             {'filter': { "regions": ["usa-east", "usa-west"], "dar": ">=99", "storage": ">=2000000000" },
+                'workerDir': 'mbProj_00/usaWorker',
                 'nWorkers': 6},
             {'filter': { "regions": ["russia"], "dar": ">=99", "storage": ">=2000000000" },
+                'workerDir': 'mbProj_00/russiaWorker',
                 'nWorkers': 3},
+            {'filter': { "regions": ["usa-central", "usa-west"], "dar": ">=99", "storage": ">=2000000000" },
+                'workerDir': 'mbProj_00/demo2Worker',
+                'jmxFile': 'multibatchDemo2.jmx',
+                'jtlFile': 'TestPlan_results.jtl',
+                'nWorkers': 6},
         ]
     }
     logger.info( 'jobPlan: %s', jobPlan )
@@ -128,8 +141,14 @@ if __name__ == '__main__':
 
     defaults = jobPlan['defaults']
     batches = jobPlan['batches']
-    # for each batch, check input values and ill in default values
+    # for each batch, check input values and fill in default values
+    jtlFilePaths = []
     for batch in batches:
+        if 'filter' not in batch:
+            batch['filter'] = defaults.get('filter')
+        if not batch['filter']:
+            logger.error( 'no filter for batch %s', batch )
+
         workerDirPath = batch.get('workerDir')
         if not workerDirPath:
             workerDirPath = defaults.get('workerDir')
@@ -210,8 +229,7 @@ if __name__ == '__main__':
                     sys.exit( 1 )
 
             batch['jtlFile'] = jtlFilePath
-        if not jtlFilePath:
-            jtlFilePath = 'TestPlan_results.csv'
+        jtlFilePaths.append( jtlFilePath or '' )
         logger.info( 'jtlFilePath: %s', jtlFilePath )
 
         nFrames = batch.get('nWorkers') or defaults.get('nWorkers')
@@ -223,43 +241,67 @@ if __name__ == '__main__':
         outDataDir = args.outDataDir
     logger.info( jobPlan )
 
+    jtlFilePath = 'TestPlan_results.csv'
+    if jtlFilePaths:
+        if min( jtlFilePaths ) != max( jtlFilePaths ):
+            logger.warning( 'more then one jtl file was specified; merge may not work as expected')
+        else:
+            jtlFilePath = jtlFilePaths[0]
+    logger.info( 'will merge %s files, given files %s', jtlFilePath, jtlFilePaths )
+
     # abort if outDataDir is not empty enough
     if os.path.isdir( outDataDir) \
         and os.listdir( outDataDir ):
         logger.error( 'please use a different outDataDir for each run' )
         sys.exit( 1 )
 
-    logger.info( 'ready to run batches')
-    # would run batches in parallel
+    logger.info( 'ready to run %d batches', len( batches ))
+    # run batches in parallel (set fals for sequential debugging)
     if True:
         nBatches = len(batches)
         with futures.ThreadPoolExecutor( max_workers=nBatches ) as executor:
             parIter = executor.map( runJMeterBatch, batches, [outDataDir]*nBatches )
-            results = list( parIter )
+            resultCodes = list( parIter )
     else:
+        resultCodes = []
         for batch in batches:
-            runJMeterBatch( batch, outDataDir)
+            rc = runJMeterBatch( batch, outDataDir)
+            resultCodes.append( rc )
+    if all( resultCodes ):
+        logger.error( 'all batches gave bad return codes')
+        sys.exit( 1 )
+    if True:
+        jtlFileName = os.path.basename( jtlFilePath )
+        if jtlFileName:
+            nameParts = os.path.splitext(jtlFileName)
+            mergedJtlFileName = nameParts[0]+'_merged_' + nameParts[1]
+            rc = subprocess.call( [sys.executable, scriptDirPath()+'/mergeMultibatchOutput.py',
+                '--dataDirPath', outDataDir,
+                '--csvPat', 'jmeterOut_%%03d/%s' % jtlFileName,
+                '--mergedCsv', mergedJtlFileName
+                ], stdout=subprocess.DEVNULL
+                )
+            if rc:
+                logger.warning( 'mergeMultibatchOutput.py exited with returnCode %d', rc )
+            else:
+                if not os.path.isfile( jmeterBinPath ):
+                    logger.info( 'no jmeter installed for producing reports (%s)', jmeterBinPath )
+                else:
+                    rcx = subprocess.call( [jmeterBinPath,
+                        '-g', os.path.join( outDataDir, mergedJtlFileName ),
+                        '-o', os.path.join( outDataDir, 'htmlReport' )
+                        ], stderr=subprocess.DEVNULL
+                    )
+                    try:
+                        shutil.move( 'jmeter.log', os.path.join( outDataDir, 'genHtml.log') )
+                    except Exception as exc:
+                        logger.warning( 'could not move the jmeter.log file (%s) %s', type(exc), exc )
+                    if rcx:
+                        logger.warning( 'jmeter reporting exited with returnCode %d', rcx )
 
     '''
     try:
-        rc = batchRunner.runBatch(
-            frameProcessor = JMeterFrameProcessor(),
-            commonInFilePath = JMeterFrameProcessor.workerDirPath,
-            authToken = args.authToken or os.getenv( 'NCS_AUTH_TOKEN' ) or 'YourAuthTokenHere',
-            cookie = args.cookie,
-            encryptFiles=False,
-            timeLimit = frameTimeLimit + 40*60,
-            instTimeLimit = 6*60,
-            frameTimeLimit = frameTimeLimit,
-            filter = args.filter,
-            #filter = '{ "regions": ["usa", "india"], "dar": "==100", "dpr": ">=48", "ram": ">=3800000000", "storage": ">=2000000000" }',
-            #filter = '{ "regions": ["usa", "india"], "dar": "==100", "dpr": ">=48", "ram": ">=2800000000", "app-version": ">=2.1.11" }',
-            outDataDir = outDataDir,
-            startFrame = 1,
-            endFrame = nFrames,
-            nWorkers = nWorkers,
-            limitOneFramePerWorker = True,
-            autoscaleMax = 1
+        rc = batchRunner.runBatch( ...
         )
         if (rc == 0) and os.path.isfile( outDataDir +'/recruitLaunched.json' ):
             rampStepDuration = args.rampStepDuration
