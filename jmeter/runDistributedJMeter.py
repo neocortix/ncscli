@@ -146,7 +146,7 @@ if workerDirPath:
     if not os.path.isdir( workerDirPath ):
         logger.error( 'the workerDirPath "%s" is not a directory', workerDirPath )
         sys.exit( 1 )
-    JMeterFrameProcessor.workerDirPath = workerDirPath
+    JMeterFrameProcessor.workerDirPath = os.path.basename( workerDirPath )
 else:
     logger.error( 'this version requires a workerDirPath' )
     sys.exit( 1 )
@@ -235,7 +235,7 @@ if os.path.isfile( outDataDir+'/batchRunner_results.jlog') \
 try:
     rc = batchRunner.runBatch(
         frameProcessor = JMeterFrameProcessor(),
-        commonInFilePath = JMeterFrameProcessor.workerDirPath,
+        commonInFilePath = workerDirPath,
         authToken = args.authToken or os.getenv( 'NCS_AUTH_TOKEN' ) or 'YourAuthTokenHere',
         cookie = args.cookie,
         encryptFiles=False,
