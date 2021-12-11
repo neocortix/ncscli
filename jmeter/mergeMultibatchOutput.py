@@ -119,7 +119,7 @@ if __name__ == "__main__":
     instancesByIid = { inst['instanceId']: inst for inst in launchedInstances }
     '''
     batchDirPaths = glob.glob( os.path.join( outputDir, 'batch_*_*' ) )
-    logger.info( 'batchDirs: %s', batchDirPaths )
+    logger.debug( 'batchDirs: %s', batchDirPaths )
 
     totRowsRead = 0
     fieldNames = None
@@ -130,6 +130,8 @@ if __name__ == "__main__":
             jlogFilePath = batchDirPath + "/batchRunner_results.jlog"
             completedFrames = extractFrameInfo(jlogFilePath)
             logger.debug( 'found %d frames', len(completedFrames) )
+            if not completedFrames:
+                continue  # move on to next batch
             iidByFrame = { frame['frameNum']: frame['instanceId'] for frame in completedFrames }
             logger.debug( 'iidByFrame: %s', iidByFrame )
             frameNums = [int(frame['frameNum']) for frame in completedFrames]
