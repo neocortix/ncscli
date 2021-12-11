@@ -68,20 +68,9 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser( description=__doc__,
         fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( '--authToken', help='the NCS authorization token to use (or none, to use NCS_AUTH_TOKEN env var' )
+    ap.add_argument( '--projDir', required=True, help='a path to the input project data dir for this run (required)' )
     ap.add_argument( '--outDataDir', required=True, help='a path to the output data dir for this run (required)' )
     '''
-    ap.add_argument( '--filter', help='json to filter instances for launch',
-        default = '{ "regions": ["usa", "india"], "dar": "==100", "dpr": ">=48", "ram": ">=3800000000", "storage": ">=2000000000" }'
-        )
-    ap.add_argument( '--jmxFile', required=True, help='the JMeter test plan file path (required)' )
-    ap.add_argument( '--jtlFile', help='the file name of the jtl file produced by the test plan (if any)',
-        default=None
-        )
-    ap.add_argument( '--planDuration', type=float, default=0, help='the expected duration of the test plan, in seconds' )
-    ap.add_argument( '--workerDir', help='the directory to upload to workers',
-        default='jmeterWorker'
-        )
-    ap.add_argument( '--nWorkers', type=int, default=6, help='the number of Load-generating workers' )
     # for analysis and plotting
     ap.add_argument( '--rampStepDuration', type=float, default=60, help='duration of ramp step, in seconds' )
     ap.add_argument( '--SLODuration', type=float, default=240, help='SLO duration, in seconds' )
@@ -100,31 +89,16 @@ if __name__ == '__main__':
         logger.error( 'the given authToken was not an alphanumeric ascii string' )
         sys.exit( 1 )
 
-    #TODO get jobPlan from json (or yml) file
-    jobPlan = {
-        'defaults': {
-            'filter': { "dar": ">=99", "storage": ">=2000000000" },
-            'workerDir': 'mbProj_00',
-            #'workerDir': 'locationWorker',
-            'jmxFile': 'multibatchDemo.jmx',
-            #'jmxFile': 'locationDemo.jmx',
-            'planDuration': 300,
-            'nWorkers': 3
-        },
-        'batches': [
-            {'filter': { "regions": ["usa-east", "usa-west"], "dar": ">=99", "storage": ">=2000000000" },
-                'workerDir': 'mbProj_00/usaWorker',
-                'nWorkers': 6},
-            {'filter': { "regions": ["russia"], "dar": ">=99", "storage": ">=2000000000" },
-                'workerDir': 'mbProj_00/russiaWorker',
-                'nWorkers': 3},
-            {'filter': { "regions": ["usa-central", "usa-west"], "dar": ">=99", "storage": ">=2000000000" },
-                'workerDir': 'mbProj_00/demo2Worker',
-                'jmxFile': 'multibatchDemo2.jmx',
-                'jtlFile': 'TestPlan_results.jtl',
-                'nWorkers': 6},
-        ]
-    }
+    projDirPath = args.projDir
+    if not projDirPath:
+        logger.error( 'please provide a --projDir (project directory path) to read from')
+        sys.exit( 1 )
+    with open( os.path.join( projDirPath, 'jobPlan.json' ), 'r') as jsonInFile:
+        try:
+            jobPlan = json.load(jsonInFile)  # a dict
+        except Exception as exc:
+            logger.error( 'could not load jobPlan.json (%s) %s', type(exc), exc )
+            sys.exit( 1 )
     logger.info( 'jobPlan: %s', jobPlan )
     if 'batches' not in jobPlan:
             logger.error( 'no batches were defined in the jobPlan' )
@@ -133,7 +107,6 @@ if __name__ == '__main__':
             logger.error( 'no defaults were defined in the jobPlan' )
             sys.exit( 1 )
 
-
     jmeterBinPath = args.jmeterBinPath
     if not jmeterBinPath:
         jmeterVersion = '5.4.1'  # 5.3 and 5.4.1 have been tested, others may work as well
@@ -141,14 +114,31 @@ if __name__ == '__main__':
 
     defaults = jobPlan['defaults']
     batches = jobPlan['batches']
+    # in the defaults make any directly specified regions override any found in default filter
+    if 'regions' in defaults:
+        #TODO do more checking for unhealthy inputs
+        if 'filter' in defaults:
+            defaults['filter']['regions'] = defaults['regions']
+        else:
+            defaults['filter'] = {'regions': defaults['regions']}
     # for each batch, check input values and fill in default values
     jtlFilePaths = []
     for batch in batches:
         if 'filter' not in batch:
-            batch['filter'] = defaults.get('filter')
-        if not batch['filter']:
-            logger.error( 'no filter for batch %s', batch )
-
+            if 'filter' not in defaults:
+                logger.error( 'please provide a filter in defaults or in each batch (%s)', batch )
+                sys.exit( 1 )
+            batch['filter'] = defaults.get('filter', {}).copy()
+        #if not batch['filter']: # actually an empty filter is allowed
+        #    logger.error( 'no filter for batch %s', batch )
+        if batch.get('regions'):
+            regions = batch.get('regions')
+            if isinstance( regions, str ):
+                regions = [regions]
+            elif not isinstance( regions, list ):
+                logger.error( 'the regions in a jobPlan batch is not a list (%s)', batch)
+                sys.exit( 1 )
+            batch['filter']['regions'] = regions
         workerDirPath = batch.get('workerDir')
         if not workerDirPath:
             workerDirPath = defaults.get('workerDir')
@@ -157,6 +147,8 @@ if __name__ == '__main__':
             sys.exit( 1 )
         workerDirPath = workerDirPath.rstrip( '/' )  # trailing slash could cause problems with rsync
         if workerDirPath:
+            # interpret as relative path, prepending projDir
+            workerDirPath = projDirPath + '/' + workerDirPath
             if not os.path.isdir( workerDirPath ):
                 logger.error( 'the workerDirPath "%s" is not a directory', workerDirPath )
                 sys.exit( 1 )
@@ -214,7 +206,7 @@ if __name__ == '__main__':
                 sys.exit( 1 )
 
             planJtlFiles = jmxTool.findJtlFileNames( jmxTree )
-            logger.info( 'planJtlFiles: %s', planJtlFiles )
+            logger.debug( 'planJtlFiles: %s', planJtlFiles )
             normalizedJtlFiles = planJtlFiles
             # don't replace backslashes for now
             #normalizedJtlFiles = [path.replace( '\\', '/' ) for path in planJtlFiles]
@@ -230,22 +222,24 @@ if __name__ == '__main__':
 
             batch['jtlFile'] = jtlFilePath
         jtlFilePaths.append( jtlFilePath or '' )
-        logger.info( 'jtlFilePath: %s', jtlFilePath )
+        logger.debug( 'jtlFilePath: %s', jtlFilePath )
 
-        nFrames = batch.get('nWorkers') or defaults.get('nWorkers')
-        nWorkers = math.ceil(nFrames*1.5) if nFrames <=10 else round( max( nFrames*1.12, nFrames + 5 * math.log10( nFrames ) ) )
-        batch['nInstances'] = nWorkers
-        batch['nFrames'] = nFrames
+        nWorkers = batch.get('nWorkers') or defaults.get('nWorkers')
+        if not nWorkers:
+            logger.error( 'please provide nWorkers in jobPlan defaults or in each batch' )
+            sys.exit( 1 )
+        batch['nWorkers'] = nWorkers
         
         dateTimeTag = datetime.datetime.now().strftime( '%Y-%m-%d_%H%M%S' )
         outDataDir = args.outDataDir
-    logger.info( jobPlan )
+    logger.info( 'processed jobPlan: %s', jobPlan )
 
+    # decide a jtlFilePath name to merge from, based on the list of those specified
     jtlFilePath = 'TestPlan_results.csv'
     if jtlFilePaths:
         if min( jtlFilePaths ) != max( jtlFilePaths ):
-            logger.warning( 'more then one jtl file was specified; merge may not work as expected')
-        else:
+            logger.warning( 'more than one jtl file was specified; merge may not work as expected')
+        elif jtlFilePaths[0]:
             jtlFilePath = jtlFilePaths[0]
     logger.info( 'will merge %s files, given files %s', jtlFilePath, jtlFilePaths )
 
@@ -317,34 +311,8 @@ if __name__ == '__main__':
             if rc2:
                 logger.warning( 'plotJMeterOutput exited with returnCode %d', rc2 )
     
-            jtlFileName = os.path.basename( jtlFilePath )
-            if jtlFileName:
-                nameParts = os.path.splitext(jtlFileName)
-                mergedJtlFileName = nameParts[0]+'_merged_' + dateTimeTag + nameParts[1]
-                rc2 = subprocess.call( [sys.executable, scriptDirPath()+'/mergeBatchOutput.py',
-                    '--dataDirPath', outDataDir,
-                    '--csvPat', 'jmeterOut_%%03d/%s' % jtlFileName,
-                    '--mergedCsv', mergedJtlFileName
-                    ], stdout=subprocess.DEVNULL
-                    )
-                if rc2:
-                    logger.warning( 'mergeBatchOutput.py exited with returnCode %d', rc2 )
-                else:
-                    if not os.path.isfile( jmeterBinPath ):
-                        logger.info( 'no jmeter installed for producing reports (%s)', jmeterBinPath )
-                    else:
-                        rcx = subprocess.call( [jmeterBinPath,
-                            '-g', os.path.join( outDataDir, mergedJtlFileName ),
-                            '-o', os.path.join( outDataDir, 'htmlReport' )
-                            ], stderr=subprocess.DEVNULL
-                        )
-                        try:
-                            shutil.move( 'jmeter.log', os.path.join( outDataDir, 'genHtml.log') )
-                        except Exception as exc:
-                            logger.warning( 'could not move the jmeter.log file (%s) %s', type(exc), exc )
-                        if rcx:
-                            logger.warning( 'jmeter reporting exited with returnCode %d', rcx )
         sys.exit( rc )
     except KeyboardInterrupt:
         logger.warning( 'an interuption occurred')
     '''
+    logger.info( 'finished' )
