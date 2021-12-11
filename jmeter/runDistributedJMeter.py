@@ -30,6 +30,7 @@ class JMeterFrameProcessor(batchRunner.frameProcessor):
     #JMeterFilePath = workerDirPath+'/TestPlan.jmx'
     JMeterFilePath = workerDirPath+'/XXX.jmx'
     jtlFileName = None
+    nFrames = 0
     JVM_ARGS ='-Xms30m -XX:MaxMetaspaceSize=64m -Dnashorn.args=--no-deprecation-warning'
     # a shell command that uses python psutil to get a recommended java heap size
     # computes available ram minus some number for safety, but not less than some minimum
@@ -57,7 +58,7 @@ class JMeterFrameProcessor(batchRunner.frameProcessor):
         #return 'TestPlan_results_%03d.csv' % frameNum
 
     def frameCmd( self, frameNum ):
-        propsClause = '-D neocortix.instanceNum=%d' % frameNum
+        propsClause = '-D neocortix.instanceNum=%d -D neocortix.nInstances=%d' % (frameNum, self.nFrames)
         cmd = '''cd %s && mkdir -p jmeterOut && JVM_ARGS="%s -Xmx$(%s)" /opt/apache-jmeter/bin/jmeter.sh -n -t %s/%s/%s -l jmeterOut/TestPlan_results.csv %s -D jmeter.save.saveservice.error_count=true -D jmeter.save.saveservice.sample_count=true -D httpclient4.time_to_live=1 -D httpclient.reset_state_on_thread_group_iteration=true''' % (
             self.workerDirPath, self.JVM_ARGS, self.clause, self.homeDirPath, self.workerDirPath, self.JMeterFilePath, propsClause
         )
@@ -220,6 +221,8 @@ if not jtlFilePath:
 logger.info( 'jtlFilePath: %s', jtlFilePath )
 
 nFrames = args.nWorkers
+JMeterFrameProcessor.nFrames = nFrames
+
 #nWorkers = round( nFrames * 1.5 )  # old formula
 nWorkers = math.ceil(nFrames*1.5) if nFrames <=10 else round( max( nFrames*1.12, nFrames + 5 * math.log10( nFrames ) ) )
 
