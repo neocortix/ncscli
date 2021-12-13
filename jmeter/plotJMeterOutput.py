@@ -592,7 +592,10 @@ if __name__ == "__main__":
     startRelTimesAndMSPRsRussiaMuxed = []
     startRelTimesAndMSPRsOtherMuxed = []
     startRelTimesAndMSPRsAllMuxed = []
-    clipTimeInSeconds = 4.00
+
+    # clipTimeInSeconds = 4.00
+    clipTimeInSeconds = SLOResponseTimeMaxSeconds * 1.2
+
     # getColumn(relativeResponseData[i],6)  # relative time
     # getColumn(relativeResponseData[i],7)  # response codes
     startRelTimesAndCodesUnitedStatesMuxed = []
