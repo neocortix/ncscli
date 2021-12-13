@@ -356,7 +356,11 @@ if __name__ == "__main__":
         for j in range(0,len(fields)):
             if len(fields[j]) <= 3:
                 logger.info( 'fields[j]: %s from %s', fields[j], resultFileNames[i] )
-            if (len(fields[j]) > 3) and (fields[j][2] in reducedLabels) and fields[j][3] == "200" and fields[j][6] != "text":
+            # if (len(fields[j]) > 3) and (fields[j][2] in reducedLabels) and fields[j][3]=="200" and fields[j][6] != "text":
+            # accepts error codes "2XX", i.e. 200, 201, 202, 204, 206, and others
+            # if (len(fields[j]) > 3) and (fields[j][2] in reducedLabels) and (len(fields[j][3])==3 and fields[j][3][0] == "2") and fields[j][6] != "text":
+            # no restriction on fields[j][6]
+            if (len(fields[j]) > 3) and (fields[j][2] in reducedLabels) and (len(fields[j][3])==3 and fields[j][3][0] == "2"):
             # if (fields[j][2] == "HTTP Request" or fields[j][2] == "GetWorkload" or fields[j][2] == "GetStarttime" or fields[j][2] == "GetDistribution")  and fields[j][3] == "200":
                 startTimes.append(int(fields[j][0])/1000.0)
                 elapsedTimes.append(int(fields[j][1])/1000.0)         
@@ -425,7 +429,9 @@ if __name__ == "__main__":
             for j in range(0,len(fields)):
                 if len(fields[j]) <= 3:
                     logger.info( 'fields[j]: %s from %s', fields[j], resultFileNames[i] )
-                if (len(fields[j]) > 3) and (fields[j][2] in reducedLabels) and fields[j][3] == "200" and fields[j][6] == "text":
+                # if (len(fields[j]) > 3) and (fields[j][2] in reducedLabels) and fields[j][3]=="200" and fields[j][6] == "text":
+                # accepts error codes "2XX", i.e. 200, 201, 202, 204, 206, and others
+                if (len(fields[j]) > 3) and (fields[j][2] in reducedLabels) and (len(fields[j][3])==3 and fields[j][3][0] == "2") and fields[j][6] == "text":
                 # if (fields[j][2] == "HTTP Request" or fields[j][2] == "GetWorkload" or fields[j][2] == "GetStarttime" or fields[j][2] == "GetDistribution")  and fields[j][3] == "200":
                     startTimes.append(int(fields[j][0])/1000.0)
                     elapsedTimes.append(int(fields[j][1])/1000.0)         
@@ -618,31 +624,57 @@ if __name__ == "__main__":
     startRelTimesAndCodesOther = [flattenList(getColumn(startRelTimesAndCodesOtherMuxed,0)),flattenList(getColumn(startRelTimesAndCodesOtherMuxed,1))]
     startRelTimesAndCodesAll = [flattenList(getColumn(startRelTimesAndCodesAllMuxed,0)),flattenList(getColumn(startRelTimesAndCodesAllMuxed,1)),flattenList(getColumn(startRelTimesAndCodesAllMuxed,2))]
 
-    # identify labels on all the error codes (non-200)
+    # identify labels on all the error codes (non-2XX)
     numberBadCodes = 0
     badCodesByLabel = [[[],numberedReducedLabels[i]] for i in range(0,len(numberedReducedLabels))]
+    numberBlankCodes = 0
+    blankCodesByLabel = [[[],numberedReducedLabels[i]] for i in range(0,len(numberedReducedLabels))]
     numberBadCodesByDevice = [0 for i in range(0,len(culledRelativeResponseData))]
     badCodesByLabelByDevice = [[[[],numberedReducedLabels[i]] for i in range(0,len(numberedReducedLabels))] for j in range(0,len(culledRelativeResponseData))]
+    numberBlankCodesByDevice = [0 for i in range(0,len(culledRelativeResponseData))]
+    blankCodesByLabelByDevice = [[[[],numberedReducedLabels[i]] for i in range(0,len(numberedReducedLabels))] for j in range(0,len(culledRelativeResponseData))]
     for i in range(0,len(startRelTimesAndCodesAll[0])):
-        if startRelTimesAndCodesAll[1][i] != 200:
+        # if startRelTimesAndCodesAll[1][i] != 200:
+        # anything not of the form 2XX, but don't count 599
+        if startRelTimesAndCodesAll[1][i] < 200 or (startRelTimesAndCodesAll[1][i] > 299):
             code = startRelTimesAndCodesAll[1][i]
             label = startRelTimesAndCodesAll[2][i]
             if label in numberedReducedLabels:
                 # print("code = %d    label = %s"%(code, label))
-                numberBadCodes += 1
                 index = numberedReducedLabels.index(label)
-                badCodesByLabel[index][0].append(code)
+                if code==599:
+                    numberBlankCodes += 1
+                    blankCodesByLabel[index][0].append(code)
+                else:
+                    numberBadCodes += 1
+                    badCodesByLabel[index][0].append(code)
+    print("numberBlankCodes = %d"%(numberBlankCodes))
+    print("numberBadCodes = %d"%(numberBadCodes))
+
+
     for i in range(0,len(culledRelativeResponseData)):
 
         for ii in range(0,len(culledRelativeResponseData[i][7])):
-            if culledRelativeResponseData[i][7][ii] != 200:
+            # if culledRelativeResponseData[i][7][ii] != 200:
+            # anything not of the form 2XX
+            if culledRelativeResponseData[i][7][ii] < 200 or (culledRelativeResponseData[i][7][ii] > 299):
                 code = culledRelativeResponseData[i][7][ii]
                 label = culledRelativeResponseData[i][11][ii]
                 if label in numberedReducedLabels:
                     # print("code = %d    label = %s"%(code, label))
-                    numberBadCodesByDevice[i] += 1
                     index = numberedReducedLabels.index(label)
-                    badCodesByLabelByDevice[i][index][0].append(code)
+                    if code==599:
+                        print("599 Code FOUND, label=%s"%label)
+                        numberBlankCodesByDevice[i] += 1
+                        blankCodesByLabelByDevice[i][index][0].append(code)
+                    else:
+                        numberBadCodesByDevice[i] += 1
+                        badCodesByLabelByDevice[i][index][0].append(code)
+
+        print("numberBlankCodesByDevice[%d] = %d"%(i,numberBlankCodesByDevice[i]))
+        # print("blankCodesByLabelByDevice[%d] = %s"%(i,blankCodesByLabelByDevice[i]))
+        print("numberBadCodesByDevice[%d] = %d"%(i,numberBadCodesByDevice[i]))
+        # print("badCodesByLabelByDevice[%d] = %s"%(i,badCodesByLabelByDevice[i]))
 
     # now split out the response data by label
     startRelTimesAndMSPRsUnitedStatesByLabel = [[[],[],reducedLabels[i]] for i in range(0,len(reducedLabels))] 
@@ -1606,7 +1638,7 @@ if __name__ == "__main__":
         # header2 for Table2.csv
         print("Label,# Samples,FAIL,Error %,Average,Min,Max,Median,90th pct,95th pct,99th pct,Transactions/s,Received,Sent",file=table2File)
 
-        totalNumSamples = numberBadCodes # total = bad + good
+        totalNumSamples = numberBadCodes + numberBlankCodes # total = bad + blank + good
         for i in range(0,len(badCodesByLabel)):
             totalNumSamples += len(startRelTimesAndMSPRsByNumberedLabel[i][0])
         totalBadCodePercentage = numberBadCodes/totalNumSamples*100.0 if totalNumSamples > 0 else 0
@@ -1709,7 +1741,8 @@ if __name__ == "__main__":
 
             index = getColumn(badCodesByLabel,1).index(label)
             badCodeCount = len(badCodesByLabel[index][0])
-            totalNumSamples = numSamples + badCodeCount
+            blankCodeCount = len(blankCodesByLabel[index][0])
+            totalNumSamples = numSamples + badCodeCount + blankCodeCount
 
             if numSamples>0:
                 testStartTime = np.min(startRelTimesAndMSPRsByNumberedLabel[index][0])
@@ -1933,7 +1966,7 @@ if __name__ == "__main__":
             print("</TR>",file=outputFile)
     
     
-            totalNumSamples = numberBadCodesByDevice[i] # total = bad + good
+            totalNumSamples = numberBadCodesByDevice[i] + numberBlankCodesByDevice[i] # total = bad + blank + good
             for ii in range(0,len(badCodesByLabelByDevice[i])):
                 totalNumSamples += len(startRelTimesAndMSPRsByNumberedLabelByDevice[i][ii][0])
             totalBadCodePercentage = numberBadCodesByDevice[i]/totalNumSamples*100.0 if totalNumSamples > 0 else 0
@@ -2031,7 +2064,8 @@ if __name__ == "__main__":
         
                 index = getColumn(badCodesByLabelByDevice[i],1).index(label)
                 badCodeCount = len(badCodesByLabelByDevice[i][index][0])
-                totalNumSamples = numSamples + badCodeCount
+                blankCodeCount = len(blankCodesByLabelByDevice[i][index][0])
+                totalNumSamples = numSamples + badCodeCount + blankCodeCount
        
                 if numSamples>0:
                     testStartTime = np.min(startRelTimesAndMSPRsByNumberedLabelByDevice[i][index][0])
