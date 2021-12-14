@@ -95,6 +95,7 @@ if __name__ == "__main__":
     ap.add_argument( '--mergedCsv', default='workers_merged.csv', help='file name for merged results csv file' )
     ap.add_argument( '--tsField', default='timeStamp', help='the name of the time stamp field in incoming csv files' )
     ap.add_argument( '--timeDiv', type=float, default=1000, help='timeStamp divisor (1000 for incoming ms; 1 for incoming seconds)' )
+    ap.add_argument( '--multibatch', type=boolArg, help='pass True for multiple batches, false for a single batch' )
     ap.add_argument( '--augment', type=boolArg, help='pass True if you want additional columns' )
     args = ap.parse_args()
 
@@ -118,8 +119,11 @@ if __name__ == "__main__":
             logger.warning( 'could not load json (%s) %s', type(exc), exc )
     instancesByIid = { inst['instanceId']: inst for inst in launchedInstances }
     '''
-    batchDirPaths = glob.glob( os.path.join( outputDir, 'batch_*_*' ) )
-    logger.debug( 'batchDirs: %s', batchDirPaths )
+    if args.multibatch:
+        batchDirPaths = glob.glob( os.path.join( outputDir, 'batch_*_*' ) )
+    else:
+        batchDirPaths = [outputDir]
+    logger.info( 'batchDirs: %s', batchDirPaths )
 
     totRowsRead = 0
     fieldNames = None
@@ -128,6 +132,9 @@ if __name__ == "__main__":
     with open( outFilePath, 'w', newline='') as outfile:
         for batchDirPath in batchDirPaths:
             jlogFilePath = batchDirPath + "/batchRunner_results.jlog"
+            if not os.path.isfile( jlogFilePath ):
+                logger.warning( 'did not find %s in %s', 'batchRunner_results.jlog', batchDirPath )
+                continue
             completedFrames = extractFrameInfo(jlogFilePath)
             logger.debug( 'found %d frames', len(completedFrames) )
             if not completedFrames:
