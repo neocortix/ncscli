@@ -18,7 +18,7 @@ import ncscli.tellInstances as tellInstances
 import startForwarders  # expected to be in the same directory
 
 
-neoloadVersion = '7.10.1'  # will be overridden by cmd-line arg
+neoloadVersion = '7.11.2'  # will be overridden by cmd-line arg
 nlWebWanted = False
 
 class g_:
@@ -218,7 +218,7 @@ if __name__ == '__main__':
     ap.add_argument( '--cookie' )
     args = ap.parse_args()
 
-    supportedVersions = ['7.6', '7.7', '7.10', '7.10.0', '7.10.1', '7.11.0']
+    supportedVersions = ['7.9.2', '7.10.2', '7.11.2', '8.0.0']
     if args.supportedVersions:
         print( json.dumps( supportedVersions ) )
         sys.exit( 0 )
