@@ -1,0 +1,21 @@
+{
+    "defaults": {
+        "filter": {
+            "dar": ">=99",
+            "storage": ">=2000000000"
+        },
+        "workerDir": "worker",
+        "jmxFile": "multiregionDemoUsa.jmx",
+        "planDuration": 600
+    },
+    "batches": [
+        {
+            "regions": ["US.MI"],
+            "nWorkers": 4
+        },
+        {
+            "regions": "US.TX",
+            "nWorkers": 4
+        }
+    ]
+}
