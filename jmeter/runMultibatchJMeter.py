@@ -269,8 +269,8 @@ if __name__ == '__main__':
         if jtlFileName:
             nameParts = os.path.splitext(jtlFileName)
             mergedJtlFileName = nameParts[0]+'_merged_' + nameParts[1]
-            rc = subprocess.call( [sys.executable, scriptDirPath()+'/mergeMultibatchOutput.py',
-                '--dataDirPath', outDataDir,
+            rc = subprocess.call( [sys.executable, scriptDirPath()+'/mergeBatchOutput.py',
+                '--dataDirPath', outDataDir, '--multibatch', 'True',
                 '--csvPat', 'jmeterOut_%%03d/%s' % jtlFileName,
                 '--mergedCsv', mergedJtlFileName
                 ], stdout=subprocess.DEVNULL
