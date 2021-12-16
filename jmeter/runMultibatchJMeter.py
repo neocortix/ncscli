@@ -283,13 +283,17 @@ if __name__ == '__main__':
                 else:
                     rcx = subprocess.call( [jmeterBinPath,
                         '-g', os.path.join( outDataDir, mergedJtlFileName ),
-                        '-o', os.path.join( outDataDir, 'htmlReport' )
+                        '-o', os.path.join( outDataDir, 'htmlReport' ),
+                        '--jmeterlogfile', os.path.join( outDataDir, 'genHtml.log' ),  # like -j
+                        '--jmeterproperty', 'jmeter.reportgenerator.overall_granularity=15000', # like -J
                         ], stderr=subprocess.DEVNULL
                     )
+                    '''
                     try:
                         shutil.move( 'jmeter.log', os.path.join( outDataDir, 'genHtml.log') )
                     except Exception as exc:
                         logger.warning( 'could not move the jmeter.log file (%s) %s', type(exc), exc )
+                    '''
                     if rcx:
                         logger.warning( 'jmeter reporting exited with returnCode %d', rcx )
 
