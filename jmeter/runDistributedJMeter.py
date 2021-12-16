@@ -39,6 +39,7 @@ class JMeterFrameProcessor(batchRunner.frameProcessor):
 
     def installerCmd( self ):
         cmd = 'free --mega -t 1>&2'  # to show amount of free ram
+        cmd += ' && ls -1 /opt/apache-jmeter/lib/log*'
         #cmd += ' && cat ~/.neocortix/device-location.properties'
         cmd += ' && cat ~/.neocortix/device-location.properties >> /opt/apache-jmeter/bin/jmeter.properties'
         if glob.glob( os.path.join( self.workerDirPath, '*.jar' ) ):
@@ -287,13 +288,17 @@ try:
                 else:
                     rcx = subprocess.call( [jmeterBinPath,
                         '-g', os.path.join( outDataDir, mergedJtlFileName ),
-                        '-o', os.path.join( outDataDir, 'htmlReport' )
+                        '-o', os.path.join( outDataDir, 'htmlReport' ),
+                        '--jmeterlogfile', os.path.join( outDataDir, 'genHtml.log' ),  # like -j
+                        '--jmeterproperty', 'jmeter.reportgenerator.overall_granularity=15000', # like -J
                         ], stderr=subprocess.DEVNULL
                     )
+                    '''
                     try:
                         shutil.move( 'jmeter.log', os.path.join( outDataDir, 'genHtml.log') )
                     except Exception as exc:
                         logger.warning( 'could not move the jmeter.log file (%s) %s', type(exc), exc )
+                    '''
                     if rcx:
                         logger.warning( 'jmeter reporting exited with returnCode %d', rcx )
     sys.exit( rc )
