@@ -19,6 +19,8 @@ except ImportError:
     import jmxTool
 
 
+jmeterVersion = '5.4.1'
+
 
 def check_batchRunner_results( jlogFilePath ):
     with open( jlogFilePath, 'r') as inFile:
@@ -39,12 +41,14 @@ def check_runDistributed_example( workerDir, jmxFile, planDuration,
     jtlFilePath=None, nWorkers=6
     ):
     binPath = '../jmeter/runDistributedJMeter.py'
+    jmeterBinPath = 'apache-jmeter-%s/bin/jmeter.sh' % jmeterVersion
     dateTimeTag = datetime.datetime.now().strftime( '%Y-%m-%d_%H%M%S' )
     outDataDir  = 'data/' + workerDir + '_' + dateTimeTag
     workerDirPath = workerDir
     cmd = [
         binPath, '--workerDir', workerDirPath, '--jmxFile', jmxFile,
         '--planDuration', str(planDuration), '--outDataDir', outDataDir,
+        '--jmeterBinPath', jmeterBinPath,
         '--nWorkers', str(nWorkers)
     ]
     proc = subprocess.run( cmd, stderr=subprocess.PIPE )
@@ -95,7 +99,7 @@ def test_installLocalJMeter():
     rc = subprocess.call( 'hash javac', shell=True )
     if rc != 0:
         pytest.xfail( 'JDK not found (for local JMeter)' )
-    rc = subprocess.call( './installJMeter5.4.1.sh', shell=True )
+    rc = subprocess.call( '../jmeter/installJMeter.sh %s' % jmeterVersion, shell=True )
     assert rc==0, 'could not install local JMeter'
 
 
