@@ -130,6 +130,9 @@ def test_jtl_uploaderWorker():
 def test_lessSlowWorker():
     check_runDistributed_example( 'lessSlowWorker', 'TestPlan_RampLong_LessSlow.jmx', 600 )
 
+def test_locationWorker():
+    check_runDistributed_example( 'locationWorker', 'locationDemo.jmx', 600 )
+
 def test_minimalWorker():
     check_runDistributed_example( 'minimalWorker', 'minimal.jmx', 90 )
 
