@@ -70,12 +70,10 @@ if __name__ == '__main__':
     ap.add_argument( '--authToken', help='the NCS authorization token to use (or none, to use NCS_AUTH_TOKEN env var' )
     ap.add_argument( '--projDir', required=True, help='a path to the input project data dir for this run (required)' )
     ap.add_argument( '--outDataDir', required=True, help='a path to the output data dir for this run (required)' )
-    '''
     # for analysis and plotting
     ap.add_argument( '--rampStepDuration', type=float, default=60, help='duration of ramp step, in seconds' )
     ap.add_argument( '--SLODuration', type=float, default=240, help='SLO duration, in seconds' )
     ap.add_argument( '--SLOResponseTimeMax', type=float, default=2.5, help='SLO RT threshold, in seconds' )
-    '''
     # environmental
     ap.add_argument( '--jmeterBinPath', help='path to the local jmeter.sh for generating html report' )
     ap.add_argument( '--cookie' )
@@ -288,32 +286,25 @@ if __name__ == '__main__':
                         '--jmeterproperty', 'jmeter.reportgenerator.overall_granularity=15000', # like -J
                         ], stderr=subprocess.DEVNULL
                     )
-                    '''
-                    try:
-                        shutil.move( 'jmeter.log', os.path.join( outDataDir, 'genHtml.log') )
-                    except Exception as exc:
-                        logger.warning( 'could not move the jmeter.log file (%s) %s', type(exc), exc )
-                    '''
                     if rcx:
                         logger.warning( 'jmeter reporting exited with returnCode %d', rcx )
+        rampStepDuration = args.rampStepDuration
+        SLODuration = args.SLODuration
+        SLOResponseTimeMax = args.SLOResponseTimeMax
+        rc2 = subprocess.call( [sys.executable, scriptDirPath()+'/plotJMeterOutput.py',
+            '--dataDirPath', outDataDir, '--multibatch', 'True',
+            '--rampStepDuration', str(rampStepDuration), '--SLODuration', str(SLODuration),
+            '--SLOResponseTimeMax', str(SLOResponseTimeMax)
+            ],
+            stdout=subprocess.DEVNULL )
+        if rc2:
+            logger.warning( 'plotJMeterOutput exited with returnCode %d', rc2 )
 
     '''
     try:
         rc = batchRunner.runBatch( ...
         )
         if (rc == 0) and os.path.isfile( outDataDir +'/recruitLaunched.json' ):
-            rampStepDuration = args.rampStepDuration
-            SLODuration = args.SLODuration
-            SLOResponseTimeMax = args.SLOResponseTimeMax
-
-            rc2 = subprocess.call( [sys.executable, scriptDirPath()+'/plotJMeterOutput.py',
-                '--dataDirPath', outDataDir,
-                '--rampStepDuration', str(rampStepDuration), '--SLODuration', str(SLODuration),
-                '--SLOResponseTimeMax', str(SLOResponseTimeMax)
-                ],
-                stdout=subprocess.DEVNULL )
-            if rc2:
-                logger.warning( 'plotJMeterOutput exited with returnCode %d', rc2 )
     
         sys.exit( rc )
     except KeyboardInterrupt:
