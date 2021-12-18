@@ -323,6 +323,8 @@ if __name__ == "__main__":
 
     # read the result .csv files
     # first try the JPetStore way, looking for fields[j][6] != "text"
+    # No, we are no longer applying that restriction, see below.  
+    # May not need second pass anymore.
     responseData = []
     for i in range(0,numResultFiles):
         inFilePath = outputDir + "/" + resultFileNames[i]
@@ -353,6 +355,12 @@ if __name__ == "__main__":
         sentBytes = []
         receivedBytesNumberedReduced = []
         sentBytesNumberedReduced = []
+        urls = []
+        urlsNumberedReduced = []
+        urlsAllCodes = []
+        responseMessages = []
+        responseMessagesNumberedReduced = []
+        responseMessagesAllCodes = []
         for j in range(0,len(fields)):
             if len(fields[j]) <= 3:
                 logger.info( 'fields[j]: %s from %s', fields[j], resultFileNames[i] )
@@ -360,20 +368,26 @@ if __name__ == "__main__":
             # accepts error codes "2XX", i.e. 200, 201, 202, 204, 206, and others
             # if (len(fields[j]) > 3) and (fields[j][2] in reducedLabels) and (len(fields[j][3])==3 and fields[j][3][0] == "2") and fields[j][6] != "text":
             # no restriction on fields[j][6]
-            if (len(fields[j]) > 3) and (fields[j][2] in reducedLabels) and (len(fields[j][3])==3 and fields[j][3][0] == "2"):
             # if (fields[j][2] == "HTTP Request" or fields[j][2] == "GetWorkload" or fields[j][2] == "GetStarttime" or fields[j][2] == "GetDistribution")  and fields[j][3] == "200":
+
+            if (len(fields[j]) > 3) and (fields[j][2] in reducedLabels) and (len(fields[j][3])==3 and (fields[j][3][0] == "2" or fields[j][3][0] == "3")): 
+                #2XX or 3XX are accepted
                 startTimes.append(int(fields[j][0])/1000.0)
                 elapsedTimes.append(int(fields[j][1])/1000.0)         
                 labels.append(fields[j][2])         
                 threads.append(int(fields[j][12]))
                 receivedBytes.append(int(fields[j][9]))
                 sentBytes.append(int(fields[j][10]))
+                urls.append(fields[j][13])
+                responseMessages.append(fields[j][4])
                 if fields[j][2] in numberedReducedLabels:
                     startTimesNumberedReduced.append(int(fields[j][0])/1000.0)
                     elapsedTimesNumberedReduced.append(int(fields[j][1])/1000.0)
                     labelsNumberedReduced.append(fields[j][2])         
                     receivedBytesNumberedReduced.append(int(fields[j][9]))
                     sentBytesNumberedReduced.append(int(fields[j][10]))
+                    urlsNumberedReduced.append(fields[j][13])
+                    responseMessagesNumberedReduced.append(fields[j][4])
             if (len(fields[j]) > 3) and (fields[j][2] in reducedLabels):
                 startTimesAllCodes.append(int(fields[j][0])/1000.0)
                 truncatedResponseCode = fields[j][3]
@@ -381,6 +395,8 @@ if __name__ == "__main__":
                     truncatedResponseCode = 599
                 codes.append(int(truncatedResponseCode))
                 labelsAllCodes.append(fields[j][2])
+                urlsAllCodes.append(fields[j][13])
+                responseMessagesAllCodes.append(fields[j][4])
         if startTimes:
             minStartTimeForDevice = min(startTimes)
             jIndex = -1
@@ -388,7 +404,7 @@ if __name__ == "__main__":
                 if frameNum == mappedFrameNumLocation[j][0]:
                     jIndex = j
             # print("len(codes) = %d  len(labelsAllCodes) = %d" % (len(codes),len(labelsAllCodes)))
-            responseData.append([frameNum,minStartTimeForDevice,startTimes,elapsedTimes,mappedFrameNumLocation[jIndex],labels,startTimesAllCodes,codes,startTimesNumberedReduced,elapsedTimesNumberedReduced,labelsNumberedReduced,labelsAllCodes,threads,receivedBytes,sentBytes,receivedBytesNumberedReduced,sentBytesNumberedReduced])
+            responseData.append([frameNum,minStartTimeForDevice,startTimes,elapsedTimes,mappedFrameNumLocation[jIndex],labels,startTimesAllCodes,codes,startTimesNumberedReduced,elapsedTimesNumberedReduced,labelsNumberedReduced,labelsAllCodes,threads,receivedBytes,sentBytes,receivedBytesNumberedReduced,sentBytesNumberedReduced, urls, urlsNumberedReduced, urlsAllCodes, responseMessages, responseMessagesNumberedReduced, responseMessagesAllCodes])
 
     if not responseData:
 
@@ -426,6 +442,9 @@ if __name__ == "__main__":
             sentBytes = []
             receivedBytesNumberedReduced = []
             sentBytesNumberedReduced = []
+            urls = []
+            urlsNumberedReduced = []
+            urlsAllCodes = []
             for j in range(0,len(fields)):
                 if len(fields[j]) <= 3:
                     logger.info( 'fields[j]: %s from %s', fields[j], resultFileNames[i] )
@@ -439,12 +458,14 @@ if __name__ == "__main__":
                     threads.append(int(fields[j][12]))
                     receivedBytes.append(int(fields[j][9]))
                     sentBytes.append(int(fields[j][10]))
+                    urls.append(fields[j][13])
                     if fields[j][2] in numberedReducedLabels:
                         startTimesNumberedReduced.append(int(fields[j][0])/1000.0)
                         elapsedTimesNumberedReduced.append(int(fields[j][1])/1000.0)
                         labelsNumberedReduced.append(fields[j][2])         
                         receivedBytesNumberedReduced.append(int(fields[j][9]))
                         sentBytesNumberedReduced.append(int(fields[j][10]))
+                        urlsNumberedReduced.append(fields[j][13])
                 if (len(fields[j]) > 3) and (fields[j][2] in reducedLabels):
                     startTimesAllCodes.append(int(fields[j][0])/1000.0)
                     truncatedResponseCode = fields[j][3]
@@ -452,6 +473,7 @@ if __name__ == "__main__":
                         truncatedResponseCode = 599
                     codes.append(int(truncatedResponseCode))
                     labelsAllCodes.append(fields[j][2])
+                    urlsAllCodes.append(fields[j][13])
             if startTimes:
                 minStartTimeForDevice = min(startTimes)
                 jIndex = -1
@@ -459,7 +481,7 @@ if __name__ == "__main__":
                     if frameNum == mappedFrameNumLocation[j][0]:
                         jIndex = j
                 # print("len(codes) = %d  len(labelsAllCodes) = %d" % (len(codes),len(labelsAllCodes)))
-                responseData.append([frameNum,minStartTimeForDevice,startTimes,elapsedTimes,mappedFrameNumLocation[jIndex],labels,startTimesAllCodes,codes,startTimesNumberedReduced,elapsedTimesNumberedReduced,labelsNumberedReduced,labelsAllCodes,threads,receivedBytes,sentBytes,receivedBytesNumberedReduced,sentBytesNumberedReduced])
+                responseData.append([frameNum,minStartTimeForDevice,startTimes,elapsedTimes,mappedFrameNumLocation[jIndex],labels,startTimesAllCodes,codes,startTimesNumberedReduced,elapsedTimesNumberedReduced,labelsNumberedReduced,labelsAllCodes,threads,receivedBytes,sentBytes,receivedBytesNumberedReduced,sentBytesNumberedReduced, urls, urlsNumberedReduced, urlsAllCodes])
 
 
     if not responseData:
@@ -483,7 +505,7 @@ if __name__ == "__main__":
         for ii in range(0,len(responseData[i][8])):
             relativeStartTimesNumberedReduced.append(responseData[i][8][ii]-responseData[i][1])
         maxStartTime = max(relativeStartTimes)
-        relativeResponseData.append([responseData[i][0],relativeStartTimes,responseData[i][3],responseData[i][4],maxStartTime,responseData[i][5],relativeStartTimesAllCodes,responseData[i][7],relativeStartTimesNumberedReduced,responseData[i][9],responseData[i][10],responseData[i][11],responseData[i][12],responseData[i][13],responseData[i][14],responseData[i][15],responseData[i][16]])
+        relativeResponseData.append([responseData[i][0],relativeStartTimes,responseData[i][3],responseData[i][4],maxStartTime,responseData[i][5],relativeStartTimesAllCodes,responseData[i][7],relativeStartTimesNumberedReduced,responseData[i][9],responseData[i][10],responseData[i][11],responseData[i][12],responseData[i][13],responseData[i][14],responseData[i][15],responseData[i][16],responseData[i][17],responseData[i][18],responseData[i][19],responseData[i][20],responseData[i][21],responseData[i][22]])
 
     # compute median maxStartTime
     medianMaxStartTime = np.median(getColumn(relativeResponseData,4))
@@ -551,10 +573,11 @@ if __name__ == "__main__":
     totalReceivedBytesByDevice = []
     totalSentBytesByDevice = []
     for i in range(0,len(culledRelativeResponseData)):
-        totalReceivedBytes += sum(culledRelativeResponseData[i][13])
-        totalSentBytes += sum(culledRelativeResponseData[i][14])
-        totalReceivedBytesByDevice.append(sum(culledRelativeResponseData[i][13]))
-        totalSentBytesByDevice.append(sum(culledRelativeResponseData[i][14]))
+        # if culledRelativeResponseData[i][17]!="null":
+        totalReceivedBytes += sum([culledRelativeResponseData[i][13][j] for j in range(0,len(culledRelativeResponseData[i][13])) if culledRelativeResponseData[i][17][j]!= "null"])
+        totalSentBytes += sum([culledRelativeResponseData[i][14][j] for j in range(0,len(culledRelativeResponseData[i][14])) if culledRelativeResponseData[i][17][j]!= "null"])
+        totalReceivedBytesByDevice.append(sum([culledRelativeResponseData[i][13][j] for j in range(0,len(culledRelativeResponseData[i][13])) if culledRelativeResponseData[i][17][j]!= "null"]))
+        totalSentBytesByDevice.append(sum([culledRelativeResponseData[i][14][j] for j in range(0,len(culledRelativeResponseData[i][14])) if culledRelativeResponseData[i][17][j]!= "null"]))
 
     # split out receivedBytes and sentBytes by Label
     numberBadCodes = 0
@@ -565,7 +588,8 @@ if __name__ == "__main__":
     for i in range(0,len(culledRelativeResponseData)):
         for j in range(0,len(culledRelativeResponseData[i][15])):
             label = culledRelativeResponseData[i][10][j]
-            if label in numberedReducedLabels:
+            url = culledRelativeResponseData[i][18][j]
+            if label in numberedReducedLabels: 
                 index = numberedReducedLabels.index(label)
                 receivedBytesByLabel[index][0] += culledRelativeResponseData[i][15][j]
                 sentBytesByLabel[index][0] += culledRelativeResponseData[i][16][j]
@@ -636,48 +660,43 @@ if __name__ == "__main__":
     badCodesByLabelByDevice = [[[[],numberedReducedLabels[i]] for i in range(0,len(numberedReducedLabels))] for j in range(0,len(culledRelativeResponseData))]
     numberBlankCodesByDevice = [0 for i in range(0,len(culledRelativeResponseData))]
     blankCodesByLabelByDevice = [[[[],numberedReducedLabels[i]] for i in range(0,len(numberedReducedLabels))] for j in range(0,len(culledRelativeResponseData))]
-    for i in range(0,len(startRelTimesAndCodesAll[0])):
-        # if startRelTimesAndCodesAll[1][i] != 200:
-        # anything not of the form 2XX, but don't count 599
-        if startRelTimesAndCodesAll[1][i] < 200 or (startRelTimesAndCodesAll[1][i] > 299):
-            code = startRelTimesAndCodesAll[1][i]
-            label = startRelTimesAndCodesAll[2][i]
-            if label in numberedReducedLabels:
-                # print("code = %d    label = %s"%(code, label))
-                index = numberedReducedLabels.index(label)
-                if code==599:
-                    numberBlankCodes += 1
-                    blankCodesByLabel[index][0].append(code)
-                else:
-                    numberBadCodes += 1
-                    badCodesByLabel[index][0].append(code)
-    print("numberBlankCodes = %d"%(numberBlankCodes))
-    print("numberBadCodes = %d"%(numberBadCodes))
 
 
     for i in range(0,len(culledRelativeResponseData)):
-
+        # print("len(code) = %d" % len(culledRelativeResponseData[i][7]))
+        # print("len(label) = %d" % len(culledRelativeResponseData[i][11]))
+        # print("len(url) = %d" % len(culledRelativeResponseData[i][19]))
         for ii in range(0,len(culledRelativeResponseData[i][7])):
-            # if culledRelativeResponseData[i][7][ii] != 200:
-            # anything not of the form 2XX
-            if culledRelativeResponseData[i][7][ii] < 200 or (culledRelativeResponseData[i][7][ii] > 299):
-                code = culledRelativeResponseData[i][7][ii]
-                label = culledRelativeResponseData[i][11][ii]
-                if label in numberedReducedLabels:
+            code=culledRelativeResponseData[i][7][ii]
+            label=culledRelativeResponseData[i][11][ii]
+            url=culledRelativeResponseData[i][19][ii]
+            responseMessage=culledRelativeResponseData[i][22][ii]
+            if code < 200 or code > 399: #2XX and 3XX are OK
+                if label in numberedReducedLabels and (url != "null" or (url == "null" and responseMessage=="")):
                     # print("code = %d    label = %s"%(code, label))
                     index = numberedReducedLabels.index(label)
                     if code==599:
-                        print("599 Code FOUND, label=%s"%label)
+                        numberBlankCodes += 1
                         numberBlankCodesByDevice[i] += 1
+                    else:
+                        numberBadCodes += 1
+                        numberBadCodesByDevice[i] += 1
+
+                if label in numberedReducedLabels and (url != "null" or (url == "null" and responseMessage=="") or (url == "null" and "number of failing samples : 1" in responseMessage)):
+                    # print("code = %d    label = %s"%(code, label))
+                    index = numberedReducedLabels.index(label)
+                    if code==599:
+                        blankCodesByLabel[index][0].append(code)
                         blankCodesByLabelByDevice[i][index][0].append(code)
                     else:
-                        numberBadCodesByDevice[i] += 1
+                        badCodesByLabel[index][0].append(code)
                         badCodesByLabelByDevice[i][index][0].append(code)
 
-        print("numberBlankCodesByDevice[%d] = %d"%(i,numberBlankCodesByDevice[i]))
-        # print("blankCodesByLabelByDevice[%d] = %s"%(i,blankCodesByLabelByDevice[i]))
-        print("numberBadCodesByDevice[%d] = %d"%(i,numberBadCodesByDevice[i]))
-        # print("badCodesByLabelByDevice[%d] = %s"%(i,badCodesByLabelByDevice[i]))
+        # print("numberBlankCodesByDevice[%d] = %d"%(i,numberBlankCodesByDevice[i]))
+        # print("numberBadCodesByDevice[%d] = %d"%(i,numberBadCodesByDevice[i]))
+
+    print("numberBlankCodes = %d"%(numberBlankCodes))
+    print("numberBadCodes = %d"%(numberBadCodes))
 
     # now split out the response data by label
     startRelTimesAndMSPRsUnitedStatesByLabel = [[[],[],reducedLabels[i]] for i in range(0,len(reducedLabels))] 
@@ -710,21 +729,27 @@ if __name__ == "__main__":
             print("len(startRelTimesAndMSPRsUnitedStatesByLabel[%d][0]) = %d" % (i,len(startRelTimesAndMSPRsUnitedStatesByLabel[i][0])))
 
     # now we want to aggregate all of the numbered Label responses
-    startRelTimesAndMSPRsByNumberedLabel = [[[],[],numberedReducedLabels[i]] for i in range(0,len(numberedReducedLabels))] 
-    startRelTimesAndMSPRsByNumberedLabelByDevice = [[[[],[],numberedReducedLabels[i]] for i in range(0,len(numberedReducedLabels))] for j in range(0,len(culledRelativeResponseData))]
+    startRelTimesAndMSPRsByNumberedLabel = [[[],[],numberedReducedLabels[i],[],[]] for i in range(0,len(numberedReducedLabels))] 
+    startRelTimesAndMSPRsByNumberedLabelByDevice = [[[[],[],numberedReducedLabels[i],[],[]] for i in range(0,len(numberedReducedLabels))] for j in range(0,len(culledRelativeResponseData))]
 
     for i in range(0,len(culledRelativeResponseData)):
         for j in range(0,len(culledRelativeResponseData[i][10])):
             label = culledRelativeResponseData[i][10][j]
+            url = culledRelativeResponseData[i][18][j]
+            responseMessage = culledRelativeResponseData[i][21][j]
             index = numberedReducedLabels.index(label)
             startRelTimesAndMSPRsByNumberedLabel[index][0].append(
                 culledRelativeResponseData[i][8][j])
             startRelTimesAndMSPRsByNumberedLabel[index][1].append(
                 culledRelativeResponseData[i][9][j])
+            startRelTimesAndMSPRsByNumberedLabel[index][3].append(url)
+            startRelTimesAndMSPRsByNumberedLabel[index][4].append(responseMessage)
             startRelTimesAndMSPRsByNumberedLabelByDevice[i][index][0].append(
                 culledRelativeResponseData[i][8][j])
             startRelTimesAndMSPRsByNumberedLabelByDevice[i][index][1].append(
                 culledRelativeResponseData[i][9][j])
+            startRelTimesAndMSPRsByNumberedLabelByDevice[i][index][3].append(url)
+            startRelTimesAndMSPRsByNumberedLabelByDevice[i][index][4].append(responseMessage)
                     
     # for i in range(0,2): 
         # print(startRelTimesAndMSPRsByNumberedLabel[i])                
@@ -769,12 +794,15 @@ if __name__ == "__main__":
 
     print("Determining Delivered Load")
     timeBinSeconds = 10
-    culledRequestTimes = []
+    flattenedCulledRequestTimes = []
     for i in range(0,len(culledRelativeResponseData)):
         # print("min, max = %f  %f" % (min(culledRelativeResponseData[i][1]),max(culledRelativeResponseData[i][1])))
-        culledRequestTimes.append(culledRelativeResponseData[i][1])
+        for j in range(0,len(culledRelativeResponseData[i][17])):
+            if culledRelativeResponseData[i][17][j] != "null":
+                flattenedCulledRequestTimes.append(culledRelativeResponseData[i][1][j])
 
-    flattenedCulledRequestTimes = flattenList(culledRequestTimes)
+    # flattenedCulledRequestTimes = flattenList(culledRequestTimes)
+    # flattenedCulledRequestTimes = culledRequestTimes
     maxCulledRequestTimes = max(flattenedCulledRequestTimes)
     print("Number of Responses = %d" %len(flattenedCulledRequestTimes))
     print("Max Culled Request Time = %.2f" % maxCulledRequestTimes)
@@ -981,8 +1009,18 @@ if __name__ == "__main__":
         #box = ax.get_position()
         #ax.set_position([box.x0, box.y0, box.width * 0.8, box.height])
 
-        for i in range(0,len(numberedReducedLabels)):
-            plt.plot(startRelTimesAndMSPRsByNumberedLabel[i][0],startRelTimesAndMSPRsByNumberedLabel[i][1], linestyle='', marker='o',markersize=plotMarkerSize,label=numberedReducedLabels[i])
+        plotOnlyMainTransactions = True
+        if plotOnlyMainTransactions:
+            for i in range(0,len(numberedReducedLabels)):
+                label=numberedReducedLabels[i]
+                if len(label)>4:
+                    if not (label[-2]=="-" and label[-1].isdigit()) and \
+                        not (label[-3]=="-" and label[-2:].isdigit()) and \
+                        not (label[-4]=="-" and label[-3:].isdigit()) :
+                        plt.plot(startRelTimesAndMSPRsByNumberedLabel[i][0],startRelTimesAndMSPRsByNumberedLabel[i][1], linestyle='', marker='o',markersize=plotMarkerSize,label=numberedReducedLabels[i])
+        else:
+            for i in range(0,len(numberedReducedLabels)):
+                plt.plot(startRelTimesAndMSPRsByNumberedLabel[i][0],startRelTimesAndMSPRsByNumberedLabel[i][1], linestyle='', marker='o',markersize=plotMarkerSize,label=numberedReducedLabels[i])
         
         plt.legend(loc="center left",ncol=1,bbox_to_anchor=(1, 0.5)) 
         plt.ylim([0,clipTimeInSeconds])
@@ -999,8 +1037,18 @@ if __name__ == "__main__":
         #box = ax.get_position()
         #ax.set_position([box.x0, box.y0, box.width * 0.8, box.height])
 
-        for i in range(0,len(numberedReducedLabels)):
-            plt.plot(startRelTimesAndMSPRsByNumberedLabelBinned[i][0],startRelTimesAndMSPRsByNumberedLabelBinned[i][1], linestyle='-', linewidth=plotLineWidth, marker='o',markersize=plotMarkerSize,label=numberedReducedLabels[i])
+        plotOnlyMainTransactions = True
+        if plotOnlyMainTransactions:
+            for i in range(0,len(numberedReducedLabels)):
+                label=numberedReducedLabels[i]
+                if len(label)>4:
+                    if not (label[-2]=="-" and label[-1].isdigit()) and \
+                        not (label[-3]=="-" and label[-2:].isdigit()) and \
+                        not (label[-4]=="-" and label[-3:].isdigit()) :
+                        plt.plot(startRelTimesAndMSPRsByNumberedLabelBinned[i][0],startRelTimesAndMSPRsByNumberedLabelBinned[i][1], linestyle='-', linewidth=plotLineWidth, marker='o',markersize=plotMarkerSize,label=numberedReducedLabels[i])
+        else:
+            for i in range(0,len(numberedReducedLabels)):
+                plt.plot(startRelTimesAndMSPRsByNumberedLabelBinned[i][0],startRelTimesAndMSPRsByNumberedLabelBinned[i][1], linestyle='-', linewidth=plotLineWidth, marker='o',markersize=plotMarkerSize,label=numberedReducedLabels[i])
         
         plt.legend(loc="center left",ncol=1,bbox_to_anchor=(1, 0.5)) 
         plt.ylim([0,clipTimeInSeconds])
@@ -1642,18 +1690,49 @@ if __name__ == "__main__":
         print("Label,# Samples,FAIL,Error %,Average,Min,Max,Median,90th pct,95th pct,99th pct,Transactions/s,Received,Sent",file=table2File)
 
         totalNumSamples = numberBadCodes + numberBlankCodes # total = bad + blank + good
-        for i in range(0,len(badCodesByLabel)):
-            totalNumSamples += len(startRelTimesAndMSPRsByNumberedLabel[i][0])
+        # print("len(numberedReducedLabels) = %d"%(len(numberedReducedLabels)))
+        nonNullTransactionFound = False
+        for i in range(0,len(numberedReducedLabels)): 
+            # print("len(startRelTimesAndMSPRsByNumberedLabel[i][0]) = %d"%(len(startRelTimesAndMSPRsByNumberedLabel[i][0])))
+            for j in range(0,len(startRelTimesAndMSPRsByNumberedLabel[i][0])):
+                if startRelTimesAndMSPRsByNumberedLabel[i][3][j]!="null" or (startRelTimesAndMSPRsByNumberedLabel[i][3][j]=="null" and startRelTimesAndMSPRsByNumberedLabel[i][4][j]==""):
+                    nonNullTransactionFound = True
+                    totalNumSamples += 1
+        if nonNullTransactionFound == False: # handles JPetStore Case
+            for i in range(0,len(numberedReducedLabels)): 
+                # print("len(startRelTimesAndMSPRsByNumberedLabel[i][0]) = %d"%(len(startRelTimesAndMSPRsByNumberedLabel[i][0])))
+                for j in range(0,len(startRelTimesAndMSPRsByNumberedLabel[i][0])):
+                    nonNullTransactionFound = True
+                    totalNumSamples += 1
         totalBadCodePercentage = numberBadCodes/totalNumSamples*100.0 if totalNumSamples > 0 else 0
         # numSamples = len(startRelTimesAndMSPRsAll[0])
-        # print("totalNumSamples = %d    numSamples = %d"%(totalNumSamples,numSamples))
-        averageMs = 1000.0*np.mean(startRelTimesAndMSPRsAll[1])
-        minMs = 1000.0*np.min(startRelTimesAndMSPRsAll[1])
-        maxMs = 1000.0*np.max(startRelTimesAndMSPRsAll[1])
-        medianMs = 1000.0*np.median(startRelTimesAndMSPRsAll[1])
-        percentile90ms = 1000.0*np.percentile(startRelTimesAndMSPRsAll[1],90)
-        percentile95ms = 1000.0*np.percentile(startRelTimesAndMSPRsAll[1],95)
-        percentile99ms = 1000.0*np.percentile(startRelTimesAndMSPRsAll[1],99)
+        # print("totalNumSamples = %d"%(totalNumSamples))
+
+        responseTimesGoodURLs = []
+        for i in range(0,len(culledRelativeResponseData)):
+            for j in range(0,len(culledRelativeResponseData[i][2])):
+                if culledRelativeResponseData[i][17][j] != "null" or (culledRelativeResponseData[i][17][j] == "null" and culledRelativeResponseData[i][20][j] == ""):
+                    responseTimesGoodURLs.append(culledRelativeResponseData[i][2][j])
+
+        # print("len(responseTimesGoodURLs) = %d" % len(responseTimesGoodURLs))
+
+        if len(responseTimesGoodURLs)>0:
+            averageMs = 1000.0*np.mean(responseTimesGoodURLs)
+            minMs = 1000.0*np.min(responseTimesGoodURLs)
+            maxMs = 1000.0*np.max(responseTimesGoodURLs)
+            medianMs = 1000.0*np.median(responseTimesGoodURLs)
+            percentile90ms = 1000.0*np.percentile(responseTimesGoodURLs,90)
+            percentile95ms = 1000.0*np.percentile(responseTimesGoodURLs,95)
+            percentile99ms = 1000.0*np.percentile(responseTimesGoodURLs,99)
+        else:
+            averageMs = 0
+            minMs = 0
+            maxMs = 0
+            medianMs = 0
+            percentile90ms = 0
+            percentile95ms = 0
+            percentile99ms = 0
+
         testStartTime = np.min(startRelTimesAndMSPRsAll[0])
         testEndTime = np.max(startRelTimesAndMSPRsAll[0])
         testDuration = testEndTime - testStartTime
@@ -1724,7 +1803,9 @@ if __name__ == "__main__":
 
             label = numberedReducedLabels[i]
             index = getColumn(startRelTimesAndMSPRsByNumberedLabel,2).index(label)
+            #----------------------------------------------
             numSamples = len(startRelTimesAndMSPRsByNumberedLabel[index][0])
+
             if numSamples>0:
                 averageMs = 1000.0*np.mean(startRelTimesAndMSPRsByNumberedLabel[index][1])
                 minMs = 1000.0*np.min(startRelTimesAndMSPRsByNumberedLabel[index][1])
@@ -1968,18 +2049,39 @@ if __name__ == "__main__":
             print("<TH style=\"background-color:#8bc0e6\">Sent</TH>",file=outputFile)
             print("</TR>",file=outputFile)
     
-    
             totalNumSamples = numberBadCodesByDevice[i] + numberBlankCodesByDevice[i] # total = bad + blank + good
-            for ii in range(0,len(badCodesByLabelByDevice[i])):
-                totalNumSamples += len(startRelTimesAndMSPRsByNumberedLabelByDevice[i][ii][0])
+            for ii in range(0,len(numberedReducedLabels)):
+                for jj in range(0,len(startRelTimesAndMSPRsByNumberedLabelByDevice[i][ii][0])):
+                    if startRelTimesAndMSPRsByNumberedLabelByDevice[i][ii][3][jj]!="null" or (startRelTimesAndMSPRsByNumberedLabelByDevice[i][ii][3][jj]=="null" and startRelTimesAndMSPRsByNumberedLabelByDevice[i][ii][4][jj]==""):
+                        totalNumSamples += 1
+
             totalBadCodePercentage = numberBadCodesByDevice[i]/totalNumSamples*100.0 if totalNumSamples > 0 else 0
-            averageMs = 1000.0*np.mean(culledRelativeResponseData[i][2])
-            minMs = 1000.0*np.min(culledRelativeResponseData[i][2])
-            maxMs = 1000.0*np.max(culledRelativeResponseData[i][2])
-            medianMs = 1000.0*np.median(culledRelativeResponseData[i][2]) 
-            percentile90ms = 1000.0*np.percentile(culledRelativeResponseData[i][2],90)
-            percentile95ms = 1000.0*np.percentile(culledRelativeResponseData[i][2],95)
-            percentile99ms = 1000.0*np.percentile(culledRelativeResponseData[i][2],99)
+
+            #------------------------
+            responseTimesGoodURLs = []
+            for j in range(0,len(culledRelativeResponseData[i][2])):
+                if culledRelativeResponseData[i][17][j] != "null" or (culledRelativeResponseData[i][17][j] == "null" and culledRelativeResponseData[i][20][j] == ""):
+                    responseTimesGoodURLs.append(culledRelativeResponseData[i][2][j])
+
+            # print("len(responseTimesGoodURLs) = %d" % len(responseTimesGoodURLs))
+    
+            if len(responseTimesGoodURLs)>0:
+                averageMs = 1000.0*np.mean(responseTimesGoodURLs)
+                minMs = 1000.0*np.min(responseTimesGoodURLs)
+                maxMs = 1000.0*np.max(responseTimesGoodURLs)
+                medianMs = 1000.0*np.median(responseTimesGoodURLs)
+                percentile90ms = 1000.0*np.percentile(responseTimesGoodURLs,90)
+                percentile95ms = 1000.0*np.percentile(responseTimesGoodURLs,95)
+                percentile99ms = 1000.0*np.percentile(responseTimesGoodURLs,99)
+            else:
+                averageMs = 0
+                minMs = 0
+                maxMs = 0
+                medianMs = 0
+                percentile90ms = 0
+                percentile95ms = 0
+                percentile99ms = 0
+
             testStartTime = np.min(startRelTimesAndMSPRsAll[0])
             testEndTime = np.max(startRelTimesAndMSPRsAll[0])
             testDuration = testEndTime - testStartTime
