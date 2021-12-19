@@ -1,0 +1,30 @@
+{
+    "defaults": {
+        "filter": {
+            "dar": ">=99",
+            "storage": ">=2000000000"
+        },
+        "workerDir": "petstoreWorker",
+        "jmxFile": "JPetstore_JMeter5.4.1.jmx",
+        "jtlFile": "VRT.jtl",
+        "planDuration": 600,
+
+        "rampStepDuration": 60,
+        "SLOResponseTimeMax": 2.5,
+        "SLODuration": 300
+    },
+    "batches": [
+        {
+            "regions": ["US.MI"],
+            "nWorkers": 4
+        },
+        {
+            "regions": ["US.NY"],
+            "nWorkers": 4
+        },
+        {
+            "regions": "US.TX",
+            "nWorkers": 4
+        }
+    ]
+}
