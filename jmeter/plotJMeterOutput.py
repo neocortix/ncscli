@@ -14,6 +14,7 @@ import warnings
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
+import glob
 
 from shutil import copyfile
 from datetime import datetime
@@ -164,11 +165,20 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser( description=__doc__, fromfile_prefix_chars='@', formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     ap.add_argument( '--dataDirPath', required=True, help='the path to to directory for input and output data' )
     ap.add_argument( '--logY', type=boolArg, help='whether to use log scale on Y axis', default=False)
+    ap.add_argument( '--multibatch', type=boolArg, default=False, help='pass True for multiple batches, False for a single batch' )
     ap.add_argument( '--rampStepDuration', type=float, default=60, help='duration, in seconds, of ramp step' )
     ap.add_argument( '--SLODuration', type=float, default=240, help='SLO duration, in seconds' )
     ap.add_argument( '--SLOResponseTimeMax', type=float, default=2.0, help='SLO RT threshold, in seconds' )
 
     args = ap.parse_args()
+
+    print("")
+    print("**********************************************************************")
+    print("\nplotJMeterOutput")
+    if args.multibatch==True:
+        print("\nargs.multibatch = True\n")
+    else:
+        print("\nargs.multibatch = False\n")
 
     logger.info( 'plotting data in directory %s', os.path.realpath(args.dataDirPath)  )
 
@@ -185,240 +195,179 @@ if __name__ == "__main__":
     #mpl.rcParams['axes.linewidth'] = 2 #set the value globally
     logYWanted = args.logY
     outputDir = args.dataDirPath
-    launchedJsonFilePath = outputDir + "/recruitLaunched.json"
-    print("launchedJsonFilePath = %s" % launchedJsonFilePath)
-    jlogFilePath = outputDir + "/batchRunner_results.jlog"
-    print("jlogFilePath = %s\n" % jlogFilePath)
 
-    if not os.path.isfile( launchedJsonFilePath ):
-        logger.error( 'file not found: %s', launchedJsonFilePath )
-        sys.exit( 1 )
+    if args.multibatch:
+        batchDirPaths = glob.glob( os.path.join( outputDir, 'batch_*_*' ) )
+    else:
+        batchDirPaths = [outputDir]
+    logger.info( 'batchDirs: %s', batchDirPaths )
 
-    launchedInstances = []
-    with open( launchedJsonFilePath, 'r') as jsonInFile:
-        try:
-            launchedInstances = json.load(jsonInFile)  # an array
-        except Exception as exc:
-            sys.exit( 'could not load json (%s) %s' % (type(exc), exc) )
-    if False:
-        print(len(launchedInstances))
-        print(launchedInstances[0])
+    if args.multibatch==True:
+        mappedFrameNumLocationTemp = []
+        mappedFrameNumLocationUnitedStatesTemp = []
+        mappedFrameNumLocationRussiaTemp = []
+        mappedFrameNumLocationOtherTemp = []
+        mappedFrameNumLocationSortedTemp = []
+        responseDataTemp = []
+        reducedLabelsTemp = []
+        numberedReducedLabelsTemp = []
+
+    #--------------------------------------------------
+    for batchDirPath in batchDirPaths:
+        if args.multibatch==True:
+            print("")
+            print("----------------------------------")
+            print("batchDirPath = %s" % batchDirPath)
+        launchedJsonFilePath = batchDirPath+ "/recruitLaunched.json"
+        jlogFilePath = batchDirPath + "/batchRunner_results.jlog"
+
+
         print("")
-        print(launchedInstances[0]["instanceId"])
-        print(launchedInstances[0]["device-location"])
-        print(launchedInstances[0]["device-location"]["latitude"])
-        print(launchedInstances[0]["device-location"]["longitude"])
-        print(launchedInstances[0]["device-location"]["display-name"])
-        print(launchedInstances[0]["device-location"]["country"])
-        print("")
+        print("launchedJsonFilePath = %s" % launchedJsonFilePath)
+        print("jlogFilePath = %s\n" % jlogFilePath)
 
-    # for i in range(0,len(launchedInstances)):
-        # print("i = %3d  %s" % (i,launchedInstances[i]))
+        if not os.path.isfile( launchedJsonFilePath ):
+            logger.error( 'file not found: %s', launchedJsonFilePath )
+            continue
+    
+        launchedInstances = []
+        with open( launchedJsonFilePath, 'r') as jsonInFile:
+            try:
+                launchedInstances = json.load(jsonInFile)  # an array
+            except Exception as exc:
+                continue
+        if False:
+            print(len(launchedInstances))
+            print(launchedInstances[0])
+            print("")
+            print(launchedInstances[0]["instanceId"])
+            print(launchedInstances[0]["device-location"])
+            print(launchedInstances[0]["device-location"]["latitude"])
+            print(launchedInstances[0]["device-location"]["longitude"])
+            print(launchedInstances[0]["device-location"]["display-name"])
+            print(launchedInstances[0]["device-location"]["country"])
+            print("")
+    
+        if False:
+            print("launchedInstances:")
+            for i in range(0,len(launchedInstances)):
+                print("i = %3d  %s" % (i,launchedInstances[i]["device-location"]["display-name"]))
+        
+        completedJobs = demuxResults(jlogFilePath)
+    
+        if False:
+            for i in range(0,len(completedJobs)):
+                print("completedJobs[%3d] = %s" % (i,completedJobs[i]))
+    
+            for i in range(0,len(completedJobs)):
+                for j in range(0,len(launchedInstances)):
+                    if launchedInstances[j]["instanceId"] == completedJobs[i][1]:
+                        # print("launchedInstances[j]=%s" % (launchedInstances[j]))
+                        # deviceID = get(launchedInstances[j]["device-id"],0)
+                        deviceID = launchedInstances[j].get("device-id",0)
+                        print("jmeterOut_%03d  instanceId=%s  device-id=%s" % (completedJobs[i][0],completedJobs[i][1], deviceID))
     
     
-    completedJobs = demuxResults(jlogFilePath)
-
-    if False:
-        for i in range(0,len(completedJobs)):
-            print("completedJobs[%3d] = %s" % (i,completedJobs[i]))
-
+    
+        mappedFrameNumLocation = []
+        mappedFrameNumLocationUnitedStates = []
+        mappedFrameNumLocationRussia = []
+        mappedFrameNumLocationOther = []
+    
+    
         for i in range(0,len(completedJobs)):
             for j in range(0,len(launchedInstances)):
                 if launchedInstances[j]["instanceId"] == completedJobs[i][1]:
-                    # print("launchedInstances[j]=%s" % (launchedInstances[j]))
-                    # deviceID = get(launchedInstances[j]["device-id"],0)
-                    deviceID = launchedInstances[j].get("device-id",0)
-                    print("jmeterOut_%03d  instanceId=%s  device-id=%s" % (completedJobs[i][0],completedJobs[i][1], deviceID))
-
-
-
-    mappedFrameNumLocation = []
-    mappedFrameNumLocationUnitedStates = []
-    mappedFrameNumLocationRussia = []
-    mappedFrameNumLocationOther = []
-
-
-    for i in range(0,len(completedJobs)):
-        for j in range(0,len(launchedInstances)):
-            if launchedInstances[j]["instanceId"] == completedJobs[i][1]:
-                mappedFrameNumLocation.append([completedJobs[i][0],
-                                           launchedInstances[j]["device-location"]["latitude"],
-                                           launchedInstances[j]["device-location"]["longitude"],
-                                           launchedInstances[j]["device-location"]["display-name"],
-                                           launchedInstances[j]["device-location"]["country"],
-                                           launchedInstances[j]["instanceId"]
-                                           ])
-                if launchedInstances[j]["device-location"]["country"] == "United States":
-                    mappedFrameNumLocationUnitedStates.append([completedJobs[i][0],
+                    mappedFrameNumLocation.append([completedJobs[i][0],
                                                launchedInstances[j]["device-location"]["latitude"],
                                                launchedInstances[j]["device-location"]["longitude"],
                                                launchedInstances[j]["device-location"]["display-name"],
-                                               launchedInstances[j]["device-location"]["country"]
+                                               launchedInstances[j]["device-location"]["country"],
+                                               launchedInstances[j]["instanceId"]
                                                ])
-                elif launchedInstances[j]["device-location"]["country"] == "Russia":
-                    mappedFrameNumLocationRussia.append([completedJobs[i][0],
-                                               launchedInstances[j]["device-location"]["latitude"],
-                                               launchedInstances[j]["device-location"]["longitude"],
-                                               launchedInstances[j]["device-location"]["display-name"],
-                                               launchedInstances[j]["device-location"]["country"]
-                                               ])
-                else:
-                    mappedFrameNumLocationOther.append([completedJobs[i][0],
-                                               launchedInstances[j]["device-location"]["latitude"],
-                                               launchedInstances[j]["device-location"]["longitude"],
-                                               launchedInstances[j]["device-location"]["display-name"],
-                                               launchedInstances[j]["device-location"]["country"]
-                                               ])
-                
-    mappedFrameNumLocationSorted = sorted(mappedFrameNumLocation,key=lambda tup: tup[0])
-
-    if False:
-        print("\nLocations and Device Details:")
-        for i in range(0,len(mappedFrameNumLocationSorted)):
-            # print("%s" % mappedFrameNumLocation[i][3])
-            print("%s" % mappedFrameNumLocationSorted[i])
-        
-    print("\nReading Response Time data")    
-    #determine number of files and their filenames  TestPlan_results_001.csv
-    fileNames = os.listdir(outputDir)    
-    # print(fileNames) 
-
-    resultFileNames = []
-    for i in range(0,len(fileNames)):
-        if "TestPlan_results_" in fileNames[i] and ".csv" in fileNames[i]:
-            resultFileNames.append(fileNames[i])
-        else:
-            subDir = os.path.join( outputDir, fileNames[i] )
-            inFilePath = os.path.join( subDir, 'TestPlan_results.csv' )
-            if os.path.isdir( subDir ) and os.path.isfile( inFilePath ):
-                partialPath = fileNames[i] + '/TestPlan_results.csv'
-                resultFileNames.append( partialPath )
-    numResultFiles = len(resultFileNames)    
-    # print(resultFileNames)
-    # print(numResultFiles)
-
-    # read the result .csv file to find out what labels are present
-    labels = []
-    for i in range(0,numResultFiles):
-        inFilePath = outputDir + "/" + resultFileNames[i]
-        fields = getFieldsFromFileNameCSV3(inFilePath,firstRecord=1) 
-        if not fields:
-            logger.info( 'no fields in %s', inFilePath )
-            continue
-        for j in range(0,len(fields)):
-            labels.append(fields[j][2])
-    reducedLabels = list(np.unique(labels))
-    print("\nreducedLabels = %s \n" % reducedLabels)
-    numberedReducedLabels = []
-    for i in range(0,len(reducedLabels)):
-        # look for two numbers followed by "_"
-        conditionFound = False
-        for j in range(0,len(reducedLabels[i])-2):
-            if reducedLabels[i][j:j+2].isnumeric() and reducedLabels[i][j+2]=="_":
-                conditionFound = True
-        # if reducedLabels[i][2]=="_" and reducedLabels[i][0:2].isnumeric():
-        if conditionFound:
-            numberedReducedLabels.append(reducedLabels[i])
-    print("numberedReducedLabels = %s \n" % numberedReducedLabels)
-
-    # read the result .csv files
-    # first try the JPetStore way, looking for fields[j][6] != "text"
-    # No, we are no longer applying that restriction, see below.  
-    # May not need second pass anymore.
-    responseData = []
-    for i in range(0,numResultFiles):
-        inFilePath = outputDir + "/" + resultFileNames[i]
-        fields = getFieldsFromFileNameCSV3(inFilePath) 
-        if not fields:
-            logger.info( 'no fields in %s', inFilePath )
-            continue
-        if 'TestPlan_results_' in resultFileNames[i] and '_merged_' not in resultFileNames[i]:
-            frameNum = int(resultFileNames[i].lstrip("TestPlan_results_").rstrip(".csv"))
-        elif resultFileNames[i].startswith('jmeterOut_'):
-            numPart = resultFileNames[i].split('/')[0].split('_')[1]
-            frameNum = int( numPart )
-        else:
-            # should not happen, but may help debugging
-            print( 'file name not recognized', resultFileNames[i] )
-            continue
-        startTimes = []
-        elapsedTimes = []
+                    if launchedInstances[j]["device-location"]["country"] == "United States":
+                        mappedFrameNumLocationUnitedStates.append([completedJobs[i][0],
+                                                   launchedInstances[j]["device-location"]["latitude"],
+                                                   launchedInstances[j]["device-location"]["longitude"],
+                                                   launchedInstances[j]["device-location"]["display-name"],
+                                                   launchedInstances[j]["device-location"]["country"]
+                                                   ])
+                    elif launchedInstances[j]["device-location"]["country"] == "Russia":
+                        mappedFrameNumLocationRussia.append([completedJobs[i][0],
+                                                   launchedInstances[j]["device-location"]["latitude"],
+                                                   launchedInstances[j]["device-location"]["longitude"],
+                                                   launchedInstances[j]["device-location"]["display-name"],
+                                                   launchedInstances[j]["device-location"]["country"]
+                                                   ])
+                    else:
+                        mappedFrameNumLocationOther.append([completedJobs[i][0],
+                                                   launchedInstances[j]["device-location"]["latitude"],
+                                                   launchedInstances[j]["device-location"]["longitude"],
+                                                   launchedInstances[j]["device-location"]["display-name"],
+                                                   launchedInstances[j]["device-location"]["country"]
+                                                   ])
+                    
+        mappedFrameNumLocationSorted = sorted(mappedFrameNumLocation,key=lambda tup: tup[0])
+    
+        if False:
+            print("\nLocations and Device Details:")
+            for i in range(0,len(mappedFrameNumLocationSorted)):
+                print("%d  %s" % (mappedFrameNumLocation[i][0],mappedFrameNumLocation[i][3]))
+                # print("%s" % mappedFrameNumLocationSorted[i])
+            
+        print("\nReading Response Time data")    
+        #determine number of files and their filenames  TestPlan_results_001.csv
+        # fileNames = os.listdir(outputDir)    
+        fileNames = os.listdir(batchDirPath)    
+        # print(fileNames) 
+    
+        resultFileNames = []
+        for i in range(0,len(fileNames)):
+            if "TestPlan_results_" in fileNames[i] and ".csv" in fileNames[i]:
+                resultFileNames.append(fileNames[i])
+            else:
+                subDir = os.path.join( batchDirPath, fileNames[i] )
+                inFilePath = os.path.join( subDir, 'TestPlan_results.csv' )
+                if os.path.isdir( subDir ) and os.path.isfile( inFilePath ):
+                    partialPath = fileNames[i] + '/TestPlan_results.csv'
+                    resultFileNames.append( partialPath )
+        numResultFiles = len(resultFileNames)    
+        # print(resultFileNames)
+        # print(numResultFiles)
+    
+        # read the result .csv file to find out what labels are present
         labels = []
-        startTimesNumberedReduced = []
-        elapsedTimesNumberedReduced = []
-        labelsNumberedReduced = []
-        startTimesAllCodes = []
-        labelsAllCodes = []
-        codes = []
-        threads = []
-        receivedBytes = []
-        sentBytes = []
-        receivedBytesNumberedReduced = []
-        sentBytesNumberedReduced = []
-        urls = []
-        urlsNumberedReduced = []
-        urlsAllCodes = []
-        responseMessages = []
-        responseMessagesNumberedReduced = []
-        responseMessagesAllCodes = []
-        for j in range(0,len(fields)):
-            if len(fields[j]) <= 3:
-                logger.info( 'fields[j]: %s from %s', fields[j], resultFileNames[i] )
-            # if (len(fields[j]) > 3) and (fields[j][2] in reducedLabels) and fields[j][3]=="200" and fields[j][6] != "text":
-            # accepts error codes "2XX", i.e. 200, 201, 202, 204, 206, and others
-            # if (len(fields[j]) > 3) and (fields[j][2] in reducedLabels) and (len(fields[j][3])==3 and fields[j][3][0] == "2") and fields[j][6] != "text":
-            # no restriction on fields[j][6]
-            # if (fields[j][2] == "HTTP Request" or fields[j][2] == "GetWorkload" or fields[j][2] == "GetStarttime" or fields[j][2] == "GetDistribution")  and fields[j][3] == "200":
-
-            if (len(fields[j]) > 3) and (fields[j][2] in reducedLabels) and (len(fields[j][3])==3 and (fields[j][3][0] == "2" or fields[j][3][0] == "3")): 
-                #2XX or 3XX are accepted
-                startTimes.append(int(fields[j][0])/1000.0)
-                elapsedTimes.append(int(fields[j][1])/1000.0)         
-                labels.append(fields[j][2])         
-                threads.append(int(fields[j][12]))
-                receivedBytes.append(int(fields[j][9]))
-                sentBytes.append(int(fields[j][10]))
-                urls.append(fields[j][13])
-                responseMessages.append(fields[j][4])
-                if fields[j][2] in numberedReducedLabels:
-                    startTimesNumberedReduced.append(int(fields[j][0])/1000.0)
-                    elapsedTimesNumberedReduced.append(int(fields[j][1])/1000.0)
-                    labelsNumberedReduced.append(fields[j][2])         
-                    receivedBytesNumberedReduced.append(int(fields[j][9]))
-                    sentBytesNumberedReduced.append(int(fields[j][10]))
-                    urlsNumberedReduced.append(fields[j][13])
-                    responseMessagesNumberedReduced.append(fields[j][4])
-            if (len(fields[j]) > 3) and (fields[j][2] in reducedLabels):
-                startTimesAllCodes.append(int(fields[j][0])/1000.0)
-                truncatedResponseCode = fields[j][3]
-                if not truncatedResponseCode.isdigit():
-                    truncatedResponseCode = 599
-                codes.append(int(truncatedResponseCode))
-                labelsAllCodes.append(fields[j][2])
-                urlsAllCodes.append(fields[j][13])
-                responseMessagesAllCodes.append(fields[j][4])
-        if startTimes:
-            minStartTimeForDevice = min(startTimes)
-            jIndex = -1
-            for j in range (0,len(mappedFrameNumLocation)):
-                if frameNum == mappedFrameNumLocation[j][0]:
-                    jIndex = j
-            # print("len(codes) = %d  len(labelsAllCodes) = %d" % (len(codes),len(labelsAllCodes)))
-            responseData.append([frameNum,minStartTimeForDevice,startTimes,elapsedTimes,mappedFrameNumLocation[jIndex],labels,startTimesAllCodes,codes,startTimesNumberedReduced,elapsedTimesNumberedReduced,labelsNumberedReduced,labelsAllCodes,threads,receivedBytes,sentBytes,receivedBytesNumberedReduced,sentBytesNumberedReduced, urls, urlsNumberedReduced, urlsAllCodes, responseMessages, responseMessagesNumberedReduced, responseMessagesAllCodes])
-
-    if not responseData:
-
-        # now try the simple way (original runBatchJMeter demos), 
-        #    looking for fields[j][6] == "text"
+        for i in range(0,numResultFiles):
+            inFilePath = batchDirPath + "/" + resultFileNames[i]
+            fields = getFieldsFromFileNameCSV3(inFilePath,firstRecord=1) 
+            if not fields:
+                logger.info( 'no fields in %s', inFilePath )
+                continue
+            for j in range(0,len(fields)):
+                labels.append(fields[j][2])
+        reducedLabels = list(np.unique(labels))
+        print("\nreducedLabels = %s \n" % reducedLabels)
+        numberedReducedLabels = []
+        for i in range(0,len(reducedLabels)):
+            # look for two numbers followed by "_"
+            conditionFound = False
+            for j in range(0,len(reducedLabels[i])-2):
+                if reducedLabels[i][j:j+2].isnumeric() and reducedLabels[i][j+2]=="_":
+                    conditionFound = True
+            # if reducedLabels[i][2]=="_" and reducedLabels[i][0:2].isnumeric():
+            if conditionFound:
+                numberedReducedLabels.append(reducedLabels[i])
+        print("numberedReducedLabels = %s \n" % numberedReducedLabels)
+    
+        # read the result .csv files
         responseData = []
         for i in range(0,numResultFiles):
-            inFilePath = outputDir + "/" + resultFileNames[i]
+            inFilePath = batchDirPath + "/" + resultFileNames[i]
             fields = getFieldsFromFileNameCSV3(inFilePath) 
             if not fields:
                 logger.info( 'no fields in %s', inFilePath )
                 continue
-            # frameNum = int(resultFileNames[i].lstrip("TestPlan_results_").rstrip(".csv"))
-            if 'TestPlan_results_' in resultFileNames[i]:
+            if 'TestPlan_results_' in resultFileNames[i] and '_merged_' not in resultFileNames[i]:
                 frameNum = int(resultFileNames[i].lstrip("TestPlan_results_").rstrip(".csv"))
             elif resultFileNames[i].startswith('jmeterOut_'):
                 numPart = resultFileNames[i].split('/')[0].split('_')[1]
@@ -427,7 +376,6 @@ if __name__ == "__main__":
                 # should not happen, but may help debugging
                 print( 'file name not recognized', resultFileNames[i] )
                 continue
-
             startTimes = []
             elapsedTimes = []
             labels = []
@@ -445,13 +393,20 @@ if __name__ == "__main__":
             urls = []
             urlsNumberedReduced = []
             urlsAllCodes = []
+            responseMessages = []
+            responseMessagesNumberedReduced = []
+            responseMessagesAllCodes = []
             for j in range(0,len(fields)):
                 if len(fields[j]) <= 3:
                     logger.info( 'fields[j]: %s from %s', fields[j], resultFileNames[i] )
-                # if (len(fields[j]) > 3) and (fields[j][2] in reducedLabels) and fields[j][3]=="200" and fields[j][6] == "text":
+                # if (len(fields[j]) > 3) and (fields[j][2] in reducedLabels) and fields[j][3]=="200" and fields[j][6] != "text":
                 # accepts error codes "2XX", i.e. 200, 201, 202, 204, 206, and others
-                if (len(fields[j]) > 3) and (fields[j][2] in reducedLabels) and (len(fields[j][3])==3 and fields[j][3][0] == "2") and fields[j][6] == "text":
+                # if (len(fields[j]) > 3) and (fields[j][2] in reducedLabels) and (len(fields[j][3])==3 and fields[j][3][0] == "2") and fields[j][6] != "text":
+                # no restriction on fields[j][6]
                 # if (fields[j][2] == "HTTP Request" or fields[j][2] == "GetWorkload" or fields[j][2] == "GetStarttime" or fields[j][2] == "GetDistribution")  and fields[j][3] == "200":
+    
+                if (len(fields[j]) > 3) and (fields[j][2] in reducedLabels) and (len(fields[j][3])==3 and (fields[j][3][0] == "2" or fields[j][3][0] == "3")): 
+                    #2XX or 3XX are accepted
                     startTimes.append(int(fields[j][0])/1000.0)
                     elapsedTimes.append(int(fields[j][1])/1000.0)         
                     labels.append(fields[j][2])         
@@ -459,6 +414,7 @@ if __name__ == "__main__":
                     receivedBytes.append(int(fields[j][9]))
                     sentBytes.append(int(fields[j][10]))
                     urls.append(fields[j][13])
+                    responseMessages.append(fields[j][4])
                     if fields[j][2] in numberedReducedLabels:
                         startTimesNumberedReduced.append(int(fields[j][0])/1000.0)
                         elapsedTimesNumberedReduced.append(int(fields[j][1])/1000.0)
@@ -466,6 +422,7 @@ if __name__ == "__main__":
                         receivedBytesNumberedReduced.append(int(fields[j][9]))
                         sentBytesNumberedReduced.append(int(fields[j][10]))
                         urlsNumberedReduced.append(fields[j][13])
+                        responseMessagesNumberedReduced.append(fields[j][4])
                 if (len(fields[j]) > 3) and (fields[j][2] in reducedLabels):
                     startTimesAllCodes.append(int(fields[j][0])/1000.0)
                     truncatedResponseCode = fields[j][3]
@@ -474,6 +431,7 @@ if __name__ == "__main__":
                     codes.append(int(truncatedResponseCode))
                     labelsAllCodes.append(fields[j][2])
                     urlsAllCodes.append(fields[j][13])
+                    responseMessagesAllCodes.append(fields[j][4])
             if startTimes:
                 minStartTimeForDevice = min(startTimes)
                 jIndex = -1
@@ -481,11 +439,69 @@ if __name__ == "__main__":
                     if frameNum == mappedFrameNumLocation[j][0]:
                         jIndex = j
                 # print("len(codes) = %d  len(labelsAllCodes) = %d" % (len(codes),len(labelsAllCodes)))
-                responseData.append([frameNum,minStartTimeForDevice,startTimes,elapsedTimes,mappedFrameNumLocation[jIndex],labels,startTimesAllCodes,codes,startTimesNumberedReduced,elapsedTimesNumberedReduced,labelsNumberedReduced,labelsAllCodes,threads,receivedBytes,sentBytes,receivedBytesNumberedReduced,sentBytesNumberedReduced, urls, urlsNumberedReduced, urlsAllCodes])
+                responseData.append([frameNum,minStartTimeForDevice,startTimes,elapsedTimes,mappedFrameNumLocation[jIndex],labels,startTimesAllCodes,codes,startTimesNumberedReduced,elapsedTimesNumberedReduced,labelsNumberedReduced,labelsAllCodes,threads,receivedBytes,sentBytes,receivedBytesNumberedReduced,sentBytesNumberedReduced, urls, urlsNumberedReduced, urlsAllCodes, responseMessages, responseMessagesNumberedReduced, responseMessagesAllCodes])
+
+        if args.multibatch==True:
+            for i in range(0,len(mappedFrameNumLocation)):
+                mappedFrameNumLocationTemp.append(mappedFrameNumLocation[i])
+            for i in range(0,len(mappedFrameNumLocationUnitedStates)):
+                mappedFrameNumLocationUnitedStatesTemp.append(mappedFrameNumLocationUnitedStates[i])
+            for i in range(0,len(mappedFrameNumLocationRussia)):
+                mappedFrameNumLocationRussiaTemp.append(mappedFrameNumLocationRussia[i])
+            for i in range(0,len(mappedFrameNumLocationOther)):
+                mappedFrameNumLocationOtherTemp.append(mappedFrameNumLocationOther[i])
+            for i in range(0,len(mappedFrameNumLocationSorted)):
+                mappedFrameNumLocationSortedTemp.append(mappedFrameNumLocationSorted[i])
+            for i in range(0,len(responseData)):
+                responseDataTemp.append(responseData[i])
+
+            for i in range(0,len(reducedLabels)):
+                reducedLabelsTemp.append(reducedLabels[i])
+
+            for i in range(0,len(numberedReducedLabels)):
+                numberedReducedLabelsTemp.append(numberedReducedLabels[i])
 
 
-    if not responseData:
-        sys.exit( 'no plottable data was found' )
+        if not responseData:
+            continue
+    
+    if args.multibatch==True:
+        mappedFrameNumLocation = mappedFrameNumLocationTemp 
+        mappedFrameNumLocationUnitedStates = mappedFrameNumLocationUnitedStatesTemp 
+        mappedFrameNumLocationRussia = mappedFrameNumLocationRussiaTemp 
+        mappedFrameNumLocationOther = mappedFrameNumLocationOtherTemp 
+        mappedFrameNumLocationSorted = mappedFrameNumLocationSortedTemp 
+        responseData = responseDataTemp  
+        reducedLabels = list(np.unique(reducedLabelsTemp))
+        numberedReducedLabels = list(np.unique(numberedReducedLabelsTemp))
+        print("")
+        print("----------------------------------")
+        print("")
+        print("len(mappedFrameNumLocation) = %d" % len(mappedFrameNumLocation))
+        print("len(mappedFrameNumLocationUnitedStates) = %d" % len(mappedFrameNumLocationUnitedStates))
+        print("len(mappedFrameNumLocationRussia) = %d" % len(mappedFrameNumLocationRussia))
+        print("len(mappedFrameNumLocationOther) = %d" % len(mappedFrameNumLocationOther))
+        print("len(mappedFrameNumLocationSorted) = %d" % len(mappedFrameNumLocationSorted))
+        print("len(responseData) = %d" % len(responseData))
+        print("len(reducedLabels) = %d" % len(reducedLabels))
+        print("len(numberedReducedLabels) = %d" % len(numberedReducedLabels))
+        print("")
+        print("mappedFrameNumLocationSorted:")
+        for i in range(0,len(mappedFrameNumLocationSorted)):
+            print("%d %s" % (mappedFrameNumLocationSorted[i][0],mappedFrameNumLocationSorted[i][3]))
+        print("")
+        print("reducedLabels:")
+        for i in range(0,len(reducedLabels)):
+            print("%s" % (reducedLabels[i]))
+        print("")
+
+    if False:
+        if args.multibatch==True:
+            sys.exit( 'Temporary Stop for Multibatch Run.' )
+
+    #----------------------------------------
+    # Start processing the data.  
+
 
     # first, time-shift all startTimes by subtracting the minStartTime for each device
     # and compute the maxStartTime (i.e. test duration) for each device
@@ -672,7 +688,14 @@ if __name__ == "__main__":
             url=culledRelativeResponseData[i][19][ii]
             responseMessage=culledRelativeResponseData[i][22][ii]
             if code < 200 or code > 399: #2XX and 3XX are OK
-                if label in numberedReducedLabels and (url != "null" or (url == "null" and responseMessage=="")):
+
+                #---------------------------
+                # print("label = %s" % label)
+                # print("numberedReducedLabels = %s" % numberedReducedLabels)
+                # sys.exit( 'Temporary Stop for Multibatch Run.' )
+                #---------------------------
+
+                if len(numberedReducedLabels)>0 and label in numberedReducedLabels and (url != "null" or (url == "null" and responseMessage=="")):
                     # print("code = %d    label = %s"%(code, label))
                     index = numberedReducedLabels.index(label)
                     if code==599:
@@ -682,7 +705,7 @@ if __name__ == "__main__":
                         numberBadCodes += 1
                         numberBadCodesByDevice[i] += 1
 
-                if label in numberedReducedLabels and (url != "null" or (url == "null" and responseMessage=="") or (url == "null" and "number of failing samples : 1" in responseMessage)):
+                if len(numberedReducedLabels)>0 and label in numberedReducedLabels and (url != "null" or (url == "null" and responseMessage=="") or (url == "null" and "number of failing samples : 1" in responseMessage)):
                     # print("code = %d    label = %s"%(code, label))
                     index = numberedReducedLabels.index(label)
                     if code==599:
@@ -1803,7 +1826,6 @@ if __name__ == "__main__":
 
             label = numberedReducedLabels[i]
             index = getColumn(startRelTimesAndMSPRsByNumberedLabel,2).index(label)
-            #----------------------------------------------
             numSamples = len(startRelTimesAndMSPRsByNumberedLabel[index][0])
 
             if numSamples>0:
@@ -2057,7 +2079,6 @@ if __name__ == "__main__":
 
             totalBadCodePercentage = numberBadCodesByDevice[i]/totalNumSamples*100.0 if totalNumSamples > 0 else 0
 
-            #------------------------
             responseTimesGoodURLs = []
             for j in range(0,len(culledRelativeResponseData[i][2])):
                 if culledRelativeResponseData[i][17][j] != "null" or (culledRelativeResponseData[i][17][j] == "null" and culledRelativeResponseData[i][20][j] == ""):
