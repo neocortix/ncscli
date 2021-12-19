@@ -50,6 +50,12 @@ def runJMeterBatch( batch, outDataDir ):
     ]
     if batch.get( 'jtlFile' ):
         cmd.extend( ['--jtlFile', batch['jtlFile']] )
+    if 'rampStepDuration' in batch:
+        cmd.extend([ '--rampStepDuration', str(batch['rampStepDuration']) ])
+    if 'SLODuration' in batch:
+        cmd.extend([ '--SLODuration', str(batch['SLODuration']) ])
+    if 'SLOResponseTimeMax' in batch:
+        cmd.extend([ '--SLOResponseTimeMax', str( batch['SLOResponseTimeMax']) ])
     logger.info( 'cmd: %s', cmd )
     proc = subprocess.run( cmd )
     rc = proc.returncode
@@ -70,10 +76,12 @@ if __name__ == '__main__':
     ap.add_argument( '--authToken', help='the NCS authorization token to use (or none, to use NCS_AUTH_TOKEN env var' )
     ap.add_argument( '--projDir', required=True, help='a path to the input project data dir for this run (required)' )
     ap.add_argument( '--outDataDir', required=True, help='a path to the output data dir for this run (required)' )
+    '''
     # for analysis and plotting
     ap.add_argument( '--rampStepDuration', type=float, default=60, help='duration of ramp step, in seconds' )
     ap.add_argument( '--SLODuration', type=float, default=240, help='SLO duration, in seconds' )
     ap.add_argument( '--SLOResponseTimeMax', type=float, default=2.5, help='SLO RT threshold, in seconds' )
+    '''
     # environmental
     ap.add_argument( '--jmeterBinPath', help='path to the local jmeter.sh for generating html report' )
     ap.add_argument( '--cookie' )
@@ -180,10 +188,17 @@ if __name__ == '__main__':
         frameTimeLimit = max( round( planDuration * 1.5 ), planDuration+8*60 ) # some slop beyond the planned duration
         batch['frameTimeLimit'] = frameTimeLimit
 
+        # propagate specified SLO defaults into batches where not overridden
+        if 'rampStepDuration' in defaults and 'rampStepDuration' not in batch:
+            batch['rampStepDuration'] = defaults['rampStepDuration']
+        if 'SLODuration' in defaults and 'SLODuration' not in batch:
+            batch['SLODuration'] = defaults['SLODuration']
+        if 'SLOResponseTimeMax' in defaults and 'SLOResponseTimeMax' not in batch:
+            batch['SLOResponseTimeMax'] = defaults['SLOResponseTimeMax']
+
         #jtlFilePath = None
         jtlFilePath = batch['jtlFile'] if 'jtlFile' in batch else defaults.get('jtlFile')
         if jtlFilePath:
-            #jtlFilePath = args.jtlFile
             if ':' in jtlFilePath:
                 logger.error( 'a colon was found in the jtlFile path' )
                 sys.exit( 1 )
@@ -288,14 +303,16 @@ if __name__ == '__main__':
                     )
                     if rcx:
                         logger.warning( 'jmeter reporting exited with returnCode %d', rcx )
-        rampStepDuration = args.rampStepDuration
-        SLODuration = args.SLODuration
-        SLOResponseTimeMax = args.SLOResponseTimeMax
-        rc2 = subprocess.call( [sys.executable, scriptDirPath()+'/plotJMeterOutput.py',
+        cmd = [sys.executable, scriptDirPath()+'/plotJMeterOutput.py',
             '--dataDirPath', outDataDir, '--multibatch', 'True',
-            '--rampStepDuration', str(rampStepDuration), '--SLODuration', str(SLODuration),
-            '--SLOResponseTimeMax', str(SLOResponseTimeMax)
-            ],
+            ]
+        if defaults.get( 'rampStepDuration' ):
+            cmd.extend( ['--rampStepDuration', str(defaults.get( 'rampStepDuration' ))] )
+        if defaults.get( 'SLODuration' ):
+            cmd.extend( ['--SLODuration', str(defaults.get( 'SLODuration' ))] )
+        if defaults.get( 'SLOResponseTimeMax' ):
+            cmd.extend( ['--SLOResponseTimeMax', str(defaults.get( 'SLOResponseTimeMax' ))] )
+        rc2 = subprocess.call( cmd,
             stdout=subprocess.DEVNULL )
         if rc2:
             logger.warning( 'plotJMeterOutput exited with returnCode %d', rc2 )
